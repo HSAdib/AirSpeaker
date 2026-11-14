@@ -2,8 +2,8 @@
 //  ContentView.swift
 //  PhoneSpeaker
 //
-//  4-Tab Studio UI for PhoneSpeaker v2.0 on iOS:
-//  PLAYER, SERVER, 🎉 PARTY (with 2-Button Chooser, QR URIs & Daisy-Chain Extend), SETTINGS.
+//  PhoneSpeaker v2.0 Studio Monospace UI for iOS.
+//  100% unified with Android (activity_main.xml & MainActivity.kt) and PC Studio.
 //
 
 import SwiftUI
@@ -12,246 +12,448 @@ import UIKit
 public struct ContentView: View {
     @StateObject private var engine = PhoneSpeakerEngine.shared
     @State private var selectedTab: Int = 0
-
-    // Accent Colors matching Android & PC Studio Dark Theme
-    private let bgDark = Color(red: 0.07, green: 0.08, blue: 0.10)
-    private let cardDark = Color(red: 0.12, green: 0.14, blue: 0.18)
-    private let accentCyan = Color(red: 0.0, green: 0.85, blue: 0.85)
-    private let accentGreen = Color(red: 0.15, green: 0.85, blue: 0.45)
-    private let accentRed = Color(red: 0.95, green: 0.25, blue: 0.3)
-    private let accentGold = Color(red: 1.0, green: 0.78, blue: 0.2)
+    @State private var showHelpModal: Bool = false
 
     public var body: some View {
         ZStack {
-            bgDark.ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
-            TabView(selection: $selectedTab) {
-                // Tab 1: PLAYER
-                PlayerTabView(engine: engine)
-                    .tabItem {
-                        Label("Player", systemImage: "speaker.wave.3.fill")
-                    }
-                    .tag(0)
+            VStack(spacing: 0) {
+                // Top Studio Header
+                VStack(spacing: 4) {
+                    HStack(alignment: .center) {
+                        Text("PHONESPEAKER v2.0")
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
 
-                // Tab 2: SERVER
-                ServerTabView(engine: engine)
-                    .tabItem {
-                        Label("Server", systemImage: "antenna.radiowaves.left.and.right")
-                    }
-                    .tag(1)
+                        Spacer()
 
-                // Tab 3: PARTY
-                PartyTabView(engine: engine)
-                    .tabItem {
-                        Label("Party", systemImage: "party.popper.fill")
-                    }
-                    .tag(2)
+                        Text("REV: \(engine.localSyncRev)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.55))
 
-                // Tab 4: SETTINGS
-                SettingsTabView(engine: engine)
-                    .tabItem {
-                        Label("Settings", systemImage: "gearshape.fill")
+                        Button(action: {
+                            showHelpModal = true
+                        }) {
+                            Text("?")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .frame(width: 38, height: 32)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1)
+                                )
+                        }
                     }
-                    .tag(3)
+
+                    HStack {
+                        let statusText: String = {
+                            if engine.isAudioPlaying && engine.isMicStreaming {
+                                return "ACTIVE: SPEAKER: ON (5004) | MIC: ON (5006)"
+                            } else if engine.isAudioPlaying {
+                                return "ACTIVE: SPEAKER PLAYER (PORT 5004)"
+                            } else if engine.isMicStreaming {
+                                return "ACTIVE: MIC SERVER (PORT 5006)"
+                            } else {
+                                return "STATUS: STOPPED"
+                            }
+                        }()
+                        Text(statusText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(engine.isAudioPlaying || engine.isMicStreaming ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+
+                // 4-Button Top Outlined Tab Bar
+                HStack(spacing: 6) {
+                    StudioTabButton(title: "PLAYER", isSelected: selectedTab == 0) { selectedTab = 0 }
+                    StudioTabButton(title: "SERVER", isSelected: selectedTab == 1) { selectedTab = 1 }
+                    StudioTabButton(title: "PARTY", isSelected: selectedTab == 2) { selectedTab = 2 }
+                    StudioTabButton(title: "SETTINGS", isSelected: selectedTab == 3) { selectedTab = 3 }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+
+                // Tab Content
+                TabView(selection: $selectedTab) {
+                    PlayerStudioTab(engine: engine)
+                        .tag(0)
+                    ServerStudioTab(engine: engine)
+                        .tag(1)
+                    PartyStudioTab(engine: engine)
+                        .tag(2)
+                    SettingsStudioTab(engine: engine)
+                        .tag(3)
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             }
-            .accentColor(accentCyan)
+        }
+        .sheet(isPresented: $showHelpModal) {
+            StudioHelpModal(isPresented: $showHelpModal)
         }
     }
 }
 
-// MARK: - Tab 1: PLAYER
-struct PlayerTabView: View {
+// MARK: - Monospace Outlined Tab Button
+struct StudioTabButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+                .frame(maxWidth: .infinity, minHeight: 38)
+                .background(isSelected ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color.black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: isSelected ? 2 : 1)
+                )
+        }
+    }
+}
+
+// MARK: - Tab 1: PLAYER STUDIO TAB
+struct PlayerStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
-    @State private var manualIpInput: String = ""
+    @State private var pcIpInput: String = ""
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                // Header Banner
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("PhoneSpeaker v2.0")
-                            .font(.title2).bold()
+            VStack(alignment: .leading, spacing: 12) {
+                // Connections Card (#1A2630)
+                VStack(alignment: .leading, spacing: 4) {
+                    let hostDisplay = engine.connectedServerIp.isEmpty ? "Waiting for PC connection..." : "\(engine.connectedServerName) (\(engine.connectedServerIp))"
+                    Text("💻 Connected to: \(hostDisplay)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+
+                    Text("📱 This Phone: \(engine.deviceName)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
+
+                    HStack(spacing: 6) {
+                        Text("PC IP:")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+
+                        TextField(engine.connectedServerIp.isEmpty ? "Auto-Detecting PC..." : engine.connectedServerIp, text: $pcIpInput)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color(red: 0.06, green: 0.09, blue: 0.13))
                             .foregroundColor(.white)
-                        Text(engine.statusMessage)
-                            .font(.subheadline)
-                            .foregroundColor(engine.isAudioPlaying ? .green : .gray)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        Button(action: {
+                            let trimmed = pcIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !trimmed.isEmpty {
+                                engine.connectedServerIp = trimmed
+                                engine.broadcastBeacon()
+                                engine.sendConfigSync(forcePcm: true, targetIp: trimmed)
+                            }
+                        }) {
+                            Text("SET IP")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.22, green: 0.71, blue: 1.0), lineWidth: 1))
+                        }
                     }
-                    Spacer()
-                    Image(systemName: engine.isAudioPlaying ? "waveform" : "waveform.slash")
-                        .font(.title)
-                        .foregroundColor(engine.isAudioPlaying ? .cyan : .gray)
+                    .padding(.top, 4)
                 }
-                .padding()
-                .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                .cornerRadius(12)
+                .padding(10)
+                .background(Color(red: 0.10, green: 0.15, blue: 0.19))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
-                // Quick Stats Card
-                HStack(spacing: 12) {
-                    StatBox(title: "Latency", value: String(format: "%.1f ms", engine.latencyMs), icon: "gauge.with.needle")
-                    StatBox(title: "Loss / RX", value: "\(String(format: "%.1f%%", engine.packetLossPercent)) (\(engine.rxPps) pps)", icon: "chart.bar.fill")
-                    StatBox(title: "Local IP", value: engine.localIpAddress, icon: "network")
-                }
-
-                // Big Action Button
+                // Two Main Action Buttons
                 Button(action: {
                     if engine.isAudioPlaying {
                         engine.stopSpeakerPlayer()
                     } else {
-                        engine.startSpeakerPlayer(manualHost: manualIpInput)
+                        let manual = pcIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        engine.startSpeakerPlayer(manualHost: manual)
                     }
                 }) {
-                    HStack {
-                        Image(systemName: engine.isAudioPlaying ? "stop.fill" : "play.fill")
-                        Text(engine.isAudioPlaying ? "STOP SPEAKER PLAYER" : "START SPEAKER PLAYER")
-                            .bold()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(engine.isAudioPlaying ? Color.red : Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+                    Text(engine.isAudioPlaying ? "[ ■ STOP SPEAKER PLAYER (PORT 5004) ]" : "[ ▶ START SPEAKER PLAYER (PORT 5004) ]")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .background(engine.isAudioPlaying ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.13, blue: 0.0))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2))
                 }
 
-                // Manual Host IP Bar
-                HStack {
-                    TextField("Server PC IP (e.g. 192.168.1.10)", text: $manualIpInput)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .padding(10)
-                        .background(Color(red: 0.18, green: 0.20, blue: 0.24))
+                Button(action: {
+                    engine.toggleMicStreaming()
+                }) {
+                    Text(engine.isMicStreaming ? "[ ■ STOP MIC STREAM (PORT 5006) ]" : "[ 🎤 START MIC STREAM TO PC (PORT 5006) ]")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 0.93, blue: 0.93))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                        .background(engine.isMicStreaming ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.09, blue: 0.13))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 2))
+                }
+
+                // Sound Mode
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SOUND MODE (QUALITY vs LOW DELAY):")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
-                        .cornerRadius(8)
-                    if !manualIpInput.isEmpty {
-                        Button("Apply") {
-                            let trimmed = manualIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                            engine.connectedServerIp = trimmed
-                            engine.broadcastBeacon()
-                            engine.sendConfigSync(targetIp: trimmed)
+
+                    HStack(spacing: 4) {
+                        RadioChip(title: "Balanced (Auto)", isSelected: engine.soundMode == "BALANCED") {
+                            engine.soundMode = "BALANCED"
+                            engine.sendConfigSync()
                         }
-                        .foregroundColor(.cyan)
+                        RadioChip(title: "Gaming", isSelected: engine.soundMode == "GAMING") {
+                            engine.soundMode = "GAMING"
+                            engine.sendConfigSync()
+                        }
+                        RadioChip(title: "Quality", isSelected: engine.soundMode == "QUALITY") {
+                            engine.soundMode = "QUALITY"
+                            engine.sendConfigSync()
+                        }
+                        RadioChip(title: "Custom", isSelected: engine.soundMode == "CUSTOM") {
+                            engine.soundMode = "CUSTOM"
+                            engine.sendConfigSync()
+                        }
                     }
                 }
-                .padding()
-                .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                .cornerRadius(12)
 
-                // Audio Controls (Volume & Sound Mode)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Audio Output Controls").font(.headline).foregroundColor(.white)
+                // Codec & Bitrate
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("CODEC & BITRATE:")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
 
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        RadioChip(title: "Opus (PC/Android)", isSelected: false) {
+                            engine.sendConfigSync(forcePcm: true)
+                        }
+                        RadioChip(title: "Lossless PCM16 (iOS Active)", isSelected: true) {
+                            engine.sendConfigSync(forcePcm: true)
+                        }
+                    }
+
+                    HStack {
+                        Text("BITRATE: 192 kbps (Lossless 48kHz PCM16)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.6))
+                        Spacer()
+                    }
+
+                    let expDelay = Int(engine.latencyMs + 25.0)
+                    Text("Expected Delay: ~\(expDelay) ms")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                }
+
+                // Stability / Delay Buffer
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("STABILITY / DELAY BUFFER:")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        RadioLine(title: "Low (20 ms) — Fast for Gaming & Video", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 20) {
+                            engine.bufferMode = "FIXED"
+                            engine.bufferTargetMs = 20
+                            engine.sendConfigSync()
+                        }
+                        RadioLine(title: "Medium (40 ms) — Balanced Everyday", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 40) {
+                            engine.bufferMode = "FIXED"
+                            engine.bufferTargetMs = 40
+                            engine.sendConfigSync()
+                        }
+                        RadioLine(title: "High (80 ms) — Smooth Music (No Dropouts)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 80) {
+                            engine.bufferMode = "FIXED"
+                            engine.bufferTargetMs = 80
+                            engine.sendConfigSync()
+                        }
+                        RadioLine(title: "Auto (Adjusts Automatically)", isSelected: engine.bufferMode == "AUTO") {
+                            engine.bufferMode = "AUTO"
+                            engine.sendConfigSync()
+                        }
+                    }
+
+                    HStack {
+                        Text("TARGET BUFFER:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.6))
+                        Spacer()
+                        Text("\(engine.bufferTargetMs) ms")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+
+                    Slider(
+                        value: Binding(
+                            get: { Double(engine.bufferTargetMs) },
+                            set: { newVal in
+                                engine.bufferTargetMs = Int(newVal)
+                                engine.sendConfigSync()
+                            }
+                        ),
+                        in: 10.0...200.0,
+                        step: 2.5
+                    )
+                    .accentColor(.white)
+                }
+
+                // Stream Volume (Relative to Phone)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("STREAM VOLUME (RELATIVE TO PHONE):")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.6))
+                        Spacer()
+                        Text("\(Int(engine.volume * 100))%")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+
+                    HStack(spacing: 8) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(engine.volume) },
+                                set: { newVal in
+                                    engine.volume = Float(newVal)
+                                    engine.sendConfigSync()
+                                }
+                            ),
+                            in: 0.0...2.0
+                        )
+                        .accentColor(.white)
+
                         Button(action: {
                             engine.isMuted.toggle()
                             engine.sendConfigSync()
                         }) {
-                            Image(systemName: engine.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                                .foregroundColor(engine.isMuted ? .red : .cyan)
-                                .font(.title3)
+                            Text(engine.isMuted ? "MUTED" : "MUTE")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(engine.isMuted ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white)
+                                .frame(width: 60, height: 32)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.isMuted ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white, lineWidth: 1))
                         }
-
-                        Slider(
-                            value: Binding(
-                                get: { engine.volume },
-                                set: { newVal in
-                                    engine.volume = newVal
-                                    engine.sendConfigSync()
-                                }
-                            ),
-                            in: 0...2.0
-                        )
-                        .accentColor(.cyan)
-
-                        Text("\(Int(engine.volume * 100))%")
-                            .foregroundColor(.white)
-                            .font(.callout).bold()
-                            .frame(width: 48, alignment: .trailing)
-                    }
-
-                    Picker("Sound Mode", selection: $engine.soundMode) {
-                        Text("Balanced").tag("BALANCED")
-                        Text("Gaming").tag("GAMING")
-                        Text("Quality").tag("QUALITY")
-                        Text("Custom").tag("CUSTOM")
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .onChange(of: engine.soundMode) { _ in
-                        engine.sendConfigSync()
                     }
                 }
-                .padding()
-                .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                .cornerRadius(12)
 
-                // Wireless Virtual Mic Card
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "mic.fill")
-                            .foregroundColor(engine.isMicStreaming ? .green : .cyan)
-                        Text("Wireless PC Microphone").font(.headline).foregroundColor(.white)
-                        Spacer()
-                        if engine.isMicStreaming {
-                            Text("\(engine.micTxPps) pps")
-                                .font(.caption).foregroundColor(.green)
-                        }
-                    }
-                    Text("Streams your iPhone microphone to your PC virtual mic device over UDP port 5006.")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-
-                    Button(action: {
-                        engine.toggleMicStreaming()
-                    }) {
-                        HStack {
-                            Image(systemName: engine.isMicStreaming ? "mic.slash.fill" : "mic.fill")
-                            Text(engine.isMicStreaming ? "STOP MIC STREAM" : "START MIC STREAM (Phone → PC)")
-                                .bold()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(engine.isMicStreaming ? Color.red : Color.cyan)
+                // Live Delay Graph Canvas
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("LIVE DELAY GRAPH")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
-                        .cornerRadius(10)
-                    }
+
+                    LiveDelayGraphView(
+                        history: engine.delayHistory,
+                        targetMs: Double(engine.bufferTargetMs),
+                        currentBufMs: engine.latencyMs
+                    )
                 }
-                .padding()
-                .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                .cornerRadius(12)
+
+                // Live Telemetry (5 Hz) Table
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("LIVE TELEMETRY (5 Hz)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    VStack(spacing: 2) {
+                        TelemetryRow(label: "BUFFER LEVEL:", value: String(format: "%.1f ms", engine.latencyMs))
+                        TelemetryRow(label: "ACTIVE TARGET:", value: "\(engine.bufferTargetMs).0 ms")
+                        TelemetryRow(label: "CODEC:", value: "PCM16 (48kHz Stereo)")
+                        TelemetryRow(label: "RX PACKETS / SEC:", value: "\(engine.rxPps) pps")
+                        TelemetryRow(label: "UNDERRUNS:", value: "\(engine.underrunCount)")
+                        TelemetryRow(label: "LOST PACKETS:", value: String(format: "%.0f (%.1f%%)", (Double(engine.rxPps) * (engine.packetLossPercent / 100.0)), engine.packetLossPercent))
+                        TelemetryRow(label: "LATE PACKETS:", value: "0")
+                    }
+                    .padding(8)
+                    .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
+                }
             }
-            .padding()
+            .padding(14)
         }
     }
 }
 
-// MARK: - Tab 2: SERVER
-struct ServerTabView: View {
+// MARK: - Tab 2: SERVER STUDIO TAB
+struct ServerStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
 
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Audio Broadcaster & Studio Link")
-                .font(.title2).bold().foregroundColor(.white)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("PHONE AUDIO SENDER MODE:")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Broadcast Network Endpoints").font(.headline).foregroundColor(.cyan)
-                Text("• Audio Receiver: UDP 5004 (Lossless PCM16 / Opus 48kHz)")
-                Text("• Control Protocol: UDP 5005 (JSON Discovery)")
-                Text("• Mic Streamer: UDP 5006 (Phone → PC 5ms 972-byte frames)")
-                Text("• Local IP Address: \(engine.localIpAddress)")
+                VStack(alignment: .leading, spacing: 6) {
+                    RadioLine(title: "Speaker Only (Stream PC audio to Phone)", isSelected: engine.serverRole == "PC_TO_PHONE") {
+                        engine.serverRole = "PC_TO_PHONE"
+                        engine.sendConfigSync()
+                    }
+                    RadioLine(title: "Microphone Only (Stream Phone mic to PC)", isSelected: engine.serverRole == "PHONE_TO_PC") {
+                        engine.serverRole = "PHONE_TO_PC"
+                        engine.sendConfigSync()
+                    }
+                    RadioLine(title: "Both Together (Hear PC Sound + Use Phone Mic)", isSelected: engine.serverRole == "FULL_DUPLEX") {
+                        engine.serverRole = "FULL_DUPLEX"
+                        engine.sendConfigSync()
+                    }
+                }
+
+                Toggle(isOn: $engine.micHardwareFx) {
+                    Text("Hardware Noise Suppression & Echo Canceler")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                .padding(.top, 4)
+
+                Button(action: {
+                    engine.toggleMicStreaming()
+                }) {
+                    Text(engine.isMicStreaming ? "[ ■ STOP MIC SERVER (PORT 5006) ]" : "[ 🎤 START MIC SERVER (PORT 5006) ]")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white)
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .background(Color.black)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white, lineWidth: 2))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(engine.isMicStreaming ? "MIC SERVER: STREAMING TO PC (PORT 5006)" : "MIC SERVER: STOPPED")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(engine.isMicStreaming ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+
+                    Text("TX PPS: \(engine.micTxPps)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(white: 0.55))
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("iPhone Mic streams 48 kHz stereo low-latency audio to PC Port 5006.\n\nOn Windows, set playback device to 'CABLE Input' or 'Virtual Audio' to use this phone as a live microphone in Discord, Teams, Zoom, or games!\n\nOn macOS: Route via BlackHole 2ch.\nOn Linux: Use PhoneSpeaker_Mic PipeWire virtual sink.")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(white: 0.6))
+                }
+                .padding(10)
+                .background(Color(red: 0.07, green: 0.07, blue: 0.07))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.15), lineWidth: 1))
             }
-            .foregroundColor(.white)
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-            .cornerRadius(12)
-
-            Spacer()
+            .padding(14)
         }
-        .padding()
     }
 }
 
-// MARK: - Tab 3: 🎉 PARTY
-struct PartyTabView: View {
+// MARK: - Tab 3: PARTY STUDIO TAB
+struct PartyStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
     @State private var showScanner: Bool = false
     @State private var manualJoinIp: String = ""
@@ -259,328 +461,313 @@ struct PartyTabView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 if engine.partyScreen == "CHOOSER" {
-                    // Clean 2-Button Chooser Screen
-                    VStack(spacing: 24) {
-                        Text("Multi-Device Party Mode")
-                            .font(.title).bold().foregroundColor(.white)
-                        Text("Play synchronized audio across multiple iPhones, Androids, and PCs simultaneously over Wi-Fi, Hotspot, or Daisy-Chain.")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                    VStack(alignment: .center, spacing: 12) {
+                        Text("🎉 PARTY MODE — MULTI-DEVICE WIRELESS AUDIO")
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
                             .multilineTextAlignment(.center)
 
-                        // Button 1: HOST A PARTY
+                        Text("Independent from Normal 1-to-1 Mode.\nChoose how you want to use Party Mode:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.55))
+                            .multilineTextAlignment(.center)
+
                         Button(action: {
                             engine.hostParty()
                         }) {
-                            VStack(spacing: 8) {
-                                Image(systemName: "crown.fill")
-                                    .font(.system(size: 36))
-                                    .foregroundColor(.yellow)
-                                Text("👑 HOST A PARTY")
-                                    .font(.headline).bold()
-                                    .foregroundColor(.white)
-                                Text("Broadcast audio to all nearby devices")
-                                    .font(.caption).foregroundColor(.gray)
+                            VStack(spacing: 4) {
+                                Text("[ 👑 HOST A PARTY ]")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                Text("Create Host IP & QR Code to Broadcast Sound")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.7))
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                            .background(Color(red: 0.15, green: 0.17, blue: 0.22))
-                            .cornerRadius(16)
-                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.yellow.opacity(0.6), lineWidth: 1.5))
+                            .frame(maxWidth: .infinity, minHeight: 64)
+                            .background(Color(red: 0.0, green: 0.13, blue: 0.0))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
                         }
 
-                        // Button 2: JOIN A PARTY
                         Button(action: {
                             engine.partyScreen = "JOIN"
                         }) {
-                            VStack(spacing: 8) {
-                                Image(systemName: "headphones")
-                                    .font(.system(size: 36))
-                                    .foregroundColor(.cyan)
-                                Text("🎧 JOIN A PARTY")
-                                    .font(.headline).bold()
-                                    .foregroundColor(.white)
-                                Text("Connect to an existing Party Host")
-                                    .font(.caption).foregroundColor(.gray)
+                            VStack(spacing: 4) {
+                                Text("[ 🎧 JOIN A PARTY ]")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                Text("Scan QR or Join from Discovered Party Hosts")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.7))
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                            .background(Color(red: 0.15, green: 0.17, blue: 0.22))
-                            .cornerRadius(16)
-                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.cyan.opacity(0.6), lineWidth: 1.5))
+                            .frame(maxWidth: .infinity, minHeight: 64)
+                            .background(Color(red: 0.0, green: 0.09, blue: 0.13))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1.5))
                         }
                     }
-                    .padding(.top, 40)
-                    .padding(.horizontal)
+                    .padding(14)
+                    .background(Color(red: 0.04, green: 0.05, blue: 0.08))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
                 } else if engine.partyScreen == "HOST" {
-                    // Host Screen
-                    VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("👑 Party Host Mode").font(.title2).bold().foregroundColor(.yellow)
-                            Spacer()
-                            Button("Exit Host") {
+                            Button(action: {
                                 engine.leaveParty()
+                            }) {
+                                Text("[ ← BACK ]")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.4), lineWidth: 1))
                             }
-                            .foregroundColor(.red)
+                            Spacer()
+                            Text("👑 HOST MODE")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
                         }
 
-                        // QR Code Card with phonespeaker://join URI
                         let hostQrUri = engine.makePartyQrUri(isExtended: false)
-                        if let qrImg = QRCodeHelper.generateQRCode(from: hostQrUri) {
-                            VStack(spacing: 8) {
+                        VStack(spacing: 6) {
+                            Text("👑 HOST IP: \(engine.localIpAddress)")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+
+                            if let qrImg = QRCodeHelper.generateQRCode(from: hostQrUri) {
                                 Image(uiImage: qrImg)
                                     .interpolation(.none)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: 180, height: 180)
-                                    .padding(8)
+                                    .frame(width: 160, height: 160)
                                     .background(Color.white)
-                                    .cornerRadius(12)
-
-                                Text("Scan with iPhone, Android, or PC Studio")
-                                    .font(.caption).foregroundColor(.gray)
-
-                                Text("Host IP: \(engine.localIpAddress):5004")
-                                    .font(.footnote).bold().foregroundColor(.yellow)
-
-                                HStack(spacing: 12) {
-                                    Button("↻ Refresh Host IP & QR") {
-                                        engine.broadcastBeacon()
-                                    }
-                                    .font(.caption)
-                                    .foregroundColor(.cyan)
-
-                                    Button("📋 Copy Link") {
-                                        UIPasteboard.general.string = hostQrUri
-                                    }
-                                    .font(.caption)
-                                    .foregroundColor(.yellow)
-                                }
+                                    .padding(4)
                             }
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                            .cornerRadius(12)
-                        }
 
-                        // Manual Add Peer Bar
-                        HStack {
+                            HStack(spacing: 12) {
+                                Button("↻ REFRESH HOST IP & QR") {
+                                    engine.broadcastBeacon()
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+
+                                Button("📋 COPY LINK") {
+                                    UIPasteboard.general.string = hostQrUri
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(10)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        // Manual Add Peer
+                        HStack(spacing: 6) {
                             TextField("Peer IP (e.g. 192.168.1.55)", text: $manualPeerInput)
-                                .textFieldStyle(PlainTextFieldStyle())
-                                .padding(10)
-                                .background(Color(red: 0.18, green: 0.20, blue: 0.24))
+                                .font(.system(size: 11, design: .monospaced))
+                                .padding(6)
+                                .background(Color(red: 0.07, green: 0.07, blue: 0.07))
                                 .foregroundColor(.white)
-                                .cornerRadius(8)
-                            Button("Add Peer") {
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                            Button("ADD IP") {
                                 if !manualPeerInput.isEmpty {
                                     engine.addManualPeer(ip: manualPeerInput)
                                     manualPeerInput = ""
                                 }
                             }
-                            .foregroundColor(.cyan)
-                        }
-                        .padding()
-                        .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                        .cornerRadius(12)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
 
-                        // Connected Party Members
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Connected Party Members (\(engine.partyMembers.count))")
-                                .font(.headline).foregroundColor(.white)
+                            Button("CLEAR") {
+                                engine.partyMembers.removeAll()
+                                engine.partyPeerIps.removeAll()
+                            }
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
+                        }
+
+                        // Connected Members
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("CONNECTED JOINERS (\(engine.partyMembers.count)):")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
 
                             if engine.partyMembers.isEmpty {
-                                Text("Waiting for friends to join...").font(.caption).foregroundColor(.gray)
+                                Text("No phones joined yet. Friends can scan the QR code to connect.")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.5))
                             } else {
                                 ForEach(engine.partyMembers) { member in
                                     HStack {
-                                        Image(systemName: "iphone").foregroundColor(.cyan)
-                                        VStack(alignment: .leading) {
-                                            Text(member.name).foregroundColor(.white).bold()
-                                            Text(member.ip).font(.caption).foregroundColor(.gray)
-                                        }
+                                        Text("\(member.name) — \(member.ip)")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white)
                                         Spacer()
-                                        Button("Kick") {
+                                        Button("KICK") {
                                             engine.kickMember(ip: member.ip)
                                         }
-                                        .font(.caption)
-                                        .foregroundColor(.red)
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
                                     }
-                                    .padding(8)
-                                    .background(Color(red: 0.18, green: 0.20, blue: 0.25))
-                                    .cornerRadius(8)
+                                    .padding(4)
                                 }
                             }
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                        .cornerRadius(12)
                     }
-                    .padding()
 
                 } else if engine.partyScreen == "JOIN" {
-                    // Join Screen
-                    VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("🎧 Join A Party").font(.title2).bold().foregroundColor(.cyan)
-                            Spacer()
-                            Button("Back") {
+                            Button(action: {
                                 engine.leaveParty()
+                            }) {
+                                Text("[ ← BACK ]")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.4), lineWidth: 1))
                             }
-                            .foregroundColor(.gray)
+                            Spacer()
+                            Button("↻ SCAN") {
+                                engine.broadcastBeacon()
+                            }
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
                         }
 
-                        // Live Discovered Party Hosts Card
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("Discovered Party Hosts").font(.headline).foregroundColor(.white)
-                                Spacer()
-                                Button("↻ Refresh") {
-                                    engine.broadcastBeacon()
-                                }
-                                .font(.caption).foregroundColor(.cyan)
-                            }
+                        // Discovered Hosts List
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("DISCOVERED PARTY HOSTS:")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
 
                             if engine.discoveredPartyHosts.isEmpty {
-                                Text("Scanning local network for Party Hosts...").font(.caption).foregroundColor(.gray)
+                                Text("Scanning local network for Party Hosts...")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.5))
                             } else {
                                 ForEach(engine.discoveredPartyHosts) { host in
                                     Button(action: {
                                         engine.joinParty(hostIp: host.ip, port: host.port)
                                     }) {
                                         HStack {
-                                            Image(systemName: host.isExtended ? "antenna.radiowaves.left.and.right" : "crown.fill")
-                                                .foregroundColor(host.isExtended ? .yellow : .green)
-                                            VStack(alignment: .leading) {
-                                                Text(host.name).foregroundColor(.white).bold()
-                                                Text("\(host.ip):\(host.port) \(host.isExtended ? "(Extended Repeater)" : "(Host)")")
-                                                    .font(.caption).foregroundColor(.gray)
-                                            }
+                                            Text("👑 \(host.name) (\(host.ip):\(host.port))")
+                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                .foregroundColor(host.isExtended ? Color(red: 1.0, green: 0.85, blue: 0.0) : Color(red: 0.0, green: 1.0, blue: 0.0))
                                             Spacer()
                                             Text("TAP TO JOIN")
-                                                .font(.caption).bold()
-                                                .foregroundColor(.cyan)
-                                                .padding(6)
-                                                .background(Color.cyan.opacity(0.2))
-                                                .cornerRadius(6)
+                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
                                         }
-                                        .padding(8)
-                                        .background(Color(red: 0.18, green: 0.20, blue: 0.25))
-                                        .cornerRadius(8)
+                                        .padding(6)
+                                        .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
                                     }
                                 }
                             }
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                        .cornerRadius(12)
 
-                        // Action Buttons: Scanner & Paste
-                        HStack(spacing: 12) {
-                            Button(action: {
+                        // Host IP & Port Manual input
+                        HStack(spacing: 6) {
+                            TextField("Host IP", text: $manualJoinIp)
+                                .font(.system(size: 11, design: .monospaced))
+                                .padding(6)
+                                .background(Color(red: 0.07, green: 0.07, blue: 0.07))
+                                .foregroundColor(.white)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                            Button("📷 SCAN QR") {
                                 showScanner = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "camera.viewfinder")
-                                    Text("SCAN QR CODE").bold()
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.cyan)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
                             }
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 6)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
 
-                            Button(action: {
+                            Button("📋 PASTE") {
                                 if let pasted = UIPasteboard.general.string {
-                                    let (ip, port) = PhoneSpeakerEngine.parseHostIpFromUri(pasted)
-                                    if !ip.isEmpty {
-                                        engine.joinParty(hostIp: ip, port: port)
-                                    }
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "doc.on.clipboard")
-                                    Text("PASTE LINK").bold()
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color(red: 0.2, green: 0.24, blue: 0.3))
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
-                            }
-                        }
-
-                        // Manual Join Bar
-                        HStack {
-                            TextField("Host IP (e.g. 192.168.1.50)", text: $manualJoinIp)
-                                .textFieldStyle(PlainTextFieldStyle())
-                                .padding(10)
-                                .background(Color(red: 0.18, green: 0.20, blue: 0.24))
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                            Button("Connect") {
-                                if !manualJoinIp.isEmpty {
-                                    let (ip, port) = PhoneSpeakerEngine.parseHostIpFromUri(manualJoinIp)
-                                    engine.joinParty(hostIp: ip, port: port)
+                                    let (ip, _) = PhoneSpeakerEngine.parseHostIpFromUri(pasted)
+                                    if !ip.isEmpty { manualJoinIp = ip }
                                 }
                             }
-                            .foregroundColor(.cyan)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 6)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.4), lineWidth: 1))
                         }
-                        .padding()
-                        .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                        .cornerRadius(12)
 
-                        // Post-Join: Extend This Party (Hotspot / Daisy-Chain Repeater)
+                        Button(action: {
+                            if !manualJoinIp.isEmpty {
+                                let (ip, port) = PhoneSpeakerEngine.parseHostIpFromUri(manualJoinIp)
+                                engine.joinParty(hostIp: ip, port: port)
+                            }
+                        }) {
+                            Text("[ 🎧 JOIN PARTY STREAM ]")
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(Color(red: 0.0, green: 0.09, blue: 0.13))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1.5))
+                        }
+
+                        // Post-Join: Extend This Party (Hotspot Repeater)
                         if engine.isPartyJoined {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 Toggle(isOn: Binding(
                                     get: { engine.isPartyExtending },
                                     set: { _ in engine.toggleExtendParty() }
                                 )) {
-                                    VStack(alignment: .leading) {
-                                        Text("📡 EXTEND THIS PARTY")
-                                            .font(.headline).bold().foregroundColor(.yellow)
-                                        Text("Turn on Personal Hotspot or Wi-Fi Repeater to daisy-chain audio to other nearby devices!")
-                                            .font(.caption).foregroundColor(.gray)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("📡 EXTEND THIS PARTY (HOTSPOT REPEATER)")
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+                                        Text("Re-broadcast incoming party sound to phones connected to your hotspot.")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundColor(Color(white: 0.6))
                                     }
                                 }
+                                .toggleStyle(SwitchToggleStyle(tint: Color(red: 1.0, green: 0.85, blue: 0.0)))
 
                                 if engine.isPartyExtending {
                                     let extQrUri = engine.makePartyQrUri(isExtended: true)
-                                    if let repQr = QRCodeHelper.generateQRCode(from: extQrUri) {
-                                        VStack(spacing: 6) {
+                                    VStack(spacing: 4) {
+                                        if let repQr = QRCodeHelper.generateQRCode(from: extQrUri) {
                                             Image(uiImage: repQr)
                                                 .interpolation(.none)
                                                 .resizable()
                                                 .scaledToFit()
-                                                .frame(width: 140, height: 140)
-                                                .padding(6)
+                                                .frame(width: 130, height: 130)
                                                 .background(Color.white)
-                                                .cornerRadius(10)
-
-                                            Text("Repeater IP: \(engine.localIpAddress)")
-                                                .font(.caption).bold().foregroundColor(.yellow)
-
-                                            Text("Downstream Peers: \(engine.partyMembers.count)")
-                                                .font(.caption2).foregroundColor(.gray)
+                                                .padding(4)
                                         }
-                                        .frame(maxWidth: .infinity)
+                                        Text("REPEATER IP: \(engine.localIpAddress)")
+                                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
                                     }
+                                    .frame(maxWidth: .infinity)
                                 }
                             }
-                            .padding()
-                            .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                            .cornerRadius(12)
+                            .padding(10)
+                            .background(Color(red: 0.07, green: 0.07, blue: 0.05))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 1.0, green: 0.85, blue: 0.0), lineWidth: 1))
                         }
                     }
-                    .padding()
                 }
             }
+            .padding(14)
         }
         .sheet(isPresented: $showScanner) {
             QRScannerView { code in
@@ -593,63 +780,309 @@ struct PartyTabView: View {
     }
 }
 
-// MARK: - Tab 4: SETTINGS
-struct SettingsTabView: View {
+// MARK: - Tab 4: SETTINGS STUDIO TAB
+struct SettingsStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Studio Settings").font(.title2).bold().foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 14) {
+                // Audio Quality (Synced with PC)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("AUDIO QUALITY (SYNCED WITH PC):")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Jitter Buffer Target").font(.headline).foregroundColor(.white)
-                    Picker("Buffer Target", selection: $engine.bufferTargetMs) {
-                        Text("10 ms (Ultra Low)").tag(10)
-                        Text("20 ms (Default)").tag(20)
-                        Text("40 ms (Safe)").tag(40)
-                        Text("80 ms (High Jitter)").tag(80)
+                    RadioLine(title: "Compressed (Opus)", isSelected: false) {
+                        engine.sendConfigSync(forcePcm: true)
                     }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .onChange(of: engine.bufferTargetMs) { _ in
+                    RadioLine(title: "Uncompressed (Lossless PCM16 48 kHz)", isSelected: true) {
+                        engine.sendConfigSync(forcePcm: true)
+                    }
+
+                    Text("OPUS BITRATE: 192 kbps")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(white: 0.55))
+                }
+
+                // Audio Output Engine
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("AUDIO OUTPUT ENGINE:")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    RadioLine(title: "AVAudioEngine Low-Latency", isSelected: engine.outputEngineMode == "OBOE_LOW_LATENCY") {
+                        engine.outputEngineMode = "OBOE_LOW_LATENCY"
+                        engine.sendConfigSync()
+                    }
+                    RadioLine(title: "Standard AudioUnit Output", isSelected: engine.outputEngineMode == "AUDIOTRACK_LEGACY") {
+                        engine.outputEngineMode = "AUDIOTRACK_LEGACY"
                         engine.sendConfigSync()
                     }
                 }
-                .padding()
-                .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                .cornerRadius(12)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("About PhoneSpeaker v2.0").font(.headline).foregroundColor(.white)
-                    Text("Cross-platform Ultra Low-Latency Audio Streaming Studio.")
-                        .font(.caption).foregroundColor(.gray)
-                    Text("Supported: Windows (WASAPI Loopback), Linux (PulseAudio/PipeWire), macOS (CoreAudio/BlackHole), Android (Oboe/AAudio), iOS (AVAudioEngine).")
-                        .font(.caption2).foregroundColor(.gray)
+                // Audio Effects
+                Toggle(isOn: Binding(
+                    get: { engine.enableAudioEffects },
+                    set: { newVal in
+                        engine.enableAudioEffects = newVal
+                        engine.sendConfigSync()
+                    }
+                )) {
+                    Text("Enable Audio Effects / Equalizer")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white)
                 }
-                .padding()
-                .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-                .cornerRadius(12)
+                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+
+                // Exclusive Audio
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("EXCLUSIVE AUDIO (AUDIO FOCUS):")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    RadioLine(title: "Mix With Others", isSelected: engine.exclusiveAudioMode == "MIX_WITH_OTHERS") {
+                        engine.exclusiveAudioMode = "MIX_WITH_OTHERS"
+                        engine.sendConfigSync()
+                    }
+                    RadioLine(title: "Duck Others When Playing", isSelected: engine.exclusiveAudioMode == "DUCK_OTHERS") {
+                        engine.exclusiveAudioMode = "DUCK_OTHERS"
+                        engine.sendConfigSync()
+                    }
+                }
+
+                // Headset Disconnect
+                Toggle(isOn: Binding(
+                    get: { engine.stopOnHeadsetDisconnect },
+                    set: { newVal in
+                        engine.stopOnHeadsetDisconnect = newVal
+                        engine.sendConfigSync()
+                    }
+                )) {
+                    Text("Pause stream on headset disconnection")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+
+                // Available Adapter IPs
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("AVAILABLE ADAPTER IPS:")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Button("[ REFRESH ]") {
+                            engine.refreshAdapterIps()
+                        }
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                    }
+
+                    Text(engine.availableIpListText.isEmpty ? "en0        : 127.0.0.1" : engine.availableIpListText)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                }
             }
-            .padding()
+            .padding(14)
         }
     }
 }
 
-// MARK: - Reusable StatBox View
-struct StatBox: View {
-    let title: String
-    let value: String
-    let icon: String
+// MARK: - Live Delay Graph View (Canvas)
+struct LiveDelayGraphView: View {
+    let history: [Double]
+    let targetMs: Double
+    let currentBufMs: Double
 
     var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).foregroundColor(.cyan).font(.subheadline)
-            Text(value).bold().foregroundColor(.white).font(.callout)
-            Text(title).font(.caption2).foregroundColor(.gray)
+        VStack(spacing: 2) {
+            HStack {
+                let estTotal = Int(currentBufMs + 35.0)
+                Text(String(format: "BUF: %.1f ms | EST: ~%d ms | TGT: %.0f ms", currentBufMs, estTotal, targetMs))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let maxMs: Double = 160.0
+
+                ZStack {
+                    Color(red: 0.04, green: 0.04, blue: 0.04)
+
+                    // Grid lines at 40, 80, 120 ms
+                    Path { path in
+                        for ms in [40.0, 80.0, 120.0] {
+                            let y = CGFloat(h - (ms / maxMs) * h)
+                            path.move(to: CGPoint(x: 0, y: y))
+                            path.addLine(to: CGPoint(x: w, y: y))
+                        }
+                    }
+                    .stroke(Color(white: 0.15), lineWidth: 1)
+
+                    // Dashed target line
+                    Path { path in
+                        let targetY = CGFloat(h - (min(targetMs, maxMs) / maxMs) * h)
+                        path.move(to: CGPoint(x: 0, y: targetY))
+                        path.addLine(to: CGPoint(x: w, y: targetY))
+                    }
+                    .stroke(Color(white: 0.4), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+
+                    // Buffer curve
+                    if history.count > 1 {
+                        Path { path in
+                            let step = w / CGFloat(max(1, history.count - 1))
+                            for (idx, val) in history.enumerated() {
+                                let x = CGFloat(idx) * step
+                                let clamped = min(max(val, 0.0), maxMs)
+                                let y = CGFloat(h - (clamped / maxMs) * h)
+                                if idx == 0 {
+                                    path.move(to: CGPoint(x: x, y: y))
+                                } else {
+                                    path.addLine(to: CGPoint(x: x, y: y))
+                                }
+                            }
+                        }
+                        .stroke(currentBufMs > targetMs + 20.0 ? Color(red: 1.0, green: 0.53, blue: 0.0) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2)
+                    }
+                }
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+            }
+            .frame(height: 80)
         }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(Color(red: 0.12, green: 0.14, blue: 0.18))
-        .cornerRadius(10)
+    }
+}
+
+// MARK: - Reusable Monospace UI Components
+struct RadioChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: isSelected ? .bold : .regular, design: .monospaced))
+                .foregroundColor(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.6))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.05))
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.2), lineWidth: 1))
+        }
+    }
+}
+
+struct RadioLine: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(isSelected ? "[●]" : "[○]")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.5))
+
+                Text(title)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(isSelected ? .white : Color(white: 0.7))
+                Spacer()
+            }
+        }
+    }
+}
+
+struct TelemetryRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Color(white: 0.55))
+            Spacer()
+            Text(value)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.white)
+        }
+    }
+}
+
+// MARK: - Studio Help Modal
+struct StudioHelpModal: View {
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("PHONESPEAKER v2.0 STUDIO GUIDE")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                    Spacer()
+                    Button("✕ CLOSE") {
+                        isPresented = false
+                    }
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                }
+                .padding(.bottom, 6)
+
+                ScrollView {
+                    Text("""
+============================================================
+PHONESPEAKER v2.0 STUDIO — CROSS-PLATFORM GUIDE
+============================================================
+
+PLATFORMS:
+• iOS 16.0–18+ (iPhone & iPad with AVAudioEngine)
+• Android 8.0–15+ (Oboe C++ AAudio ultra-low latency)
+• Windows 11 / 10 (WASAPI Loopback, VB-CABLE Virtual Mic)
+• macOS Sonoma / Ventura / Monterey (CoreAudio / BlackHole)
+• Linux: Ubuntu, Mint, Arch, Debian (PipeWire / PulseAudio)
+
+1. WIRELESS SPEAKER PLAYER (PORT 5004):
+------------------------------------------------------------
+* Connect both PC and iPhone to the same Wi-Fi or Hotspot.
+* Tap [ ▶ START SPEAKER PLAYER (PORT 5004) ] on iPhone.
+* On PC, click [ ▶ START SPEAKER STREAM ] in Tab 1.
+* Audio streams lossless 48 kHz stereo PCM16 with <35 ms delay!
+
+2. WIRELESS PC MICROPHONE (PORT 5006):
+------------------------------------------------------------
+* Tap [ 🎤 START MIC STREAM TO PC (PORT 5006) ] on iPhone.
+* Streams iPhone microphone to PC Port 5006.
+* On Windows, route via VB-CABLE to use in Discord/Zoom.
+* On macOS, route via BlackHole 2ch.
+* On Linux, route via PhoneSpeaker_Mic virtual sink.
+
+3. MULTI-DEVICE PARTY MODE:
+------------------------------------------------------------
+* 👑 HOST: Tap [ 👑 HOST A PARTY ] to generate a QR code.
+  Multiple iPhones and Androids can join the party simultaneously.
+* 🎧 JOIN: Tap [ 🎧 JOIN A PARTY ] to scan QR code or select
+  discovered hosts on the network.
+* 📡 EXTEND: Turn on Personal Hotspot and tap 'Extend This Party'
+  to act as a secondary repeater for infinite range!
+============================================================
+""")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(white: 0.8))
+                }
+            }
+            .padding(14)
+        }
     }
 }

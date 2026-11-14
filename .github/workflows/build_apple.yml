@@ -31,12 +31,12 @@ jobs:
 
       - name: Install macOS Audio & Build Dependencies via Homebrew
         run: |
-          brew install opus portaudio python-tk xcodegen oras
+          brew install opus portaudio python@3.11 python-tk@3.11 xcodegen oras
 
       - name: Build macOS Application Bundle & DMG
         run: |
           cd phonespeaker-pc
-          python3 build_macos.py
+          /opt/homebrew/bin/python3.11 build_macos.py || python3 build_macos.py
 
       - name: Verify macOS DMG Artifact
         run: |
@@ -107,8 +107,17 @@ jobs:
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
             gh release create "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio (All Platforms)" --notes "Latest cross-platform installers for Windows, Linux, macOS, Android, and iOS."
 
+          if [ ! -f "PhoneSpeaker v2.exe" ] && [ ! -f "PhoneSpeaker.v2.exe" ]; then
+            gh release download "$TAG_NAME" -p "*.exe" --clobber 2>/dev/null || true
+          fi
+          if [ ! -f "PhoneSpeaker v2.apk" ] && [ ! -f "PhoneSpeaker.v2.apk" ]; then
+            gh release download "$TAG_NAME" -p "*.apk" --clobber 2>/dev/null || true
+          fi
+
           cp -f "PhoneSpeaker v2.exe" "PhoneSpeaker.v2.exe" 2>/dev/null || true
           cp -f "PhoneSpeaker v2.apk" "PhoneSpeaker.v2.apk" 2>/dev/null || true
+          cp -f "PhoneSpeaker.v2.exe" "PhoneSpeaker v2.exe" 2>/dev/null || true
+          cp -f "PhoneSpeaker.v2.apk" "PhoneSpeaker v2.apk" 2>/dev/null || true
 
           for f in \
             "PhoneSpeaker v2.exe" \
@@ -138,16 +147,20 @@ jobs:
           OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           PKG_REF="ghcr.io/${OWNER_LC}/phonespeaker"
 
+          ORAS_FILES=()
+          [ -f "PhoneSpeaker.v2.exe" ] && ORAS_FILES+=("PhoneSpeaker.v2.exe:application/vnd.microsoft.portable-executable")
+          [ -f "PhoneSpeaker.v2.apk" ] && ORAS_FILES+=("PhoneSpeaker.v2.apk:application/vnd.android.package-archive")
+          [ -f "PhoneSpeaker-v2-Linux-Installer.run" ] && ORAS_FILES+=("PhoneSpeaker-v2-Linux-Installer.run:application/x-executable")
+          [ -f "PhoneSpeaker-v2-macOS-Installer.command" ] && ORAS_FILES+=("PhoneSpeaker-v2-macOS-Installer.command:application/x-sh")
+          [ -f "PhoneSpeaker-v2-macOS.dmg" ] && ORAS_FILES+=("PhoneSpeaker-v2-macOS.dmg:application/x-apple-diskimage")
+          [ -f "PhoneSpeaker-v2-iOS.ipa" ] && ORAS_FILES+=("PhoneSpeaker-v2-iOS.ipa:application/octet-stream")
+          [ -f "install_linux.sh" ] && ORAS_FILES+=("install_linux.sh:application/x-sh")
+
+          echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF..."
           oras push "${PKG_REF}:latest" \
             --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --annotation "org.opencontainers.image.description=PhoneSpeaker v2.0 Studio — Official Installers for Windows (.exe), Linux (.run), macOS (.dmg & .command), Android (.apk), and iOS (.ipa)" \
             --annotation "org.opencontainers.image.version=2.0.0" \
-            "PhoneSpeaker.v2.exe:application/vnd.microsoft.portable-executable" \
-            "PhoneSpeaker.v2.apk:application/vnd.android.package-archive" \
-            "PhoneSpeaker-v2-Linux-Installer.run:application/x-executable" \
-            "PhoneSpeaker-v2-macOS-Installer.command:application/x-sh" \
-            "PhoneSpeaker-v2-macOS.dmg:application/x-apple-diskimage" \
-            "PhoneSpeaker-v2-iOS.ipa:application/octet-stream" \
-            "install_linux.sh:application/x-sh"
+            "${ORAS_FILES[@]}"
 
           oras tag "${PKG_REF}:latest" "2.0.0"

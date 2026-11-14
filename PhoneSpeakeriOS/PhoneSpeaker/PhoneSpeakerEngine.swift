@@ -123,6 +123,19 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     @Published public var bufferMode: String = "AUTO" // AUTO or FIXED
     @Published public var soundMode: String = "BALANCED" // BALANCED, GAMING, QUALITY, CUSTOM
 
+    // Studio Telemetry & PC Synced State
+    @Published public var delayHistory: [Double] = Array(repeating: 0.0, count: 60)
+    @Published public var activeCodecName: String = "PCM16"
+    @Published public var opusBitrateKbps: String = "192"
+    @Published public var serverRole: String = "PC_TO_PHONE"
+    @Published public var micHardwareFx: Bool = true
+    @Published public var outputEngineMode: String = "OBOE_LOW_LATENCY"
+    @Published public var enableAudioEffects: Bool = false
+    @Published public var exclusiveAudioMode: String = "MIX_WITH_OTHERS"
+    @Published public var stopOnHeadsetDisconnect: Bool = false
+    @Published public var availableIpListText: String = ""
+    @Published public var localSyncRev: Int = 1
+
     // Party Mode States
     @Published public var partyScreen: String = "CHOOSER" // CHOOSER, HOST, JOIN
     @Published public var isPartyHost: Bool = false {
@@ -202,6 +215,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         super.init()
         setupAudioSession()
         setupAudioEngine()
+        refreshAdapterIps()
 
         // Start Control Channel (Port 5005) & 1-second Beacon Discovery IMMEDIATELY on init
         startControlSocket()
@@ -807,6 +821,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             if let sid = inSyncId { lastSyncId = sid }
             let inRev = (payload["rev"] as? NSNumber)?.intValue ?? 0
             localRev = max(localRev, inRev) + 1
+            localSyncRev = localRev
             suppressSync = true
             defer { suppressSync = false }
 
@@ -825,6 +840,24 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             if let targetMs = (payload["custom_buffer_ms"] as? NSNumber)?.intValue {
                 bufferTargetMs = min(200, max(10, targetMs))
             }
+            if let role = payload["direction"] as? String {
+                serverRole = role
+            }
+            if let bRate = (payload["opus_bitrate_kbps"] as? NSNumber)?.intValue {
+                opusBitrateKbps = String(bRate)
+            }
+            if let outEng = payload["audio_output_engine"] as? String {
+                outputEngineMode = outEng
+            }
+            if let fx = payload["enable_audio_effects"] as? Bool {
+                enableAudioEffects = fx
+            }
+            if let excl = payload["exclusive_audio_mode"] as? String {
+                exclusiveAudioMode = excl
+            }
+            if let disc = payload["stop_on_headset_disconnect"] as? Bool {
+                stopOnHeadsetDisconnect = disc
+            }
 
         case "MIC_CONTROL":
             if let active = payload["active"] as? Bool {
@@ -842,8 +875,13 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     }
 
     public func sendConfigSync(forcePcm: Bool = false, targetIp: String? = nil) {
-        guard !suppressSync else { return }
-        localRev += 1
+        if forcePcm {
+            localRev += 10
+        } else {
+            guard !suppressSync else { return }
+            localRev += 1
+        }
+        localSyncRev = localRev
         let syncId = Int(Date().timeIntervalSince1970 * 1000) & 0x7FFFFFFF
         lastSyncId = syncId
         let cfg: [String: Any] = [
@@ -852,8 +890,10 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             "sync_id": syncId,
             "direction": isMicStreaming && isAudioPlaying ? "FULL_DUPLEX" : (isMicStreaming ? "PHONE_TO_PC" : "PC_TO_PHONE"),
             "audio_profile": soundMode,
-            "codec": forcePcm ? 0 : 0,
-            "opus_bitrate_kbps": 192,
+            "codec": 0,
+            "force_pcm": true,
+            "platform": "ios",
+            "opus_bitrate_kbps": Int(opusBitrateKbps) ?? 192,
             "frame_ms": 5,
             "buffer_mode": bufferMode,
             "custom_buffer_ms": Double(bufferTargetMs),
@@ -861,7 +901,11 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             "volume_gain": Double(volume),
             "muted": isMuted,
             "device": deviceName,
-            "party_mode": isPartyHost || isPartyExtending
+            "party_mode": isPartyHost || isPartyExtending,
+            "audio_output_engine": outputEngineMode,
+            "enable_audio_effects": enableAudioEffects,
+            "exclusive_audio_mode": exclusiveAudioMode,
+            "stop_on_headset_disconnect": stopOnHeadsetDisconnect
         ]
         let dest = targetIp ?? connectedServerIp
         if !dest.isEmpty && dest != "255.255.255.255" {
@@ -1036,7 +1080,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             "party_join": false,
             "is_party_host": self.isPartyHost && !self.isPartyExtending,
             "is_extended_host": self.isPartyExtending,
-            "mic_streaming": self.isMicStreaming
+            "mic_streaming": self.isMicStreaming,
+            "platform": "ios",
+            "force_pcm": true
         ]
         broadcastControlMessage(beacon)
     }
@@ -1079,7 +1125,13 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
             let total = curRx + curLost
             self.packetLossPercent = total > 0 ? (Double(curLost) / Double(total)) * 100.0 : 0.0
-            self.latencyMs = Double(self.bufferTargetMs)
+            let curBufMs = Double(self.audioBufferQueueCount.value * 5)
+            self.latencyMs = curBufMs > 0 ? curBufMs : Double(self.bufferTargetMs)
+
+            self.delayHistory.append(curBufMs)
+            if self.delayHistory.count > 60 {
+                self.delayHistory.removeFirst(self.delayHistory.count - 60)
+            }
 
             self.rxPps = Int(curRx >= self.lastRxPpsCount ? (curRx - self.lastRxPpsCount) : 0) * 3
             self.lastRxPpsCount = curRx
@@ -1093,7 +1145,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             if !self.connectedServerIp.isEmpty {
                 let stats: [String: Any] = [
                     "type": "STATS",
-                    "buffer_ms": self.latencyMs,
+                    "buffer_ms": curBufMs,
                     "target_ms": Double(self.bufferTargetMs),
                     "underruns": self.underrunCount,
                     "lost_packets": curLost,
@@ -1103,7 +1155,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                     "active_codec": 0,
                     "device": self.deviceName,
                     "mic_streaming": self.isMicStreaming,
-                    "mic_pps": self.micTxPps
+                    "mic_pps": self.micTxPps,
+                    "platform": "ios",
+                    "force_pcm": true
                 ]
                 self.sendControlMessage(stats, toIp: self.connectedServerIp)
             }
@@ -1172,6 +1226,38 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         closeSocket(&relayTxSocket)
         isRunningControl = false
         closeSocket(&controlSocket)
+    }
+
+    // MARK: - Adapter Enumeration
+    public func refreshAdapterIps() {
+        var lines: [String] = []
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+            availableIpListText = "en0        : 127.0.0.1"
+            return
+        }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let interface = ptr.pointee
+            if interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
+                let name = String(cString: interface.ifa_name)
+                if name.hasPrefix("lo") { continue }
+                var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                            &hostname, socklen_t(hostname.count),
+                            nil, socklen_t(0), NI_NUMERICHOST)
+                let ip = String(cString: hostname)
+                if ip != "127.0.0.1" {
+                    let paddedName = name.padding(toLength: 10, withPad: " ", startingAt: 0)
+                    lines.append("\(paddedName): \(ip)")
+                }
+            }
+        }
+        freeifaddrs(ifaddr)
+        if lines.isEmpty {
+            lines.append("en0        : 127.0.0.1")
+        }
+        availableIpListText = lines.joined(separator: "\n")
     }
 
     // MARK: - Hotspot-First Local IPv4 Address Discovery

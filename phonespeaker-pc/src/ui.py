@@ -287,6 +287,26 @@ class PhoneSpeakerApp:
         style.map("TButton",
                   background=[("active", "#2A2A2A"), ("pressed", "#333333")],
                   foreground=[("active", ACCENT)])
+        style.configure("Green.TButton", background="#002B00", foreground="#00FF00",
+                        font=FONT_MONO_BOLD, borderwidth=1, relief="solid", padding=[8, 4])
+        style.map("Green.TButton",
+                  background=[("active", "#004400"), ("pressed", "#001100")],
+                  foreground=[("active", "#FFFFFF")])
+        style.configure("Red.TButton", background="#330000", foreground="#FF4444",
+                        font=FONT_MONO_BOLD, borderwidth=1, relief="solid", padding=[8, 4])
+        style.map("Red.TButton",
+                  background=[("active", "#550000"), ("pressed", "#220000")],
+                  foreground=[("active", "#FFFFFF")])
+        style.configure("Cyan.TButton", background="#001822", foreground="#00EEEE",
+                        font=FONT_MONO_BOLD, borderwidth=1, relief="solid", padding=[8, 4])
+        style.map("Cyan.TButton",
+                  background=[("active", "#003344"), ("pressed", "#001018")],
+                  foreground=[("active", "#FFFFFF")])
+        style.configure("Dark.TButton", background="#222222", foreground="#FFFFFF",
+                        font=FONT_MONO_BOLD, borderwidth=1, relief="solid", padding=[8, 4])
+        style.map("Dark.TButton",
+                  background=[("active", "#333333"), ("pressed", "#111111")],
+                  foreground=[("active", ACCENT)])
         style.configure("TCombobox", fieldbackground="#141414", background="#222222",
                         foreground=FG, arrowcolor=ACCENT, font=FONT_MONO_SM)
         style.map("TCombobox",
@@ -2017,13 +2037,14 @@ class PhoneSpeakerApp:
     def _apply_incoming_config(self, msg: dict) -> None:
         incoming_rev = msg.get("rev", 0)
         incoming_sync_id = msg.get("sync_id")
+        force_pcm = (msg.get("force_pcm") is True or msg.get("platform") == "ios")
 
-        if incoming_sync_id is not None and incoming_sync_id == self._last_sync_id:
+        if incoming_sync_id is not None and incoming_sync_id == self._last_sync_id and not force_pcm:
             return
 
         if incoming_sync_id is not None:
             self._last_sync_id = incoming_sync_id
-        elif incoming_rev <= self._config_rev:
+        elif incoming_rev <= self._config_rev and not force_pcm:
             return
 
         self._suppress_sync = True
@@ -2041,7 +2062,10 @@ class PhoneSpeakerApp:
                     self.ip_var.set(sender_ip)
                 self.conn_device_ip_var.set(f"{sender_ip}  •  CONNECTED")
 
-            if "codec" in msg:
+            if force_pcm or ("iphone" in dev_name.lower()) or ("ipad" in dev_name.lower()):
+                self.codec_var.set(CODEC_PCM16)
+                self._update_codec_ui_state()
+            elif "codec" in msg:
                 self.codec_var.set(int(msg["codec"]))
             if "opus_bitrate_kbps" in msg:
                 self.bitrate_var.set(str(msg["opus_bitrate_kbps"]))
@@ -2645,6 +2669,13 @@ class PhoneSpeakerApp:
                     elif self._connected_phone_name == "Waiting for phone...":
                         self.conn_device_name_var.set("Android Phone")
                     self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED")
+
+                    is_ios = (msg.get("platform") == "ios" or msg.get("force_pcm") is True or
+                              "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
+                    if is_ios and self.codec_var.get() != CODEC_PCM16:
+                        self.codec_var.set(CODEC_PCM16)
+                        self._update_codec_ui_state()
+                        self._on_local_setting_changed()
                     if (self._party_view_state == "HOST" and self.party_mode_var.get()) or msg.get("party_join"):
                         if self._party_view_state == "HOST" or getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get():
                             self._register_party_device(best_ip, dev_name or "Android Phone", msg.get("audio_port", AUDIO_PORT), force=True)
@@ -2699,6 +2730,13 @@ class PhoneSpeakerApp:
                         self.conn_device_name_var.set(dev_name)
                     elif self._connected_phone_name == "Waiting for phone...":
                         self.conn_device_name_var.set("Android Phone")
+
+                    is_ios = (s.get("platform") == "ios" or s.get("force_pcm") is True or
+                              "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
+                    if is_ios and self.codec_var.get() != CODEC_PCM16:
+                        self.codec_var.set(CODEC_PCM16)
+                        self._update_codec_ui_state()
+                        self._on_local_setting_changed()
                     cur_ip = self.ip_var.get().strip()
                     sender_ip = s.get("_sender_ip") or cur_ip
                     if cur_ip:
@@ -2761,19 +2799,20 @@ class PhoneSpeakerApp:
 
     def _show_firewall_dialog(self) -> None:
         from firewall import get_firewall_commands, apply_firewall_rules
+        os_name = "macOS" if sys.platform == "darwin" else ("Linux" if sys.platform.startswith("linux") else "Windows")
         dlg = tk.Toplevel(self.root)
-        dlg.title("Firewall Rules")
+        dlg.title(f"{os_name} Firewall Configuration")
         dlg.configure(bg=BG)
         dlg.resizable(False, False)
 
         tk.Label(
-            dlg, text="Windows Firewall Configuration",
+            dlg, text=f"{os_name} Firewall Configuration",
             bg=BG, fg=FG, font=FONT_MONO_LG
         ).pack(anchor="w", padx=12, pady=(12, 6))
 
         tk.Label(
             dlg,
-            text="Inbound UDP ports 5004, 5005, and 5006 must be allowed\nso the phone and PC can stream audio and sync settings.",
+            text="Inbound UDP ports 5004, 5005, and 5006 must be allowed\nso Android, iOS, and PC/Mac/Linux can stream audio and sync settings.",
             bg=BG, fg=FG, font=FONT_MONO, justify="left",
         ).pack(anchor="w", padx=12, pady=4)
 
@@ -2878,39 +2917,50 @@ class PhoneSpeakerApp:
         scrollbar.config(command=guide_text.yview)
 
         help_content = """============================================================
-PHONESPEAKER v2.0 STUDIO — COMPLETE USER GUIDE (WINDOWS & LINUX)
+PHONESPEAKER v2.0 STUDIO — USER GUIDE (CROSS-PLATFORM STUDIO)
 ============================================================
 
-✓ VERIFIED STATUS: SPEAKER & MIC STREAMING ARE WORKING!
+PLATFORMS SUPPORTED:
+• Windows 11 / 10 (WASAPI Loopback, VB-CABLE Virtual Mic)
+• Linux: Ubuntu, Mint, Arch, Debian (PipeWire / PulseAudio native)
+• macOS: Sonoma, Ventura, Monterey (CoreAudio / BlackHole loopback)
+• Android: 8.0 through 15+ (Oboe C++ AAudio ultra-low latency)
+• iOS: 16.0 through 18+ (AVAudioEngine 48 kHz stereo player & mic)
+
+✓ DUAL INDEPENDENT ACTIONS:
 ------------------------------------------------------------
-* Both PC (.exe / Linux binary) and Android now have TWO SEPARATE
-  dedicated buttons on the main screen:
-  1. [ ▶ START SPEAKER STREAM (PC -> PHONE :5004) ]
-  2. [ 🎤 START / STOP MIC RECEIVER (PHONE -> PC :5006) ]
-* Clicking the Mic button on PC toggles the UDP 5006 receiver AND
-  remotely signals your Phone to start/stop its Microphone Server!
+* Dedicated buttons on PC/Mac/Linux, Android, and iOS:
+  1. [ ▶ START SPEAKER STREAM / PLAYER (PORT 5004) ]
+  2. [ 🎤 START / STOP MIC STREAM / RECEIVER (PORT 5006) ]
+* Clicking the Mic button on desktop toggles the UDP 5006 receiver AND
+  remotely signals the mobile device to start/stop its Mic Server!
 * How to verify Mic Streaming is working:
   - Check 'MIC RX PPS: ~200' and 'Phone Mic: STREAMING' in Live Status.
-  - Speak into your phone and watch the green Level Meter move on PC!
+  - Speak into your phone and watch the level meter move on desktop!
 
 1. PC -> PHONE WIRELESS SPEAKER (PORT 5004)
 ------------------------------------------------------------
-* Connect both PC and Phone to the same Wi-Fi, Phone Hotspot, or USB Tether.
+* Connect desktop and phone to the same Wi-Fi, Phone Hotspot, or USB.
 * Click [ ▶ START SPEAKER STREAM ] on PC and [ ▶ START SPEAKER PLAYER ] on Phone.
-* On Linux: Automatically captures PipeWire / PulseAudio monitor loopback.
-* On Windows: Automatically captures WASAPI loopback.
+* Windows: Captures default WASAPI loopback automatically.
+* Linux: Captures PipeWire / PulseAudio monitor loopback automatically.
+* macOS: Captures CoreAudio / BlackHole 2ch loopback automatically.
 
 2. PHONE -> PC WIRELESS MICROPHONE (PORT 5006)
 ------------------------------------------------------------
-* Tap [ 🎤 START MIC STREAM TO PC (PORT 5006) ] on the Phone's main tab
-  (or click the Mic button on PC once the phone is discovered).
-* Routing Phone Mic to Discord / Zoom / OBS:
-  - ON WINDOWS: Install VB-CABLE in Tab 3, set 'PC Playback Dev' on Tab 1
-    to 'CABLE Input', and set Discord/Zoom input to 'CABLE Output'.
-  - ON LINUX: In Tab 3, click [ Install Virtual Audio Driver ] to create
-    a native PipeWire/PulseAudio virtual mic ('PhoneSpeaker_Mic'). Set
-    'PC Playback Dev' to '[PipeWire/Pulse] PhoneSpeaker_Mic_Sink', and
-    choose 'PhoneSpeaker_Wireless_Mic' as your mic in Discord/Zoom/OBS!
+* Tap [ 🎤 START MIC STREAM TO PC (PORT 5006) ] on Android or iOS.
+* Routing Phone Mic to Discord / Zoom / Teams / OBS:
+  - WINDOWS: Install VB-CABLE in Tab 3, set PC Playback Dev to 'CABLE Input',
+    and set Discord/Zoom input to 'CABLE Output'.
+  - LINUX: In Tab 3, click [ Install Virtual Audio Driver ] to create
+    a native PipeWire/PulseAudio virtual mic ('PhoneSpeaker_Mic').
+  - MACOS: Route via BlackHole 2ch or Multi-Output Device.
+
+3. PARTY MODE (MULTI-DEVICE BROADCAST & EXTEND)
+------------------------------------------------------------
+* Host screen broadcasts low-latency audio to all connected devices simultaneously.
+* Any connected phone or laptop can tap 'Extend This Party' to create a
+  secondary Hotspot repeater for infinite range and synchronized sound!
 ============================================================
 """
         guide_text.insert("1.0", help_content)

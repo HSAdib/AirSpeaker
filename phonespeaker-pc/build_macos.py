@@ -46,13 +46,34 @@ def find_system_libopus() -> Path | None:
     return None
 
 
+def find_python_with_tkinter() -> str:
+    candidates = [
+        "/opt/homebrew/bin/python3.11",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3.11",
+        "/usr/local/bin/python3",
+        sys.executable,
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            try:
+                res = subprocess.run([c, "-c", "import tkinter"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if res.returncode == 0:
+                    print(f"Using Python with tkinter: {c}", flush=True)
+                    return c
+            except Exception:
+                pass
+    return sys.executable
+
+
 def main() -> None:
     os.chdir(ROOT)
     VENDOR.mkdir(parents=True, exist_ok=True)
 
     if not VENV.exists():
-        print("Creating macOS virtual environment...", flush=True)
-        run([sys.executable, "-m", "venv", "--system-site-packages", str(VENV)])
+        py_bin = find_python_with_tkinter()
+        print(f"Creating macOS virtual environment using {py_bin}...", flush=True)
+        run([py_bin, "-m", "venv", "--system-site-packages", str(VENV)])
 
     python = VENV / "bin" / "python"
     pip = VENV / "bin" / "pip"

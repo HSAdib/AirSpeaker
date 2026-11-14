@@ -538,7 +538,10 @@ class AudioCapture:
                 info = self._pa.get_device_info_by_index(self._device_index)
                 self.active_device_name = info.get("name", f"Device {self._device_index}")
                 self._in_rate = int(info.get("defaultSampleRate", TARGET_RATE))
-                self._in_channels = max(1, int(info.get("maxInputChannels", 2)))
+                if _IS_MAC:
+                    self._in_channels = min(2, max(1, int(info.get("maxInputChannels", 2))))
+                else:
+                    self._in_channels = max(1, int(info.get("maxInputChannels", 2)))
 
                 if _SOXR_AVAILABLE and self._in_rate != TARGET_RATE:
                     try:
@@ -578,9 +581,12 @@ class AudioCapture:
                 except TypeError:
                     self._stream = self._pa.open(**open_kwargs)
                 except Exception:
-                    # Fallback for legacy PyAudio WASAPI forks that require as_loopback=True
-                    open_kwargs["as_loopback"] = True
-                    self._stream = self._pa.open(**open_kwargs)
+                    # Fallback for legacy PyAudio WASAPI forks that require as_loopback=True (Windows PyAudioWPatch only)
+                    if hasattr(self._pa, "get_default_wasapi_loopback"):
+                        open_kwargs["as_loopback"] = True
+                        self._stream = self._pa.open(**open_kwargs)
+                    else:
+                        raise
                 self._stream.start_stream()
                 self._running = True
                 logger.info(

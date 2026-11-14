@@ -1,4 +1,4 @@
-﻿"""
+"""
 build_exe.py — Build PhoneSpeaker.exe using PyInstaller.
 
 Creates venv if needed, installs requirements, then runs PyInstaller.

@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 

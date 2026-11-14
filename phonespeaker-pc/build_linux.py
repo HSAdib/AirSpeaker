@@ -53,7 +53,7 @@ def main() -> None:
 
     if not VENV.exists():
         print("Creating Linux virtual environment...", flush=True)
-        run([sys.executable, "-m", "venv", str(VENV)])
+        run([sys.executable, "-m", "venv", "--system-site-packages", str(VENV)])
 
     python = VENV / "bin" / "python"
     pip = VENV / "bin" / "pip"
