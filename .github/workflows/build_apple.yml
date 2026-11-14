@@ -1,4 +1,4 @@
-name: Build Apple Deliverables (macOS DMG & iOS IPA)
+name: Build & Publish All Deliverables (GitHub Releases & Packages)
 
 on:
   push:
@@ -9,11 +9,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apple:
-    name: Build macOS DMG and iOS IPA
+  build-and-publish:
+    name: Build macOS DMG, iOS IPA & Publish to Releases + Packages
     runs-on: macos-latest
     permissions:
       contents: write
+      packages: write
 
     steps:
       - name: Checkout Code
@@ -28,9 +29,9 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install macOS Audio Dependencies via Homebrew
+      - name: Install macOS Audio & Build Dependencies via Homebrew
         run: |
-          brew install opus portaudio python-tk xcodegen
+          brew install opus portaudio python-tk xcodegen oras
 
       - name: Build macOS Application Bundle & DMG
         run: |
@@ -39,7 +40,7 @@ jobs:
 
       - name: Verify macOS DMG Artifact
         run: |
-          ls -lh PhoneSpeaker-v2-macOS.dmg || ls -lh phonespeaker-pc/dist/
+          ls -lh PhoneSpeaker-v2-macOS.dmg
 
       # ----------------------------------------------------
       # 2. BUILD IOS APP & IPA (PhoneSpeaker-v2-iOS.ipa)
@@ -69,39 +70,84 @@ jobs:
       - name: Package IPA (Payload zip for AltStore / SideStore / Sideloadly)
         run: |
           cd PhoneSpeakeriOS
+          rm -rf Payload
           mkdir -p Payload
           cp -R "build/PhoneSpeaker.xcarchive/Products/Applications/PhoneSpeaker.app" Payload/
-          zip -r ../PhoneSpeaker-v2-iOS.ipa Payload
+          zip -r -q ../PhoneSpeaker-v2-iOS.ipa Payload
           cd ..
           ls -lh PhoneSpeaker-v2-iOS.ipa
 
       # ----------------------------------------------------
-      # 3. UPLOAD ARTIFACTS
+      # 3. UPLOAD WORKFLOW ARTIFACTS
       # ----------------------------------------------------
-      - name: Upload macOS DMG
+      - name: Upload macOS DMG Artifact
         uses: actions/upload-artifact@v4
         with:
           name: PhoneSpeaker-v2-macOS-DMG
           path: PhoneSpeaker-v2-macOS.dmg
-          if-no-files-found: warn
 
-      - name: Upload iOS IPA
+      - name: Upload iOS IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: PhoneSpeaker-v2-iOS-IPA
           path: PhoneSpeaker-v2-iOS.ipa
-          if-no-files-found: warn
 
       # ----------------------------------------------------
-      # 4. ATTACH APPLE PACKAGES TO GITHUB RELEASE ON TAGS
+      # 4. PUBLISH ALL DEVICE INSTALLERS TO GITHUB RELEASE (v2.0.0 / Latest)
       # ----------------------------------------------------
-      - name: Attach Apple Deliverables to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          fail_on_unmatched_files: false
-          files: |
-            PhoneSpeaker-v2-macOS.dmg
-            PhoneSpeaker-v2-iOS.ipa
-            PhoneSpeaker-v2-macOS-Installer.command
+      - name: Publish All Device Installers to GitHub Release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG_NAME" =~ ^v ]]; then
+            TAG_NAME="v2.0.0"
+          fi
+          gh release view "$TAG_NAME" >/dev/null 2>&1 || \
+            gh release create "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio (All Platforms)" --notes "Latest cross-platform installers for Windows, Linux, macOS, Android, and iOS."
 
+          cp -f "PhoneSpeaker v2.exe" "PhoneSpeaker.v2.exe" 2>/dev/null || true
+          cp -f "PhoneSpeaker v2.apk" "PhoneSpeaker.v2.apk" 2>/dev/null || true
+
+          for f in \
+            "PhoneSpeaker v2.exe" \
+            "PhoneSpeaker.v2.exe" \
+            "PhoneSpeaker v2.apk" \
+            "PhoneSpeaker.v2.apk" \
+            "PhoneSpeaker-v2-Linux-Installer.run" \
+            "PhoneSpeaker-v2-macOS-Installer.command" \
+            "PhoneSpeaker-v2-macOS.dmg" \
+            "PhoneSpeaker-v2-iOS.ipa" \
+            "install_linux.sh"; do
+            if [ -f "$f" ]; then
+              echo "Uploading $f to Release $TAG_NAME..."
+              gh release upload "$TAG_NAME" "$f" --clobber
+            fi
+          done
+
+      # ----------------------------------------------------
+      # 5. PUBLISH TO GITHUB PACKAGES SECTION (ghcr.io/hsadib/phonespeaker)
+      # ----------------------------------------------------
+      - name: Publish Installers to GitHub Packages (GHCR OCI Registry)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          PKG_REF="ghcr.io/${OWNER_LC}/phonespeaker"
+
+          oras push "${PKG_REF}:latest" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "org.opencontainers.image.description=PhoneSpeaker v2.0 Studio — Official Installers for Windows (.exe), Linux (.run), macOS (.dmg & .command), Android (.apk), and iOS (.ipa)" \
+            --annotation "org.opencontainers.image.version=2.0.0" \
+            "PhoneSpeaker.v2.exe:application/vnd.microsoft.portable-executable" \
+            "PhoneSpeaker.v2.apk:application/vnd.android.package-archive" \
+            "PhoneSpeaker-v2-Linux-Installer.run:application/x-executable" \
+            "PhoneSpeaker-v2-macOS-Installer.command:application/x-sh" \
+            "PhoneSpeaker-v2-macOS.dmg:application/x-apple-diskimage" \
+            "PhoneSpeaker-v2-iOS.ipa:application/octet-stream" \
+            "install_linux.sh:application/x-sh"
+
+          oras tag "${PKG_REF}:latest" "2.0.0"

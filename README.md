@@ -32,18 +32,18 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 
 ## GitHub Packages & Release Downloads
 
-> **Note on GitHub Packages vs Releases:** The **GitHub Packages** registry (`0 packages`) is reserved for language/container registries (Docker, npm, NuGet, Maven, RubyGems). All prebuilt PhoneSpeaker installers live in [**GitHub Releases**](https://github.com/HSAdib/PhoneSpeaker/releases) and [**GitHub Actions Artifacts**](https://github.com/HSAdib/PhoneSpeaker/actions).
+> **Official Releases & Packages:** All prebuilt PhoneSpeaker deliverables are hosted on [**GitHub Releases (`releases/latest`)**](https://github.com/HSAdib/PhoneSpeaker/releases) and mirrored to [**GitHub Packages (`ghcr.io/hsadib/phonespeaker`)**](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker).
 
-| Platform | Package / Installer | Local Build Status | GitHub Release (`v2.0.0`) Status | Direct Download / Build Source |
+| Platform | Package / Installer | Description | Direct 1-Click Download | Package Registry |
 |---|---|---|---|---|
-| **Windows 11** | `PhoneSpeaker.v2.exe` *(local: `PhoneSpeaker v2.exe`)* | Built (`34,812,399` bytes) | Hosted (`33.1 MB`, Nov 8, 2026) | [Download EXE](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.exe) |
-| **Android** | `PhoneSpeaker.v2.apk` *(local: `PhoneSpeaker v2.apk`)* | Built (`16,677,105` bytes) | Hosted (`13.6 MB`, Nov 8, 2026) | [Download APK](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.apk) |
-| **Linux** | `PhoneSpeaker-v2-Linux-Installer.run` | Built (`65,841` bytes) | Hosted (`47 KB`, Nov 8, 2026) | [Download `.run`](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-Linux-Installer.run) |
-| **macOS (Script)** | `PhoneSpeaker-v2-macOS-Installer.command` | Built (`66,918` bytes) | Pending upload | Included in repository root (`PhoneSpeaker-v2-macOS-Installer.command`) |
-| **macOS (DMG)** | `PhoneSpeaker-v2-macOS.dmg` | Built via Apple CI | Pending CI / Release upload | [GitHub Actions (`build_apple.yml`)](https://github.com/HSAdib/PhoneSpeaker/actions/workflows/build_apple.yml) |
-| **iOS (iPhone/iPad)** | `PhoneSpeaker-v2-iOS.ipa` *(unsigned)* | Built via Apple CI | Pending CI / Release upload | [GitHub Actions (`build_apple.yml`)](https://github.com/HSAdib/PhoneSpeaker/actions/workflows/build_apple.yml) |
+| **Windows 11 / 10** | `PhoneSpeaker.v2.exe` *(or `PhoneSpeaker v2.exe`)* | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.exe) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Android (8.0–15+)** | `PhoneSpeaker.v2.apk` *(or `PhoneSpeaker v2.apk`)* | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.apk) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Linux (All Distros)** | `PhoneSpeaker-v2-Linux-Installer.run` | Self-extracting bundle for PipeWire & PulseAudio | [**Download `.run`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-Linux-Installer.run) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **macOS (Apple Silicon & Intel)** | `PhoneSpeaker-v2-macOS.dmg` | Drag-and-drop macOS Disk Image (.app bundle) | [**Download DMG**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS.dmg) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **macOS (One-Click Script)** | `PhoneSpeaker-v2-macOS-Installer.command` | Interactive terminal installer & dependency manager | [**Download `.command`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS-Installer.command) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **iOS (iPhone & iPad)** | `PhoneSpeaker-v2-iOS.ipa` | Sideloadable IPA (AltStore, SideStore, Sideloadly) | [**Download IPA**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-iOS.ipa) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 
-> **Current `v2.0.0` Note:** GitHub Release [`v2.0.0`](https://github.com/HSAdib/PhoneSpeaker/releases/tag/v2.0.0) still serves the earlier `2026-11-08` builds for Windows, Android, and Linux; push the updated binaries from the repo root (and run the Apple CI workflow) to publish the newer Party Mode + Apple deliverables under the next release tag.
+> **Linux One-Line Install:** `curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_linux.sh | bash`
 
 ## Install and build
 

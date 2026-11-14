@@ -49,15 +49,11 @@ class ControlChannel(
         if (!ip.isNullOrBlank() && !isOwnLocalIp(ip)) {
             activePcIp = ip.trim()
             lastKnownPcIp = activePcIp
+            sendPreStreamBeacon(activePcIp)
         }
     }
 
-    fun isOwnLocalIp(ip: String?): Boolean {
-        if (ip.isNullOrBlank()) return false
-        val trimmed = ip.trim()
-        if (trimmed == "127.0.0.1" || trimmed == "0.0.0.0" || trimmed == "255.255.255.255") return true
-        return getLocalIpv4Addresses().contains(trimmed)
-    }
+    fun isOwnLocalIp(ip: String?): Boolean = Companion.isOwnLocalIp(ip)
 
     @Synchronized
     fun start() {
@@ -141,10 +137,20 @@ class ControlChannel(
     private fun startListener() {
         listenerThread = thread(name = "ControlListener", isDaemon = true) {
             try {
-                val sock = DatagramSocket(null).apply {
-                    reuseAddress = true
-                    bind(InetSocketAddress(controlPort))
+                var sock: DatagramSocket? = null
+                for (attempt in 1..10) {
+                    try {
+                        sock = DatagramSocket(null).apply {
+                            reuseAddress = true
+                            bind(InetSocketAddress(controlPort))
+                        }
+                        break
+                    } catch (e: java.net.BindException) {
+                        if (attempt == 10) throw e
+                        Thread.sleep(50)
+                    }
                 }
+                if (sock == null) return@thread
                 listenerSocket = sock
                 Log.i(TAG, "Control listener bound to UDP $controlPort")
 
@@ -269,13 +275,31 @@ class ControlChannel(
                         sock.send(DatagramPacket(data, data.size, broadcastAddr, controlPort))
                     } catch (_: Exception) {}
 
+                    val unicastTargets = mutableSetOf<String>()
+                    activePcIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+                    lastKnownPcIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+                    AudioNative.nativeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+
+                    for (target in unicastTargets) {
+                        try {
+                            sock.send(DatagramPacket(data, data.size, InetAddress.getByName(target), controlPort))
+                        } catch (_: Exception) {}
+                    }
+
                     try {
                         for (ip in ips) {
                             val parts = ip.split(".")
                             if (parts.size == 4) {
-                                val subnetBroadcast = "${parts[0]}.${parts[1]}.${parts[2]}.255"
-                                val addr = InetAddress.getByName(subnetBroadcast)
-                                sock.send(DatagramPacket(data, data.size, addr, controlPort))
+                                val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
+                                val subnetBroadcast = "$prefix.255"
+                                try {
+                                    sock.send(DatagramPacket(data, data.size, InetAddress.getByName(subnetBroadcast), controlPort))
+                                } catch (_: Exception) {}
+                                if (parts[3] != "1") {
+                                    try {
+                                        sock.send(DatagramPacket(data, data.size, InetAddress.getByName("$prefix.1"), controlPort))
+                                    } catch (_: Exception) {}
+                                }
                             }
                         }
                     } catch (_: Exception) {}
@@ -423,7 +447,14 @@ class ControlChannel(
             }
         }
 
-        fun sendPreStreamBeacon() {
+        fun isOwnLocalIp(ip: String?): Boolean {
+            if (ip.isNullOrBlank()) return false
+            val trimmed = ip.trim()
+            if (trimmed == "127.0.0.1" || trimmed == "0.0.0.0" || trimmed == "255.255.255.255") return true
+            return getLocalIpv4Addresses().contains(trimmed)
+        }
+
+        fun sendPreStreamBeacon(targetPcIp: String? = null) {
             kotlin.concurrent.thread(name = "PreStreamBeaconSender", isDaemon = true) {
                 try {
                     val sock = DatagramSocket().apply { broadcast = true }
@@ -441,8 +472,22 @@ class ControlChannel(
                         put("mic_streaming", AudioStreamService.isMicStreaming)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
-                    val broadcastAddr = java.net.InetAddress.getByName("255.255.255.255")
-                    sock.send(DatagramPacket(data, data.size, broadcastAddr, 5005))
+                    try {
+                        val broadcastAddr = java.net.InetAddress.getByName("255.255.255.255")
+                        sock.send(DatagramPacket(data, data.size, broadcastAddr, 5005))
+                    } catch (_: Exception) {}
+
+                    val unicastTargets = mutableSetOf<String>()
+                    targetPcIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+                    lastKnownPcIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+                    AudioNative.nativeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+
+                    for (target in unicastTargets) {
+                        try {
+                            sock.send(DatagramPacket(data, data.size, java.net.InetAddress.getByName(target), 5005))
+                        } catch (_: Exception) {}
+                    }
+
                     for (ip in ips) {
                         val parts = ip.split(".")
                         if (parts.size == 4 && !parts[0].startsWith("127")) {
@@ -450,6 +495,11 @@ class ControlChannel(
                             try {
                                 sock.send(DatagramPacket(data, data.size, java.net.InetAddress.getByName("$prefix.255"), 5005))
                             } catch (_: Exception) {}
+                            if (parts[3] != "1") {
+                                try {
+                                    sock.send(DatagramPacket(data, data.size, java.net.InetAddress.getByName("$prefix.1"), 5005))
+                                } catch (_: Exception) {}
+                            }
                         }
                     }
                     sock.close()

@@ -1,4 +1,4 @@
-"""
+﻿"""
 build_exe.py — Build PhoneSpeaker.exe using PyInstaller.
 
 Creates venv if needed, installs requirements, then runs PyInstaller.
@@ -213,24 +213,6 @@ cat > "$INSTALL_DIR/PhoneSpeaker-v2" <<'EOF'
 #!/usr/bin/env bash
 mkdir -p "$HOME/.config/PhoneSpeaker"
 
-# On Linux with PipeWire/PulseAudio: create a silent virtual sink so
-# audio streams to the phone only (PC speakers stay silent).
-MOD_ID=""
-if command -v pactl >/dev/null 2>&1; then
-    pactl unload-module module-null-sink 2>/dev/null || true
-    MOD_ID=$(pactl load-module module-null-sink sink_name=PhoneSpeaker_Only sink_properties=device.description="PhoneSpeaker_Only" 2>/dev/null)
-    pactl set-default-sink PhoneSpeaker_Only 2>/dev/null || true
-    pactl set-sink-mute PhoneSpeaker_Only 0 2>/dev/null || true
-    pactl set-sink-volume PhoneSpeaker_Only 100% 2>/dev/null || true
-fi
-
-cleanup() {
-    if [ -n "$MOD_ID" ]; then
-        pactl unload-module "$MOD_ID" 2>/dev/null || true
-    fi
-}
-trap cleanup EXIT INT TERM
-
 PYTHON="$HOME/.local/opt/phonespeaker/phonespeaker-pc/.venv-linux/bin/python"
 [ -x "$PYTHON" ] || PYTHON=python3
 "$PYTHON" "$HOME/.local/opt/phonespeaker/phonespeaker-pc/src/main.py" "$@" >>"$HOME/.config/PhoneSpeaker/startup.log" 2>&1
@@ -351,7 +333,7 @@ fi
 # 2. Install audio dependencies via Homebrew if available
 if command -v brew >/dev/null 2>&1; then
     echo "Installing audio drivers and codecs via Homebrew..."
-    brew install opus portaudio python-tk 2>/dev/null || true
+    brew install opus portaudio python-tk pillow numpy 2>/dev/null || true
     # Optionally install BlackHole 2ch for virtual loopback capture
     brew install --cask blackhole-2ch 2>/dev/null || true
 fi
@@ -366,7 +348,7 @@ tail -n+$ARCHIVE_LINE "$0" | tar -xz -C "$INSTALL_DIR"
 
 cd "$INSTALL_DIR/phonespeaker-pc"
 rm -rf .venv-macos
-python3 -m venv .venv-macos
+python3 -m venv --system-site-packages .venv-macos
 ./.venv-macos/bin/pip install --upgrade pip -q 2>/dev/null || true
 ./.venv-macos/bin/pip install numpy psutil Pillow qrcode -q 2>/dev/null || true
 ./.venv-macos/bin/pip install soxr pyaudio pystray -q 2>/dev/null || true
@@ -400,15 +382,35 @@ cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>PhoneSpeaker requires microphone access for PC microphone streaming.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>PhoneSpeaker uses your local network (UDP 5004, 5005, 5006) for low-latency audio streaming and device discovery.</string>
 </dict>
 </plist>
 EOF
 
-cat > "$APP_DIR/Contents/MacOS/phonespeaker" <<EOF
+cat > "$APP_DIR/Contents/MacOS/phonespeaker" <<'EOF'
 #!/usr/bin/env bash
-export PATH="/opt/homebrew/bin:/usr/local/bin:\$PATH"
-mkdir -p "\$HOME/Library/Application Support/PhoneSpeaker"
-exec "$INSTALL_DIR/phonespeaker-pc/.venv-macos/bin/python" "$INSTALL_DIR/phonespeaker-pc/src/main.py" "\$@" >>"\$HOME/Library/Application Support/PhoneSpeaker/startup.log" 2>&1
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+mkdir -p "$HOME/Library/Application Support/PhoneSpeaker"
+LOG_FILE="$HOME/Library/Application Support/PhoneSpeaker/startup.log"
+
+PYTHON="$HOME/Library/Application Support/PhoneSpeaker/app/phonespeaker-pc/.venv-macos/bin/python"
+if ! "$PYTHON" -c "import tkinter" >/dev/null 2>&1; then
+    if [ -x "/opt/homebrew/bin/python3" ] && /opt/homebrew/bin/python3 -c "import tkinter" >/dev/null 2>&1; then
+        PYTHON="/opt/homebrew/bin/python3"
+    elif python3 -c "import tkinter" >/dev/null 2>&1; then
+        PYTHON="python3"
+    fi
+fi
+
+"$PYTHON" "$HOME/Library/Application Support/PhoneSpeaker/app/phonespeaker-pc/src/main.py" "$@" >>"$LOG_FILE" 2>&1 &
+APP_PID=$!
+sleep 1
+if ! kill -0 $APP_PID 2>/dev/null; then
+    echo "PhoneSpeaker exited on launch. Recent log output:" >&2
+    tail -n 25 "$LOG_FILE" >&2
+fi
+wait $APP_PID 2>/dev/null || true
 EOF
 chmod +x "$APP_DIR/Contents/MacOS/phonespeaker"
 

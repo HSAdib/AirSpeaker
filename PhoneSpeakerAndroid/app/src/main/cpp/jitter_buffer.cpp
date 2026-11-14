@@ -108,7 +108,7 @@ int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
         mCurrentRxPps = 0;
     }
 
-    if (!mHasStarted || sinceLastRxMs > 600) {
+    if (!mHasStarted || sinceLastRxMs > 800) {
         mHasStarted = false;
         mIsPrebuffering = true;
         std::memset(out_samples, 0, needed_samples * sizeof(int16_t));
@@ -122,10 +122,10 @@ int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
         : 0.0f;
     float currentBufferMs = (mPacketMap.size() * mPacketDurationMs) + fifoMs;
 
-    // Only prebuffer once at the very start of a stream (never pause mid-stream!)
+    // Only prebuffer once at stream startup (never re-enter prebuffering mid-stream!)
     if (mIsPrebuffering) {
-        float startThreshold = std::min(mTargetBufferMs * 0.6f, 20.0f);
-        if (currentBufferMs < startThreshold && mPacketMap.size() < 2) {
+        float startThreshold = std::min(mTargetBufferMs * 0.5f, 15.0f);
+        if (currentBufferMs < startThreshold && mPacketMap.size() < 3) {
             std::memset(out_samples, 0, needed_samples * sizeof(int16_t));
             return num_frames;
         }
@@ -162,8 +162,9 @@ void JitterBuffer::popNextPacketOrConceal() {
         : 0.0f;
     float totalQueuedMs = (mPacketMap.size() * mPacketDurationMs) + fifoMs;
 
-    // Soft anti-drift: only trim if excess exceeds target + 50ms
-    if (totalQueuedMs > (mTargetBufferMs + 50.0f) && mPacketMap.size() > 4) {
+    // Soft anti-drift: only trim if excess exceeds target + 85ms (and at least 100ms total)
+    float maxAllowedMs = std::max(100.0f, mTargetBufferMs + 85.0f);
+    if (totalQueuedMs > maxAllowedMs && mPacketMap.size() > 8) {
         auto oldest = mPacketMap.begin();
         if (oldest->second.header.codec != CODEC_PCM16 && !oldest->second.payload.empty()) {
             int16_t discard_buf[960 * 2];
@@ -181,11 +182,11 @@ void JitterBuffer::popNextPacketOrConceal() {
         mPacketMap.erase(oldest);
     }
 
-    // Only snap forward if gap > 4 or after > 2 consecutive losses so single-packet Opus FEC works
+    // If mExpectedSeq is missing but newer packets are already waiting in mPacketMap, snap forward after 1 loss or gap > 2
     if (!mPacketMap.empty()) {
         uint32_t earliestSeq = mPacketMap.begin()->first;
         int32_t gap = seqDiff(earliestSeq, mExpectedSeq);
-        if (gap > 4 || (mConsecutiveLosses > 2 && gap > 0)) {
+        if (gap > 2 || (mConsecutiveLosses >= 1 && gap > 0)) {
             mExpectedSeq = earliestSeq;
         }
     }
@@ -274,7 +275,8 @@ void JitterBuffer::popNextPacketOrConceal() {
         }
 
         int conceal_frames = mLastFrameSamplesPerCh;
-        if (mCurrentCodec == CODEC_PCM16) {
+        if (mCurrentCodec == CODEC_PCM16 || mPacketMap.empty()) {
+            // When mPacketMap is empty (jitter underrun), use smooth PCM decay so we don't corrupt Opus decoder state for the arriving packet!
             concealPcmGap(conceal_frames);
         } else {
             concealOpusGap(conceal_frames, mExpectedSeq);

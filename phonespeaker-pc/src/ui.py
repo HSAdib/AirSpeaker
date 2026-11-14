@@ -162,7 +162,7 @@ class PhoneSpeakerApp:
         self._connected_phone_name = "Waiting for phone..."
         self._last_os_vol: Optional[float] = None
         self._last_os_mute: Optional[bool] = None
-        self.sync_os_vol_var = tk.BooleanVar(value=True)
+        self.sync_os_vol_var = tk.BooleanVar(value=False)
         self._gain_sync_after_id: Optional[str] = None
         self._phone_audio_engine = self.cfg.get("audio_output_engine", "OBOE_LOW_LATENCY")
         self._phone_audio_fx = bool(self.cfg.get("enable_audio_effects", False))
@@ -245,6 +245,7 @@ class PhoneSpeakerApp:
             on_config_sync=self._on_config_sync_received,
         )
         self._control_listener.start()
+        self._control_listener.set_target_ip(self.ip_var.get().strip())
 
         self._schedule_ui_update()
 
@@ -1748,6 +1749,8 @@ class PhoneSpeakerApp:
             self.conn_device_ip_var.set("Auto-Discovery active (waiting for phone beacon...)")
             return
         self._manual_ip_override = new_ip
+        if self._control_listener:
+            self._control_listener.set_target_ip(new_ip)
         self.phone_ip_var.set(f"Phone: {new_ip}")
         self.conn_device_ip_var.set(f"{new_ip}  •  TARGET SET")
         self._register_party_device(new_ip, "Manual Device", new_port)
@@ -2133,6 +2136,8 @@ class PhoneSpeakerApp:
 
         direction = self.direction_var.get()
         target_ip, target_port = self._sanitize_ip_and_port()
+        if self._control_listener and target_ip:
+            self._control_listener.set_target_ip(target_ip)
         if as_party:
             if not target_ip and self._party_devices:
                 target_ip = next(iter(self._party_devices))
@@ -2463,7 +2468,8 @@ class PhoneSpeakerApp:
         if getattr(self, "sync_os_vol_var", None) and self.sync_os_vol_var.get():
             if not hasattr(self, "_last_vol_poll"):
                 self._last_vol_poll = 0.0
-            if (now - self._last_vol_poll) >= 0.10:
+            poll_interval = 1.0 if not sys.platform.startswith("win") else 0.25
+            if (now - self._last_vol_poll) >= poll_interval:
                 self._last_vol_poll = now
                 os_state = get_system_volume_and_mute()
                 if os_state is not None:

@@ -218,6 +218,14 @@ def _list_linux_pulse_monitors() -> List[dict]:
         return []
     devices = []
     try:
+        res_mod = subprocess.run(["pactl", "list", "short", "modules"], capture_output=True, text=True, timeout=2)
+        if res_mod.returncode == 0 and "PhoneSpeaker_Only" in res_mod.stdout:
+            for line in res_mod.stdout.splitlines():
+                if "PhoneSpeaker_Only" in line:
+                    mod_id = line.split("\t")[0].strip()
+                    if mod_id.isdigit():
+                        subprocess.run(["pactl", "unload-module", mod_id], capture_output=True, timeout=2)
+
         default_sink = ""
         res_def = subprocess.run(
             ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2
@@ -451,10 +459,10 @@ class AudioCapture:
             "--format=s16le",
             f"--rate={TARGET_RATE}",
             f"--channels={TARGET_CHANNELS}",
-            "--latency-msec=5",
+            "--latency-msec=15",
         ]
-        if source_name and source_name != "default" and source_name != "@DEFAULT_MONITOR@":
-            cmd.append(f"--device={source_name}")
+        dev_arg = source_name if (source_name and source_name != "default") else "@DEFAULT_MONITOR@"
+        cmd.append(f"--device={dev_arg}")
 
         try:
             self._parec_proc = subprocess.Popen(

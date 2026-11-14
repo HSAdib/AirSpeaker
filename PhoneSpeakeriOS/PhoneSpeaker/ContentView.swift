@@ -123,7 +123,10 @@ struct PlayerTabView: View {
                         .cornerRadius(8)
                     if !manualIpInput.isEmpty {
                         Button("Apply") {
-                            engine.connectedServerIp = manualIpInput
+                            let trimmed = manualIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            engine.connectedServerIp = trimmed
+                            engine.broadcastBeacon()
+                            engine.sendConfigSync(targetIp: trimmed)
                         }
                         .foregroundColor(.cyan)
                     }

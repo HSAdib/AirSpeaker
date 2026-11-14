@@ -152,6 +152,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     private var atomicRelayActive: Bool = false
     private var atomicConnectedServerIp: String = ""
     private var isMicRunning: Bool = false
+    private var isPrebufferingAudio: Bool = true
 
     // MARK: - Audio Engine Components
     private let audioEngine = AVAudioEngine()
@@ -256,6 +257,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         if !audioEngine.isRunning {
             try? audioEngine.start()
         }
+        isPrebufferingAudio = true
         playerNode.play()
 
         if !manualHost.isEmpty {
@@ -358,6 +360,15 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             inet_ntop(AF_INET, &senderAddr.sin_addr, &senderIpStr, socklen_t(INET_ADDRSTRLEN))
             let senderIp = String(cString: senderIpStr)
 
+            if atomicConnectedServerIp.isEmpty && senderIp != "127.0.0.1" {
+                atomicConnectedServerIp = senderIp
+                DispatchQueue.main.async { [weak self] in
+                    if self?.connectedServerIp.isEmpty == true {
+                        self?.connectedServerIp = senderIp
+                    }
+                }
+            }
+
             // Parse Little-Endian 12-Byte Header:
             // bytes[0..3]: seq (UInt32 LE)
             // bytes[4..7]: timestamp_ms (UInt32 LE)
@@ -428,8 +439,8 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             let frameCount = AVAudioFrameCount(channels == 1 ? sampleCount : (sampleCount / 2))
             guard frameCount > 0 else { continue }
 
-            // Cap queued buffers to max(3, bufferTargetMs / 5) so latency never drifts!
-            let maxQueued = max(3, curTargetMs / 5)
+            // Cap queued buffers to max(12, bufferTargetMs * 2 / 5) so Wi-Fi bursts buffer smoothly!
+            let maxQueued = max(12, (curTargetMs * 2) / 5)
             if audioBufferQueueCount.value >= maxQueued {
                 atomicUnderruns.increment()
                 continue
@@ -461,9 +472,20 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                     }
                 }
 
+                let minPrebuffer = max(3, curTargetMs / 5)
+                if audioBufferQueueCount.value == 0 {
+                    isPrebufferingAudio = true
+                    playerNode.pause()
+                }
                 audioBufferQueueCount.increment()
                 playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
                     self?.audioBufferQueueCount.decrement()
+                }
+                if isPrebufferingAudio && audioBufferQueueCount.value >= minPrebuffer {
+                    isPrebufferingAudio = false
+                    if !playerNode.isPlaying {
+                        playerNode.play()
+                    }
                 }
             }
         }
@@ -1097,12 +1119,22 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     public func broadcastControlMessage(_ dict: [String: Any]) {
         sendControlMessage(dict, toIp: "255.255.255.255")
 
-        // Also broadcast to local subnet
+        // Unicast to known connected Server PC and party host
+        if !connectedServerIp.isEmpty {
+            sendControlMessage(dict, toIp: connectedServerIp)
+        }
+        if !currentPartyHostIp.isEmpty {
+            sendControlMessage(dict, toIp: currentPartyHostIp)
+        }
+
+        // Also broadcast to local subnet and gateway
         let localIp = localIpAddress
         let parts = localIp.split(separator: ".")
         if parts.count == 4 {
             let subnetBcast = "\(parts[0]).\(parts[1]).\(parts[2]).255"
             sendControlMessage(dict, toIp: subnetBcast)
+            let gatewayIp = "\(parts[0]).\(parts[1]).\(parts[2]).1"
+            sendControlMessage(dict, toIp: gatewayIp)
         }
     }
 

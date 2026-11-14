@@ -128,7 +128,7 @@ def list_real_adapters() -> List[Dict[str, Any]]:
 # Bounded audio frame ring buffer (lock-free via queue)
 # ---------------------------------------------------------------------------
 
-QUEUE_MAX_FRAMES = 30  # ~150ms at 5ms/frame
+QUEUE_MAX_FRAMES = 60  # ~300ms cushion at 5ms/frame
 
 
 class AudioQueue:
@@ -151,6 +151,12 @@ class AudioQueue:
     def get_nowait(self) -> Optional[bytes]:
         try:
             return self._q.get_nowait()
+        except queue.Empty:
+            return None
+
+    def get(self, timeout: float = 0.005) -> Optional[bytes]:
+        try:
+            return self._q.get(timeout=timeout)
         except queue.Empty:
             return None
 
@@ -265,7 +271,7 @@ class UDPSender:
             return
         self._running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
 
         with self._lock:
             target_ip = self._target_ip
@@ -313,7 +319,7 @@ class UDPSender:
                         except Exception:
                             pass
                     self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                    self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
                     logger.info("UDPSender recreated unbound socket for subnet switch to %s", target_ip)
                 except Exception as exc:
                     logger.warning("Error recreating socket in update_target: %s", exc)
@@ -419,13 +425,13 @@ class UDPSender:
         return header + pcm_frame
 
     def _run(self) -> None:
-        """Main sender loop — strictly paced at frame_ms intervals."""
+        """Main sender loop — steady 5ms pacing without GIL spin or burst drops."""
         set_timer_resolution(1)
 
         with self._lock:
             frame_ms = self._frame_ms
         interval = frame_ms / 1000.0
-        silence_threshold = 0.085  # Only send keep-alive silence after 85ms of true audio silence (never between 10-20ms WASAPI callbacks!)
+        silence_threshold = 0.085
         silence_frame = (
             SILENCE_PCM_20MS if frame_ms == 20
             else (SILENCE_PCM_10MS if frame_ms == 10 else SILENCE_PCM_5MS)
@@ -437,7 +443,6 @@ class UDPSender:
         pps_count = 0
 
         while self._running:
-            now = time.monotonic()
             with self._lock:
                 target_ip = self._target_ip
                 target_port = self._target_port
@@ -460,67 +465,78 @@ class UDPSender:
                         SILENCE_PCM_20MS if frame_ms == 20
                         else (SILENCE_PCM_10MS if frame_ms == 10 else SILENCE_PCM_5MS)
                     )
+                    next_tick = time.monotonic()
 
-            if targets_snapshot and sock is not None:
-                frame = self._audio_queue.get_nowait()
+            if not targets_snapshot or sock is None:
+                time.sleep(0.010)
+                next_tick = time.monotonic()
+                continue
 
-                if frame is not None:
-                    last_audio_time = now
-                    packet = self._build_packet(frame) if send_enabled else None
+            # Pull next audio frame; if empty, block up to `interval` (5ms) releasing the GIL
+            frame = self._audio_queue.get_nowait()
+            if frame is None:
+                frame = self._audio_queue.get(timeout=interval)
+
+            now = time.monotonic()
+            if frame is not None:
+                last_audio_time = now
+                packet = self._build_packet(frame) if send_enabled else None
+            else:
+                # We already waited `interval` (5ms) inside get(timeout=interval)
+                if (now - last_audio_time) >= silence_threshold and send_enabled:
+                    packet = self._build_packet(silence_frame)
                 else:
-                    # Check if we need silence / keep-alive
-                    silence_needed = (now - last_audio_time) >= silence_threshold
-                    if silence_needed and send_enabled:
-                        packet = self._build_packet(silence_frame)
-                    else:
-                        packet = None
+                    packet = None
+                next_tick = now
 
-                if packet is not None and send_enabled:
-                    sent_any = False
-                    for t_ip, t_port in targets_snapshot:
+            if packet is not None and send_enabled:
+                sent_any = False
+                for t_ip, t_port in targets_snapshot:
+                    try:
+                        sock.sendto(packet, (t_ip, t_port))
+                        sent_any = True
+                    except OSError as exc:
+                        logger.warning("Send error on bound socket (%s), falling back to unbound socket", exc)
                         try:
+                            with self._lock:
+                                if self._sock:
+                                    try:
+                                        self._sock.close()
+                                    except Exception:
+                                        pass
+                                self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                                sock = self._sock
                             sock.sendto(packet, (t_ip, t_port))
                             sent_any = True
-                        except OSError as exc:
-                            logger.warning("Send error on bound socket (%s), falling back to unbound socket", exc)
-                            try:
-                                with self._lock:
-                                    if self._sock:
-                                        try:
-                                            self._sock.close()
-                                        except Exception:
-                                            pass
-                                    self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                                    self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
-                                    sock = self._sock
-                                sock.sendto(packet, (t_ip, t_port))
-                                sent_any = True
-                            except Exception as retry_exc:
-                                logger.error("Retry send error on unbound socket: %s", retry_exc)
-                        except Exception as exc:
-                            logger.error("Send error to %s:%d: %s", t_ip, t_port, exc)
-                    if sent_any:
-                        pps_count += 1
+                        except Exception as retry_exc:
+                            logger.error("Retry send error on unbound socket: %s", retry_exc)
+                    except Exception as exc:
+                        logger.error("Send error to %s:%d: %s", t_ip, t_port, exc)
+                if sent_any:
+                    pps_count += 1
 
             # PPS stat reporting (every 1 second)
-            elapsed = now - pps_window_start
+            now_stat = time.monotonic()
+            elapsed = now_stat - pps_window_start
             if elapsed >= 1.0:
                 if self._on_stats:
                     try:
-                        self._on_stats(int(pps_count / elapsed))
+                        self._on_stats(int(round(pps_count / elapsed)))
                     except Exception:
                         pass
                 pps_count = 0
-                pps_window_start = now
+                pps_window_start = now_stat
 
-            # Strict pacing
-            next_tick += interval
-            sleep_time = next_tick - time.monotonic()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            elif sleep_time < -interval:
-                # We're behind — reset tick to now to avoid spiral
-                next_tick = time.monotonic()
+            if frame is not None:
+                next_tick += interval
+                now_after = time.monotonic()
+                sleep_time = next_tick - now_after
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                elif sleep_time < -0.040:
+                    # Only re-anchor if more than 40ms (8 frames) behind
+                    next_tick = now_after
 
 
 # ---------------------------------------------------------------------------
@@ -548,9 +564,13 @@ class ControlListener:
         self._announce_thread: Optional[threading.Thread] = None
         self._running = False
         self._party_mode_enabled: bool = False
+        self._target_ip: str = ""
 
     def set_party_mode(self, enabled: bool) -> None:
         self._party_mode_enabled = bool(enabled)
+
+    def set_target_ip(self, ip: str) -> None:
+        self._target_ip = (ip or "").strip()
 
     def start(self) -> None:
         if self._running:
@@ -558,6 +578,7 @@ class ControlListener:
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self._sock.bind(("", self._bind_port))
             self._sock.settimeout(0.5)
         except Exception as exc:
@@ -600,17 +621,27 @@ class ControlListener:
                 adapters = list_real_adapters()
                 sock = self._sock
                 if sock is not None:
+                    # 1. Direct unicast to manually configured Phone IP if set
+                    if self._target_ip and not self._target_ip.startswith("127."):
+                        try:
+                            sock.sendto(msg, (self._target_ip, self._bind_port))
+                        except Exception:
+                            pass
+                    # 2. Global broadcast
+                    try:
+                        sock.sendto(msg, ("255.255.255.255", self._bind_port))
+                    except Exception:
+                        pass
+                    # 3. Subnet broadcast & gateway for each adapter
                     for a in adapters:
                         ip = a.get("ip", "")
                         parts = ip.split(".")
                         if len(parts) == 4 and not parts[0].startswith("127"):
                             prefix = f"{parts[0]}.{parts[1]}.{parts[2]}"
-                            # Subnet broadcast
                             try:
                                 sock.sendto(msg, (f"{prefix}.255", self._bind_port))
                             except Exception:
                                 pass
-                            # Subnet gateway (e.g. Phone Hotspot / USB Tether host at .1)
                             if parts[3] != "1":
                                 try:
                                     sock.sendto(msg, (f"{prefix}.1", self._bind_port))
@@ -619,7 +650,7 @@ class ControlListener:
             except Exception as exc:
                 logger.debug("Announce loop error: %s", exc)
 
-            for _ in range(15):
+            for _ in range(10):
                 if not self._running:
                     break
                 time.sleep(0.1)
@@ -632,19 +663,21 @@ class ControlListener:
                     msg = json.loads(data.decode("utf-8"))
                     msg["_sender_ip"] = addr[0]
                     msg_type = msg.get("type", "")
-                    if msg_type == "BEACON":
+                    if msg_type in ("BEACON", "STATS", "CONFIG_SYNC"):
                         try:
                             reply = json.dumps({
                                 "type": "PC_ANNOUNCE",
                                 "app": "PhoneSpeakerPC",
                                 "version": 2,
                                 "pc_name": socket.gethostname(),
+                                "party_mode": bool(self._party_mode_enabled),
+                                "is_party_host": bool(self._party_mode_enabled),
                             }).encode("utf-8")
                             self._sock.sendto(reply, (addr[0], self._bind_port))
                         except Exception:
                             pass
-                        if self._on_beacon:
-                            self._on_beacon(msg)
+                    if msg_type == "BEACON" and self._on_beacon:
+                        self._on_beacon(msg)
                     elif msg_type == "STATS" and self._on_stats:
                         self._on_stats(msg)
                     elif msg_type == "CONFIG_SYNC" and self._on_config_sync:
