@@ -18,6 +18,9 @@ phonespeaker-pc/dist/
 **/build/
 .cxx/
 local.properties
+keystore.properties
+*.jks
+*.keystore
 gradle-8.7/
 PhoneSpeakerAndroid/.gradle/
 PhoneSpeakerAndroid/app/build/

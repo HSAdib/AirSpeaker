@@ -80,6 +80,7 @@ class MainActivity : AppCompatActivity() {
     private var currentFrameMs = 5
     private var userEditedPcIp: String? = null
     private var lastAppliedDiscoveredPcIp: String? = null
+    private var lastAdvLogTime: Long = 0L
 
     private val bitrateValues = listOf("10", "24", "32", "64", "96", "128", "160", "192", "256", "320")
 
@@ -1566,17 +1567,20 @@ class MainActivity : AppCompatActivity() {
             binding.tvBufferLevel.text = String.format("%.1f ms", safeBuffer)
             val targetText = if (target % 1f == 0f) "${target.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", target)
             binding.tvActiveTarget.text = targetText
-            if (binding.rbBufAuto.isChecked && !binding.sliderTargetBuffer.isPressed) {
-                if (kotlin.math.abs(binding.sliderTargetBuffer.value - target) > 0.1f) {
-                    binding.sliderTargetBuffer.value = target
-                    binding.tvTargetBufferValue.text = targetText
-                }
-            }
+            // Section 9: Do not mutate Material Slider with callback telemetry values
             binding.tvPps.text = "${stats.rxPps} pps"
             binding.tvUnderruns.text = "${stats.underruns}"
             binding.tvLostPackets.text = "${stats.lostPackets}"
             binding.tvLatePackets.text = "${stats.latePackets}"
             binding.tvCodec.text = if (stats.codec == 1) "Opus" else "PCM16"
+
+            // Once-per-second advanced telemetry logging
+            val adv = AudioNative.getAdvancedStats()
+            val currentTimeMs = SystemClock.elapsedRealtime()
+            if (currentTimeMs - lastAdvLogTime >= 1000L) {
+                lastAdvLogTime = currentTimeMs
+                Log.d("NativeStats", "Telemetry: buffer=${adv.bufferMs}ms target=${adv.targetMs}ms underruns=${adv.underruns} lost=${adv.lostPackets} late=${adv.latePackets} dup=${adv.duplicatePackets} concealed=${adv.concealedPackets} driftDrops=${adv.intentionalDriftDrops} pktQueueDrops=${adv.packetQueueOverflowDrops} ringDrops=${adv.pcmRingOverflowDrops} ringUnderruns=${adv.pcmRingUnderrunFrames} availFrames=${adv.pcmRingAvailableFrames} avgCbMicros=${String.format(java.util.Locale.US, "%.1f", adv.callbackAverageMicros)} maxCbMicros=${adv.callbackMaxMicros} misses=${adv.callbackDeadlineMisses} pps=${String.format(java.util.Locale.US, "%.1f", adv.rxPps)}")
+            }
 
             // Auto-update connected PC IP if empty / network changed
             val rawPcIp = AudioStreamService.activeControlChannel?.getActivePcIp()

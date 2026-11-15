@@ -6,12 +6,20 @@ static inline int32_t seqDiff(uint32_t a, uint32_t b) {
     return static_cast<int32_t>(a - b);
 }
 
+static inline int64_t getNowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
+
 JitterBuffer::JitterBuffer() {
     auto now = std::chrono::steady_clock::now();
-    mLastPacketRecvTime = now;
-    mLastPpsTime = now;
+    int64_t nowMs = getNowMs();
+    mLastPacketRecvTimeMs.store(nowMs, std::memory_order_relaxed);
+    mLastPpsCalcTimeMs.store(nowMs, std::memory_order_relaxed);
     mLastUnderrunAdaptTime = now;
     mLastDecayAdaptTime = now;
+
     mOpusDecoder.init(48000, 2);
     mLastValidFrame.resize(480 * 2, 0);
 }
@@ -21,14 +29,14 @@ JitterBuffer::~JitterBuffer() {
 }
 
 void JitterBuffer::start() {
-    if (mIsRunning.exchange(true)) return;
+    if (mIsRunning.exchange(true, std::memory_order_acq_rel)) return;
     reset();
-    mIsRunning.store(true);
+    mIsRunning.store(true, std::memory_order_release);
     mDecodeThread = std::thread(&JitterBuffer::decodeWorkerLoop, this);
 }
 
 void JitterBuffer::stop() {
-    if (!mIsRunning.exchange(false)) return;
+    if (!mIsRunning.exchange(false, std::memory_order_acq_rel)) return;
     {
         std::lock_guard<std::mutex> lock(mConditionMutex);
         mCondition.notify_all();
@@ -43,8 +51,11 @@ void JitterBuffer::reset() {
     {
         std::lock_guard<std::mutex> lock(mPacketMutex);
         mPacketMap.clear();
+        mQueuedPacketCount.store(0, std::memory_order_relaxed);
     }
     mPcmRingBuffer.reset();
+
+    // Reset worker state
     mHasStarted = false;
     mIsPrebuffering = true;
     mExpectedSeq = 0;
@@ -52,45 +63,37 @@ void JitterBuffer::reset() {
     mLastFrameSamplesPerCh = 240;
     mPacketDurationMs = 5.0f;
     std::fill(mLastValidFrame.begin(), mLastValidFrame.end(), 0);
+
+    mWorkerExpectedSeq.store(0, std::memory_order_relaxed);
 }
 
 void JitterBuffer::pushPacket(const AudioPacket& packet) {
-    auto now = std::chrono::steady_clock::now();
-    mLastPacketRecvTime = now;
+    if (packet.payload.empty() || packet.payload.size() > 2048) {
+        return;
+    }
 
+    int64_t nowMs = getNowMs();
+    mLastPacketRecvTimeMs.store(nowMs, std::memory_order_relaxed);
+
+    // Calculate packets-per-second (PPS) atomically
     mRxPacketsInterval.fetch_add(1, std::memory_order_relaxed);
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPpsTime).count();
-    if (elapsed >= 1000) {
-        mCurrentRxPps.store((mRxPacketsInterval.exchange(0) * 1000) / elapsed, std::memory_order_relaxed);
-        mLastPpsTime = now;
+    int64_t lastPpsMs = mLastPpsCalcTimeMs.load(std::memory_order_relaxed);
+    int64_t elapsedMs = nowMs - lastPpsMs;
+    if (elapsedMs >= 1000) {
+        if (mLastPpsCalcTimeMs.compare_exchange_strong(lastPpsMs, nowMs, std::memory_order_relaxed)) {
+            uint64_t count = mRxPacketsInterval.exchange(0, std::memory_order_relaxed);
+            mCurrentRxPps.store((count * 1000) / std::max<int64_t>(1, elapsedMs), std::memory_order_relaxed);
+        }
     }
 
-    mCurrentCodec = packet.header.codec;
-    mChannels = 2; // Output stream is always stereo
-    if (packet.header.sample_rate_div100 > 0) {
-        mSampleRate = packet.header.sample_rate_div100 * 100;
-    }
-
+    // Packet insertion and bounded queue management
     {
         std::lock_guard<std::mutex> lock(mPacketMutex);
 
-        if (!mHasStarted) {
-            mPacketMap.clear();
-            mPcmRingBuffer.reset();
-            mExpectedSeq = packet.header.seq;
-            mConsecutiveLosses = 0;
-            mIsPrebuffering = true;
-            mHasStarted = true;
-        } else {
-            int32_t diff = seqDiff(packet.header.seq, mExpectedSeq);
-            if (diff < -100 || diff > 1000) {
-                // Large sequence discontinuity (sender restarted or jumped)
-                mPacketMap.clear();
-                mPcmRingBuffer.reset();
-                mExpectedSeq = packet.header.seq;
-                mConsecutiveLosses = 0;
-                mIsPrebuffering = false;
-            } else if (diff < 0) {
+        uint32_t expected = mWorkerExpectedSeq.load(std::memory_order_relaxed);
+        if (expected > 0) {
+            int32_t diff = seqDiff(packet.header.seq, expected);
+            if (diff < 0 && diff > -1000) {
                 mLateCount.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
@@ -103,34 +106,34 @@ void JitterBuffer::pushPacket(const AudioPacket& packet) {
 
         mPacketMap[packet.header.seq] = packet;
 
-        // Bounded capacity on packet map (100 packets = ~500ms)
-        while (mPacketMap.size() > 100) {
+        // Section 4: Hard capacity bound (256 packets = ~1.28s at 5ms/frame)
+        while (mPacketMap.size() > MAX_PACKET_QUEUE_SIZE) {
             mPacketMap.erase(mPacketMap.begin());
-            if (!mPacketMap.empty() && seqDiff(mPacketMap.begin()->first, mExpectedSeq) > 0) {
-                mExpectedSeq = mPacketMap.begin()->first;
-            }
+            mPacketQueueOverflowDrops.fetch_add(1, std::memory_order_relaxed);
         }
+
+        mQueuedPacketCount.store(mPacketMap.size(), std::memory_order_relaxed);
     }
 
-    // Notify decode worker that new data has arrived
+    // Notify decode worker that data is available
     mCondition.notify_one();
 }
 
 int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
-    // REAL-TIME SAFE: No mutex, no allocations, no decoding, no vector resizing!
+    // REAL-TIME SAFE: Delegates directly to lock-free SPSC PCM Ring Buffer.
+    // ZERO mutexes, ZERO allocations, ZERO opus decodes.
     return mPcmRingBuffer.readFrames(out_samples, num_frames);
 }
 
 void JitterBuffer::decodeWorkerLoop() {
     int16_t decoded_buf[960 * 2]; // Scratch buffer for up to 20ms at 48kHz stereo
 
-    while (mIsRunning.load(std::memory_order_relaxed)) {
+    while (mIsRunning.load(std::memory_order_acquire)) {
         {
             std::unique_lock<std::mutex> lock(mConditionMutex);
             mCondition.wait_for(lock, std::chrono::milliseconds(3), [this] {
                 if (!mIsRunning.load(std::memory_order_relaxed)) return true;
-                std::lock_guard<std::mutex> pLock(mPacketMutex);
-                return !mPacketMap.empty();
+                return mQueuedPacketCount.load(std::memory_order_relaxed) > 0;
             });
         }
 
@@ -141,30 +144,43 @@ void JitterBuffer::decodeWorkerLoop() {
 }
 
 void JitterBuffer::processPackets(int16_t* decoded_buf) {
-    auto now = std::chrono::steady_clock::now();
-    auto sinceLastRxMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPacketRecvTime).count();
+    int64_t nowMs = getNowMs();
+    int64_t sinceLastRxMs = nowMs - mLastPacketRecvTimeMs.load(std::memory_order_relaxed);
+
     if (sinceLastRxMs > 1500) {
         mCurrentRxPps.store(0, std::memory_order_relaxed);
     }
+
     if (!mHasStarted || sinceLastRxMs > 800) {
         mHasStarted = false;
         mIsPrebuffering = true;
-        return;
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+        if (mPacketMap.empty()) return;
+
+        // Initialize from first available packet
+        auto first = mPacketMap.begin();
+        mExpectedSeq = first->first;
+        mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+        mCurrentCodec = first->second.header.codec;
+        mActiveCodec.store(mCurrentCodec, std::memory_order_relaxed);
+        if (first->second.header.sample_rate_div100 > 0) {
+            mSampleRate = first->second.header.sample_rate_div100 * 100;
+        }
+        mHasStarted = true;
     }
 
+    // Apply cross-thread configuration changes
+    mLocalTargetBufferMs = std::clamp(mConfiguredTargetBufferMs.load(std::memory_order_relaxed), 10.0f, 200.0f);
     adaptTargetBuffer();
+    mEffectiveTargetBufferMs.store(mLocalTargetBufferMs, std::memory_order_relaxed);
 
     float ringOccupiedMs = mPcmRingBuffer.getOccupiedMs(mSampleRate);
-    size_t packetQueueSize = 0;
-    {
-        std::lock_guard<std::mutex> lock(mPacketMutex);
-        packetQueueSize = mPacketMap.size();
-    }
+    size_t packetQueueSize = mQueuedPacketCount.load(std::memory_order_relaxed);
     float totalQueuedMs = (packetQueueSize * mPacketDurationMs) + ringOccupiedMs;
 
     // Startup prebuffering: wait until queued audio reaches configured target buffer
     if (mIsPrebuffering) {
-        float startThreshold = std::clamp(mTargetBufferMs, 10.0f, 200.0f);
+        float startThreshold = mLocalTargetBufferMs;
         int minPackets = std::max(2, static_cast<int>(startThreshold / std::max(1.0f, mPacketDurationMs)));
         if (totalQueuedMs < startThreshold && static_cast<int>(packetQueueSize) < minPackets) {
             return;
@@ -174,6 +190,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (!mPacketMap.empty()) {
             mExpectedSeq = mPacketMap.begin()->first;
+            mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
         }
     }
 
@@ -183,10 +200,12 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         {
             std::lock_guard<std::mutex> lock(mPacketMutex);
             float currentQueuedMs = (mPacketMap.size() * mPacketDurationMs) + mPcmRingBuffer.getOccupiedMs(mSampleRate);
-            if (currentQueuedMs > (mTargetBufferMs + 15.0f) && mPacketMap.size() > 4) {
+            if (currentQueuedMs > (mLocalTargetBufferMs + 15.0f) && mPacketMap.size() > 4) {
                 auto oldest = mPacketMap.begin();
                 mExpectedSeq = oldest->first + 1;
+                mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
                 mPacketMap.erase(oldest);
+                mQueuedPacketCount.store(mPacketMap.size(), std::memory_order_relaxed);
                 mIntentionalDriftDrops.fetch_add(1, std::memory_order_relaxed);
             }
         }
@@ -205,17 +224,19 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
                 break;
             }
 
-            // If sequence is far behind, catch up
+            // If sequence is far behind, catch up to prevent stale playout
             uint32_t earliestSeq = mPacketMap.begin()->first;
             int32_t gap = seqDiff(earliestSeq, mExpectedSeq);
             if (gap > 4 || (mConsecutiveLosses >= 2 && gap > 0)) {
                 mExpectedSeq = earliestSeq;
+                mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
             }
 
             auto it = mPacketMap.find(mExpectedSeq);
             if (it != mPacketMap.end()) {
                 pkt = it->second;
                 mPacketMap.erase(it);
+                mQueuedPacketCount.store(mPacketMap.size(), std::memory_order_relaxed);
                 has_packet = true;
             } else {
                 // Gap detected: check if next packet N+1 is available for Opus in-band FEC
@@ -265,7 +286,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
                 }
             }
 
-            // Stereo-coherent crossfade if recovering from packet loss (Checkpoint 5)
+            // Stereo-coherent crossfade on recovery from loss
             if (mConsecutiveLosses > 0 && total_frames > 0 && !mLastValidFrame.empty()) {
                 int fade_frames = std::min({32, total_frames, static_cast<int>(mLastValidFrame.size() / 2)});
                 if (fade_frames > 0) {
@@ -289,24 +310,25 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
 
             mConsecutiveLosses = 0;
             mExpectedSeq++;
+            mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
         } else {
             // Gap detected: frame mExpectedSeq is missing
             mLostCount.fetch_add(1, std::memory_order_relaxed);
 
             auto underrunNow = std::chrono::steady_clock::now();
-            if (mAutoMode.load()) {
+            if (mAutoMode.load(std::memory_order_relaxed)) {
                 auto sinceLastBumpMs = std::chrono::duration_cast<std::chrono::milliseconds>(underrunNow - mLastUnderrunAdaptTime).count();
                 if (sinceLastBumpMs >= 300) {
-                    mTargetBufferMs = std::min(200.0f, mTargetBufferMs + 5.0f);
+                    mLocalTargetBufferMs = std::min(200.0f, mLocalTargetBufferMs + 5.0f);
                     mLastUnderrunAdaptTime = underrunNow;
                 }
             }
 
             int total_frames = 0;
 
-            // Checkpoint 4: Opus FEC Sequencing
-            // If next packet N+1 is available in mPacketMap, decode it with decode_fec=true to reconstruct frame N.
-            // Packet N+1 remains in mPacketMap to be decoded normally with decode_fec=false on the next step!
+            // Opus In-Band FEC Sequencing:
+            // When packet N is missing and N+1 is present, decode N+1 with decode_fec=true for frame N.
+            // Packet N+1 remains in mPacketMap to be decoded normally with decode_fec=false on the next iteration!
             if (has_next_fec_candidate) {
                 int fec_decoded = mOpusDecoder.decode(next_pkt.payload.data(), next_pkt.payload.size(),
                                                       decoded_buf, mLastFrameSamplesPerCh, /*decode_fec=*/true);
@@ -340,6 +362,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
 
             mConsecutiveLosses++;
             mExpectedSeq++;
+            mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
 
             if (mConsecutiveLosses >= 8) {
                 mIsPrebuffering = true;
@@ -368,52 +391,53 @@ void JitterBuffer::concealPcmGap(int frames, int16_t* out_buf) {
 }
 
 void JitterBuffer::adaptTargetBuffer() {
-    if (!mAutoMode.load()) return;
+    if (!mAutoMode.load(std::memory_order_relaxed)) return;
     auto now = std::chrono::steady_clock::now();
     auto noUnderrunSec = std::chrono::duration_cast<std::chrono::seconds>(now - mLastUnderrunAdaptTime).count();
     auto decayIntervalSec = std::chrono::duration_cast<std::chrono::seconds>(now - mLastDecayAdaptTime).count();
 
     if (noUnderrunSec >= 10 && decayIntervalSec >= 10) {
-        mTargetBufferMs = std::max(15.0f, mTargetBufferMs - 2.5f);
+        mLocalTargetBufferMs = std::max(15.0f, mLocalTargetBufferMs - 2.5f);
         mLastDecayAdaptTime = now;
     }
 }
 
 void JitterBuffer::setTargetBufferMs(float target_ms) {
-    mTargetBufferMs = std::clamp(target_ms, 10.0f, 200.0f);
+    mConfiguredTargetBufferMs.store(std::clamp(target_ms, 10.0f, 200.0f), std::memory_order_relaxed);
 }
 
 float JitterBuffer::getTargetBufferMs() const {
-    return mTargetBufferMs;
+    return mEffectiveTargetBufferMs.load(std::memory_order_relaxed);
 }
 
 void JitterBuffer::setAutoMode(bool enabled) {
-    mAutoMode.store(enabled);
+    mAutoMode.store(enabled, std::memory_order_relaxed);
 }
 
 bool JitterBuffer::isAutoMode() const {
-    return mAutoMode.load();
+    return mAutoMode.load(std::memory_order_relaxed);
 }
 
-JitterStats JitterBuffer::getStats() {
-    JitterStats stats;
-    size_t packetCount = 0;
-    {
-        std::lock_guard<std::mutex> lock(mPacketMutex);
-        packetCount = mPacketMap.size();
-    }
+JitterStatsSnapshot JitterBuffer::getStatsSnapshot() const {
+    JitterStatsSnapshot stats;
+    size_t packetCount = mQueuedPacketCount.load(std::memory_order_relaxed);
     float ringMs = mPcmRingBuffer.getOccupiedMs(mSampleRate);
-    stats.buffer_ms = (packetCount * mPacketDurationMs) + ringMs;
-    stats.target_ms = mTargetBufferMs;
-    stats.underruns = mUnderrunCount.load(std::memory_order_relaxed) + mPcmRingBuffer.getUnderrunFrames() / 240;
-    stats.lost_packets = mLostCount.load(std::memory_order_relaxed);
-    stats.late_packets = mLateCount.load(std::memory_order_relaxed);
-    stats.rx_pps = mCurrentRxPps.load(std::memory_order_relaxed);
-    stats.active_codec = mCurrentCodec;
-    stats.auto_mode = mAutoMode.load();
-    stats.ring_occupied_frames = static_cast<uint32_t>(mPcmRingBuffer.getOccupiedFrames());
-    stats.ring_overflow_drops = mPcmRingBuffer.getOverflowDrops();
-    stats.concealed_packets = mConcealedPackets.load(std::memory_order_relaxed);
-    stats.intentional_drift_drops = mIntentionalDriftDrops.load(std::memory_order_relaxed);
+
+    stats.bufferMs = (packetCount * mPacketDurationMs) + ringMs;
+    stats.targetMs = mEffectiveTargetBufferMs.load(std::memory_order_relaxed);
+    stats.underruns = mUnderrunCount.load(std::memory_order_relaxed) + (mPcmRingBuffer.underrunFrames() / 240);
+    stats.lostPackets = mLostCount.load(std::memory_order_relaxed);
+    stats.latePackets = mLateCount.load(std::memory_order_relaxed);
+    stats.duplicatePackets = mDuplicatePackets.load(std::memory_order_relaxed);
+    stats.concealedPackets = mConcealedPackets.load(std::memory_order_relaxed);
+    stats.intentionalDriftDrops = mIntentionalDriftDrops.load(std::memory_order_relaxed);
+    stats.packetQueueOverflowDrops = mPacketQueueOverflowDrops.load(std::memory_order_relaxed);
+    stats.pcmRingOverflowDrops = mPcmRingBuffer.overflowDroppedFrames();
+    stats.pcmRingUnderrunFrames = mPcmRingBuffer.underrunFrames();
+    stats.pcmRingAvailableFrames = mPcmRingBuffer.availableFrames();
+    stats.rxPacketsPerSecond = mCurrentRxPps.load(std::memory_order_relaxed);
+    stats.activeCodec = mActiveCodec.load(std::memory_order_relaxed);
+    stats.autoMode = mAutoMode.load(std::memory_order_relaxed);
+
     return stats;
 }

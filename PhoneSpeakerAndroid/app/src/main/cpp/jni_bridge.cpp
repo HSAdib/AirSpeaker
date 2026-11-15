@@ -184,18 +184,52 @@ Java_com_hasan_phonespeaker_AudioNative_nativeGetStats(JNIEnv* env, jobject /*th
         statsArr[7] = gSavedAutoMode ? 1.0f : 0.0f;
         if (gAudioEngine) {
             JitterStats stats = gAudioEngine->getStats();
-            statsArr[0] = stats.buffer_ms;
-            statsArr[1] = stats.target_ms;
+            statsArr[0] = stats.bufferMs;
+            statsArr[1] = stats.targetMs;
             statsArr[2] = static_cast<float>(stats.underruns);
-            statsArr[3] = static_cast<float>(stats.lost_packets);
-            statsArr[4] = static_cast<float>(stats.late_packets);
-            statsArr[5] = static_cast<float>(stats.rx_pps);
-            statsArr[6] = static_cast<float>(stats.active_codec);
-            statsArr[7] = stats.auto_mode ? 1.0f : 0.0f;
+            statsArr[3] = static_cast<float>(stats.lostPackets);
+            statsArr[4] = static_cast<float>(stats.latePackets);
+            statsArr[5] = static_cast<float>(stats.rxPacketsPerSecond);
+            statsArr[6] = static_cast<float>(stats.activeCodec);
+            statsArr[7] = stats.autoMode ? 1.0f : 0.0f;
         }
     }
 
     env->SetFloatArrayRegion(result, 0, 8, statsArr);
+    return result;
+}
+
+JNIEXPORT jdoubleArray JNICALL
+Java_com_hasan_phonespeaker_AudioNative_nativeGetAdvancedStats(JNIEnv* env, jobject /*thiz*/) {
+    jdoubleArray result = env->NewDoubleArray(16);
+    if (!result) return nullptr;
+
+    jdouble statsArr[16] = {0.0};
+    {
+        std::lock_guard<std::mutex> lock(gEngineMutex);
+        statsArr[1] = static_cast<double>(gSavedTargetMs);
+        if (gAudioEngine) {
+            AdvancedEngineStats adv = gAudioEngine->getAdvancedStats();
+            statsArr[0] = static_cast<double>(adv.bufferMs);
+            statsArr[1] = static_cast<double>(adv.targetMs);
+            statsArr[2] = static_cast<double>(adv.underruns);
+            statsArr[3] = static_cast<double>(adv.lostPackets);
+            statsArr[4] = static_cast<double>(adv.latePackets);
+            statsArr[5] = static_cast<double>(adv.duplicatePackets);
+            statsArr[6] = static_cast<double>(adv.concealedPackets);
+            statsArr[7] = static_cast<double>(adv.intentionalDriftDrops);
+            statsArr[8] = static_cast<double>(adv.packetQueueOverflowDrops);
+            statsArr[9] = static_cast<double>(adv.pcmRingOverflowDrops);
+            statsArr[10] = static_cast<double>(adv.pcmRingUnderrunFrames);
+            statsArr[11] = static_cast<double>(adv.pcmRingAvailableFrames);
+            statsArr[12] = adv.callbackAverageMicros;
+            statsArr[13] = static_cast<double>(adv.callbackMaxMicros);
+            statsArr[14] = static_cast<double>(adv.callbackDeadlineMisses);
+            statsArr[15] = adv.rxPps;
+        }
+    }
+
+    env->SetDoubleArrayRegion(result, 0, 16, statsArr);
     return result;
 }
 

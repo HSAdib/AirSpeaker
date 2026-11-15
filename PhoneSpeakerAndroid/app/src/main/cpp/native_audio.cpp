@@ -3,9 +3,12 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <android/log.h>
+#include <cmath>
+#include <algorithm>
 
 #define TAG "NativeAudioEngine"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 NativeAudioEngine::NativeAudioEngine() {}
@@ -15,25 +18,29 @@ NativeAudioEngine::~NativeAudioEngine() {
 }
 
 bool NativeAudioEngine::start(int audio_port) {
-    if (mIsRunning.load()) return true;
+    std::lock_guard<std::mutex> lock(mStartStopMutex);
+    if (mIsRunning.load(std::memory_order_acquire)) return true;
 
     mAudioPort = audio_port;
-    mIsRunning.store(true);
-    mJitterBuffer.start();
 
-    // 1. Open UDP socket
+    // Reset instrumentation metrics
+    mTotalCallbackCount.store(0, std::memory_order_relaxed);
+    mTotalCallbackMicros.store(0, std::memory_order_relaxed);
+    mMaxCallbackMicros.store(0, std::memory_order_relaxed);
+    mDeadlineMisses.store(0, std::memory_order_relaxed);
+
+    // 1. Create UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
         LOGE("Failed to create UDP socket");
-        mIsRunning.store(false);
+        cleanupAfterFailedStart();
         return false;
     }
 
-    // Set socket receive buffer size
-    int rcvbuf = 1024 * 1024; // 1 MB
+    // Set receive buffer to 1MB
+    int rcvbuf = 1024 * 1024;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
-    // Enable SO_REUSEADDR
     int reuse = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
@@ -45,30 +52,46 @@ bool NativeAudioEngine::start(int audio_port) {
     if (bind(sockfd, (const struct sockaddr*)&servaddr, sizeof(servaddr)) < 0) {
         LOGE("Failed to bind UDP socket to port %d", mAudioPort);
         close(sockfd);
-        mIsRunning.store(false);
+        cleanupAfterFailedStart();
+        return false;
+    }
+    mSocketFd.store(sockfd, std::memory_order_release);
+
+    // 2. Open Oboe audio output stream
+    if (!openOboeStream()) {
+        LOGE("Failed to open Oboe stream");
+        cleanupAfterFailedStart();
         return false;
     }
 
-    mSocketFd.store(sockfd);
+    // 3. Start JitterBuffer decode worker thread
+    mJitterBuffer.start();
 
-    // 2. Start receiver thread
-    mReceiverThread = std::thread(&NativeAudioEngine::socketReceiverLoop, this);
-
-    // 3. Start Oboe audio output stream
-    if (!openAndStartOboeStream()) {
-        LOGE("Failed to start Oboe stream");
-        stop();
+    // 4. Start UDP receiver thread
+    try {
+        mReceiverThread = std::thread(&NativeAudioEngine::socketReceiverLoop, this);
+    } catch (const std::exception& e) {
+        LOGE("Failed to start receiver thread: %s", e.what());
+        cleanupAfterFailedStart();
         return false;
     }
 
+    // 5. Request Oboe stream playback start
+    if (!startOboeStream()) {
+        LOGE("Failed to start Oboe stream playback");
+        cleanupAfterFailedStart();
+        return false;
+    }
+
+    mIsRunning.store(true, std::memory_order_release);
     LOGI("NativeAudioEngine started successfully on port %d", mAudioPort);
     return true;
 }
 
-void NativeAudioEngine::stop() {
-    if (!mIsRunning.exchange(false)) return;
+void NativeAudioEngine::cleanupAfterFailedStart() noexcept {
+    stopAndCloseOboeStream();
 
-    int fd = mSocketFd.exchange(-1);
+    int fd = mSocketFd.exchange(-1, std::memory_order_acq_rel);
     if (fd >= 0) {
         shutdown(fd, SHUT_RDWR);
         close(fd);
@@ -78,19 +101,44 @@ void NativeAudioEngine::stop() {
         mReceiverThread.join();
     }
 
+    mJitterBuffer.stop();
+    mIsRunning.store(false, std::memory_order_release);
+}
+
+void NativeAudioEngine::stop() {
+    std::lock_guard<std::mutex> lock(mStartStopMutex);
+    if (!mIsRunning.exchange(false, std::memory_order_acq_rel)) return;
+
+    // 1. Unblock UDP recvfrom by shutting down and closing socket
+    int fd = mSocketFd.exchange(-1, std::memory_order_acq_rel);
+    if (fd >= 0) {
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+    }
+
+    // 2. Stop Oboe callback delivery and close stream
+    stopAndCloseOboeStream();
+
+    // 3. Join receiver thread
+    if (mReceiverThread.joinable()) {
+        mReceiverThread.join();
+    }
+
+    // 4. Join reopen thread if running
     {
-        std::lock_guard<std::mutex> lock(mReopenMutex);
+        std::lock_guard<std::mutex> rLock(mReopenMutex);
         if (mReopenThread.joinable()) {
             mReopenThread.join();
         }
     }
 
-    closeOboeStream();
+    // 5. Stop and join JitterBuffer decode worker
     mJitterBuffer.stop();
-    LOGI("NativeAudioEngine stopped");
+
+    LOGI("NativeAudioEngine stopped cleanly");
 }
 
-bool NativeAudioEngine::openAndStartOboeStream() {
+bool NativeAudioEngine::openOboeStream() {
     std::lock_guard<std::mutex> lock(mStreamMutex);
     oboe::AudioStreamBuilder builder;
     builder.setFormat(oboe::AudioFormat::I16)
@@ -101,226 +149,167 @@ bool NativeAudioEngine::openAndStartOboeStream() {
         ->setDataCallback(this)
         ->setErrorCallback(this);
 
-    if (mLowLatencyMode.load()) {
-        builder.setAudioApi(oboe::AudioApi::AAudio)
-            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+    if (mLowLatencyMode.load(std::memory_order_relaxed)) {
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency)
             ->setSharingMode(oboe::SharingMode::Exclusive);
     } else {
-        builder.setAudioApi(oboe::AudioApi::OpenSLES)
-            ->setPerformanceMode(oboe::PerformanceMode::None)
-            ->setSharingMode(oboe::SharingMode::Shared)
-            ->setSessionId(oboe::SessionId::Allocate);
+        builder.setPerformanceMode(oboe::PerformanceMode::None)
+            ->setSharingMode(oboe::SharingMode::Shared);
     }
 
     oboe::Result result = builder.openStream(mAudioStream);
     if (result != oboe::Result::OK) {
-        LOGE("Failed to open preferred stream: %s, falling back to Shared", oboe::convertToText(result));
-        builder.setSharingMode(oboe::SharingMode::Shared);
-        result = builder.openStream(mAudioStream);
-        if (result != oboe::Result::OK) {
-            LOGE("Failed to open Shared stream: %s", oboe::convertToText(result));
-            return false;
-        }
-    }
-
-    // Configure burst buffer size for optimal latency/stability balance
-    int32_t burst = std::max(192, mAudioStream->getFramesPerBurst());
-    mBurstPeriodMicros.store(static_cast<uint32_t>((burst * 1000000) / 48000), std::memory_order_relaxed);
-    int32_t mult = mLowLatencyMode.load() ? 3 : 4;
-    mAudioStream->setBufferSizeInFrames(burst * mult);
-
-    result = mAudioStream->requestStart();
-    if (result != oboe::Result::OK) {
-        LOGE("Failed to start stream: %s", oboe::convertToText(result));
-        mAudioStream->close();
+        LOGE("Failed to open Oboe stream: %s", oboe::convertToText(result));
         mAudioStream.reset();
         return false;
     }
-
     return true;
 }
 
-void NativeAudioEngine::closeOboeStream() {
+bool NativeAudioEngine::startOboeStream() {
+    std::lock_guard<std::mutex> lock(mStreamMutex);
+    if (!mAudioStream) return false;
+
+    oboe::Result result = mAudioStream->requestStart();
+    if (result != oboe::Result::OK) {
+        LOGE("Failed to start Oboe stream: %s", oboe::convertToText(result));
+        return false;
+    }
+    return true;
+}
+
+void NativeAudioEngine::stopAndCloseOboeStream() {
     std::lock_guard<std::mutex> lock(mStreamMutex);
     if (mAudioStream) {
-        oboe::StreamState state = mAudioStream->getState();
-        if (state != oboe::StreamState::Closed && state != oboe::StreamState::Disconnected && state != oboe::StreamState::Stopping) {
-            try {
-                mAudioStream->stop();
-            } catch (...) {}
-        }
-        try {
-            mAudioStream->close();
-        } catch (...) {}
+        mAudioStream->stop();
+        mAudioStream->close();
         mAudioStream.reset();
     }
 }
 
-void NativeAudioEngine::socketReceiverLoop() {
-    uint8_t buffer[4096];
-    struct sockaddr_in clientaddr{};
-    socklen_t addrlen = sizeof(clientaddr);
+void NativeAudioEngine::scheduleStreamReopen() {
+    bool expected = false;
+    if (!mReopenPending.compare_exchange_strong(expected, true)) {
+        return;
+    }
 
-    while (mIsRunning.load()) {
-        int fd = mSocketFd.load();
-        if (fd < 0) break;
+    std::lock_guard<std::mutex> lock(mReopenMutex);
+    if (mReopenThread.joinable()) {
+        mReopenThread.join();
+    }
 
-        ssize_t n = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&clientaddr, &addrlen);
-        if (n < 0) {
+    mReopenThread = std::thread([this]() {
+        LOGI("Oboe stream reopen worker started");
+        stopAndCloseOboeStream();
+
+        for (int retry = 0; retry < 5 && mIsRunning.load(); ++retry) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
             if (!mIsRunning.load()) break;
-            usleep(2000);
-            continue;
-        }
 
-        // Validate 12-byte header
-        if (n < static_cast<ssize_t>(sizeof(AudioHeader))) {
-            continue;
-        }
-
-        AudioHeader header;
-        std::memcpy(&header, buffer, sizeof(AudioHeader));
-        uint8_t hopCount = (header.codec >> 4) & 0x07;
-        header.codec &= 0x0F;
-
-        // Validation rules:
-        if (header.codec != CODEC_PCM16 && header.codec != CODEC_OPUS) {
-            LOGE("Dropping packet with unknown codec: %d", header.codec);
-            continue;
-        }
-
-        if (header.channels != 1 && header.channels != 2) {
-            LOGE("Dropping packet with invalid channel count: %d", header.channels);
-            continue;
-        }
-
-        if (header.sample_rate_div100 != 480) {
-            LOGE("Dropping packet with unexpected sample_rate_div100: %d", header.sample_rate_div100);
-            continue;
-        }
-
-        // Cache the sender IP address for the Port 5005 stats back-channel only after header is valid
-        char ipStr[INET_ADDRSTRLEN] = {0};
-        if (inet_ntop(AF_INET, &clientaddr.sin_addr, ipStr, sizeof(ipStr))) {
-            std::lock_guard<std::mutex> lock(mSenderIpMutex);
-            mLastSenderIp = ipStr;
-        }
-
-        size_t payload_len = n - sizeof(AudioHeader);
-
-        // Strict PCM validation
-        if (header.codec == CODEC_PCM16) {
-            size_t sample_size = header.channels * sizeof(int16_t);
-            if (payload_len == 0 || (payload_len % 2 != 0) || (payload_len % sample_size != 0)) {
-                LOGE("Dropping malformed PCM packet: payload_len=%zu for %d channels",
-                     payload_len, header.channels);
-                continue;
+            if (openOboeStream() && startOboeStream()) {
+                LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
+                mReopenPending.store(false);
+                return;
             }
         }
 
-        AudioPacket packet;
-        packet.header = header;
-        packet.recv_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
+        mReopenPending.store(false);
+        LOGW("Failed to reopen Oboe stream after retries");
+    });
+}
 
-        if (payload_len > 0) {
-            packet.payload.assign(buffer + sizeof(AudioHeader), buffer + n);
-        }
-
-        mJitterBuffer.pushPacket(packet);
-
-        // Forward to downstream peers if Hosting or Extending Party (up to 4 hops)
-        if (mPartyRelayEnabled.load() && hopCount < 4 && fd >= 0) {
-            uint8_t origByte8 = buffer[8];
-            buffer[8] = (header.codec & 0x0F) | (((hopCount + 1) & 0x07) << 4);
-            std::lock_guard<std::mutex> lock(mPartyPeersMutex);
-            for (const auto& peerAddr : mPartyPeerAddrs) {
-                if (peerAddr.sin_addr.s_addr != clientaddr.sin_addr.s_addr) {
-                    sendto(fd, buffer, n, MSG_DONTWAIT, (const struct sockaddr*)&peerAddr, sizeof(peerAddr));
-                }
-            }
-            buffer[8] = origByte8;
-        }
+void NativeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result result) {
+    LOGW("onErrorAfterClose fired: %s. Scheduling reopen.", oboe::convertToText(result));
+    if (mIsRunning.load(std::memory_order_relaxed)) {
+        scheduleStreamReopen();
     }
 }
 
-oboe::DataCallbackResult NativeAudioEngine::onAudioReady(oboe::AudioStream* /*stream*/,
-                                                         void* audioData,
-                                                         int32_t numFrames) {
-    if (!audioData || numFrames <= 0) {
-        return oboe::DataCallbackResult::Continue;
-    }
+oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
+    oboe::AudioStream* /*stream*/,
+    void* audioData,
+    int32_t numFrames) {
 
-    auto tStart = std::chrono::steady_clock::now();
+    auto start_time = std::chrono::steady_clock::now();
+    int16_t* output = static_cast<int16_t*>(audioData);
 
-    int16_t* pcmOut = static_cast<int16_t*>(audioData);
+    // Guaranteed real-time safe: ZERO mutexes, ZERO allocations, ZERO opus decodes.
+    mJitterBuffer.readAudio(output, numFrames);
 
-    // Guaranteed lock-free read from SPSC ring buffer: ZERO mutexes, ZERO allocations!
-    mJitterBuffer.readAudio(pcmOut, numFrames);
-
-    if (mMuted.load(std::memory_order_relaxed) || mVolumeGain.load(std::memory_order_relaxed) <= 0.0001f) {
-        std::memset(pcmOut, 0, numFrames * 2 * sizeof(int16_t));
+    // Real-time safe mute and volume scaling
+    if (mMuted.load(std::memory_order_relaxed)) {
+        std::memset(output, 0, numFrames * 2 * sizeof(int16_t));
     } else {
         float gain = mVolumeGain.load(std::memory_order_relaxed);
-        if (gain != 1.0f) {
-            int total = numFrames * 2;
-            for (int i = 0; i < total; i++) {
-                int32_t val = static_cast<int32_t>(pcmOut[i] * gain);
-                if (val > 32767) val = 32767;
-                else if (val < -32768) val = -32768;
-                pcmOut[i] = static_cast<int16_t>(val);
+        if (std::abs(gain - 1.0f) > 0.001f) {
+            int total_samples = numFrames * 2;
+            for (int i = 0; i < total_samples; ++i) {
+                int32_t val = static_cast<int32_t>(output[i] * gain);
+                output[i] = static_cast<int16_t>(std::clamp(val, -32768, 32767));
             }
         }
     }
 
-    auto tEnd = std::chrono::steady_clock::now();
-    uint32_t elapsedMicros = static_cast<uint32_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(tEnd - tStart).count()
-    );
+    // Section 10: Callback performance instrumentation
+    auto end_time = std::chrono::steady_clock::now();
+    int64_t elapsed_micros = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 
-    uint32_t curMax = mMaxCallbackMicros.load(std::memory_order_relaxed);
-    while (elapsedMicros > curMax && !mMaxCallbackMicros.compare_exchange_weak(curMax, elapsedMicros, std::memory_order_relaxed));
+    mTotalCallbackCount.fetch_add(1, std::memory_order_relaxed);
+    mTotalCallbackMicros.fetch_add(elapsed_micros, std::memory_order_relaxed);
 
-    uint32_t curAvg = mAvgCallbackMicros.load(std::memory_order_relaxed);
-    mAvgCallbackMicros.store((curAvg * 63 + elapsedMicros) / 64, std::memory_order_relaxed);
+    int64_t current_max = mMaxCallbackMicros.load(std::memory_order_relaxed);
+    while (elapsed_micros > current_max &&
+           !mMaxCallbackMicros.compare_exchange_weak(current_max, elapsed_micros, std::memory_order_relaxed)) {}
 
-    if (elapsedMicros > mBurstPeriodMicros.load(std::memory_order_relaxed)) {
+    // Diagnostic deadline calculation: audio duration = (numFrames * 1,000,000) / sampleRate
+    int64_t audio_duration_micros = (static_cast<int64_t>(numFrames) * 1000000LL) / 48000LL;
+    int64_t deadline_threshold_micros = audio_duration_micros / 4; // 25% of audio duration
+    if (elapsed_micros > deadline_threshold_micros) {
         mDeadlineMisses.fetch_add(1, std::memory_order_relaxed);
     }
 
     return oboe::DataCallbackResult::Continue;
 }
 
-void NativeAudioEngine::scheduleStreamReopen() {
-    if (!mIsRunning.load()) return;
-    bool expected = false;
-    if (!mReopenPending.compare_exchange_strong(expected, true)) {
-        return; // Reopen already in progress
-    }
-    std::lock_guard<std::mutex> lock(mReopenMutex);
-    if (mReopenThread.joinable()) {
-        if (mReopenThread.get_id() == std::this_thread::get_id()) {
-            mReopenThread.detach();
-        } else {
-            mReopenThread.join();
+void NativeAudioEngine::socketReceiverLoop() {
+    uint8_t buffer[2048];
+    struct sockaddr_in client_addr{};
+    socklen_t client_len = sizeof(client_addr);
+
+    while (mIsRunning.load(std::memory_order_relaxed)) {
+        int fd = mSocketFd.load(std::memory_order_relaxed);
+        if (fd < 0) break;
+
+        ssize_t bytes_read = recvfrom(fd, buffer, sizeof(buffer), 0,
+                                      (struct sockaddr*)&client_addr, &client_len);
+        if (bytes_read <= 0) {
+            continue;
         }
-    }
-    mReopenThread = std::thread([this]() {
-        if (mIsRunning.load()) {
-            closeOboeStream();
-            for (int attempt = 0; attempt < 5 && mIsRunning.load(); attempt++) {
-                if (openAndStartOboeStream()) {
-                    break;
+
+        // Cache sender IP address for auto-discovery
+        char ip_str[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &(client_addr.sin_addr), ip_str, INET_ADDRSTRLEN)) {
+            std::lock_guard<std::mutex> lock(mSenderIpMutex);
+            mLastSenderIp = ip_str;
+        }
+
+        // Optional Party Mode mesh relay
+        if (mPartyRelayEnabled.load(std::memory_order_relaxed)) {
+            std::lock_guard<std::mutex> pLock(mPartyPeersMutex);
+            for (const auto& peerAddr : mPartyPeerAddrs) {
+                if (peerAddr.sin_addr.s_addr != client_addr.sin_addr.s_addr) {
+                    sendto(fd, buffer, bytes_read, 0,
+                           (const struct sockaddr*)&peerAddr, sizeof(peerAddr));
                 }
-                usleep(100000); // 100ms backoff
             }
         }
-        mReopenPending.store(false);
-    });
-}
 
-void NativeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result result) {
-    LOGI("Audio stream error after close: %s. Reopening stream.", oboe::convertToText(result));
-    scheduleStreamReopen();
+        // Deserialize and enqueue packet into bounded jitter buffer
+        AudioPacket pkt;
+        if (pkt.deserialize(buffer, bytes_read)) {
+            mJitterBuffer.pushPacket(pkt);
+        }
+    }
 }
 
 void NativeAudioEngine::setTargetBufferMs(float target_ms) {
@@ -340,51 +329,49 @@ bool NativeAudioEngine::isAutoMode() {
 }
 
 void NativeAudioEngine::setMuted(bool muted) {
-    mMuted.store(muted);
+    mMuted.store(muted, std::memory_order_relaxed);
 }
 
 bool NativeAudioEngine::isMuted() const {
-    return mMuted.load();
+    return mMuted.load(std::memory_order_relaxed);
 }
 
 void NativeAudioEngine::setVolumeGain(float gain) {
-    mVolumeGain.store(std::clamp(gain, 0.0f, 2.0f));
+    mVolumeGain.store(std::clamp(gain, 0.0f, 2.0f), std::memory_order_relaxed);
 }
 
 float NativeAudioEngine::getVolumeGain() const {
-    return mVolumeGain.load();
+    return mVolumeGain.load(std::memory_order_relaxed);
 }
 
 void NativeAudioEngine::setLowLatencyMode(bool lowLatency) {
-    bool prev = mLowLatencyMode.exchange(lowLatency);
-    if (prev != lowLatency && mIsRunning.load()) {
-        scheduleStreamReopen();
-    }
+    mLowLatencyMode.store(lowLatency, std::memory_order_relaxed);
 }
 
 bool NativeAudioEngine::isLowLatencyMode() const {
-    return mLowLatencyMode.load();
+    return mLowLatencyMode.load(std::memory_order_relaxed);
 }
 
 void NativeAudioEngine::setPartyRelayEnabled(bool enabled) {
-    mPartyRelayEnabled.store(enabled);
+    mPartyRelayEnabled.store(enabled, std::memory_order_relaxed);
 }
 
 bool NativeAudioEngine::isPartyRelayEnabled() const {
-    return mPartyRelayEnabled.load();
+    return mPartyRelayEnabled.load(std::memory_order_relaxed);
 }
 
 void NativeAudioEngine::setPartyPeers(const std::vector<std::string>& peers) {
-    std::lock_guard<std::mutex> lock(mPartyPeersMutex);
-    mPartyPeerAddrs.clear();
-    for (const auto& ip : peers) {
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(mAudioPort);
-        if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) == 1) {
-            mPartyPeerAddrs.push_back(addr);
+    std::vector<struct sockaddr_in> addrs;
+    for (const auto& p : peers) {
+        struct sockaddr_in sa{};
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(5004);
+        if (inet_pton(AF_INET, p.c_str(), &(sa.sin_addr)) > 0) {
+            addrs.push_back(sa);
         }
     }
+    std::lock_guard<std::mutex> lock(mPartyPeersMutex);
+    mPartyPeerAddrs = std::move(addrs);
 }
 
 int32_t NativeAudioEngine::getAudioSessionId() const {
@@ -396,15 +383,39 @@ int32_t NativeAudioEngine::getAudioSessionId() const {
 }
 
 JitterStats NativeAudioEngine::getStats() {
-    JitterStats stats = mJitterBuffer.getStats();
-    stats.max_callback_micros = mMaxCallbackMicros.load(std::memory_order_relaxed);
-    stats.avg_callback_micros = mAvgCallbackMicros.load(std::memory_order_relaxed);
-    stats.deadline_misses = mDeadlineMisses.load(std::memory_order_relaxed);
-    return stats;
+    return mJitterBuffer.getStats();
+}
+
+AdvancedEngineStats NativeAudioEngine::getAdvancedStats() {
+    AdvancedEngineStats adv;
+    JitterStatsSnapshot jStats = mJitterBuffer.getStatsSnapshot();
+
+    adv.bufferMs = jStats.bufferMs;
+    adv.targetMs = jStats.targetMs;
+    adv.underruns = jStats.underruns;
+    adv.lostPackets = jStats.lostPackets;
+    adv.latePackets = jStats.latePackets;
+    adv.duplicatePackets = jStats.duplicatePackets;
+    adv.concealedPackets = jStats.concealedPackets;
+    adv.intentionalDriftDrops = jStats.intentionalDriftDrops;
+    adv.packetQueueOverflowDrops = jStats.packetQueueOverflowDrops;
+    adv.pcmRingOverflowDrops = jStats.pcmRingOverflowDrops;
+    adv.pcmRingUnderrunFrames = jStats.pcmRingUnderrunFrames;
+    adv.pcmRingAvailableFrames = jStats.pcmRingAvailableFrames;
+    adv.rxPps = static_cast<double>(jStats.rxPacketsPerSecond);
+    adv.activeCodec = jStats.activeCodec;
+    adv.autoMode = jStats.autoMode;
+
+    uint64_t count = mTotalCallbackCount.load(std::memory_order_relaxed);
+    uint64_t totalMicros = mTotalCallbackMicros.load(std::memory_order_relaxed);
+    adv.callbackAverageMicros = (count > 0) ? (static_cast<double>(totalMicros) / static_cast<double>(count)) : 0.0;
+    adv.callbackMaxMicros = mMaxCallbackMicros.load(std::memory_order_relaxed);
+    adv.callbackDeadlineMisses = mDeadlineMisses.load(std::memory_order_relaxed);
+
+    return adv;
 }
 
 std::string NativeAudioEngine::getSenderIp() {
     std::lock_guard<std::mutex> lock(mSenderIpMutex);
     return mLastSenderIp;
 }
-

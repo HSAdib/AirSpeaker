@@ -31,6 +31,8 @@ class MicStreamer {
     private val payloadSize = samplesPerCh * outChannels * 2 // 960 bytes stereo
 
     private val isRunning = AtomicBoolean(false)
+    private val isFailedStuck = AtomicBoolean(false)
+    private var workerTerminated: java.util.concurrent.CountDownLatch? = null
     private var workerThread: Thread? = null
     private var audioRecord: AudioRecord? = null
     private var noiseSuppressor: NoiseSuppressor? = null
@@ -52,6 +54,10 @@ class MicStreamer {
 
     @SuppressLint("MissingPermission")
     fun start(targetIp: String, targetPort: Int = 5006, enableFx: Boolean = true): Boolean {
+        if (isFailedStuck.get()) {
+            Log.e(TAG, "Cannot start MicStreamer: previous worker thread remained stuck")
+            return false
+        }
         if (isRunning.get()) {
             updateTargetIp(targetIp)
             return true
@@ -139,8 +145,14 @@ class MicStreamer {
             isRunning.set(true)
             dynamicTargetIp = targetIp.ifBlank { "255.255.255.255" }
 
+            val latch = java.util.concurrent.CountDownLatch(1)
+            workerTerminated = latch
             workerThread = thread(name = "MicStreamerThread", isDaemon = true) {
-                runLoop(targetPort)
+                try {
+                    runLoop(targetPort)
+                } finally {
+                    latch.countDown()
+                }
             }
             Log.i(TAG, "MicStreamer started streaming to $dynamicTargetIp:$targetPort (inChannels=$actualInputChannels)")
             return true
@@ -261,12 +273,7 @@ class MicStreamer {
         val ns = noiseSuppressor
         val aec = echoCanceler
         val autoGain = agc
-
-        workerThread = null
-        audioRecord = null
-        noiseSuppressor = null
-        echoCanceler = null
-        agc = null
+        val latch = workerTerminated
 
         // 1. Unblock AudioRecord.read() by stopping the recorder
         try {
@@ -278,34 +285,44 @@ class MicStreamer {
         // 2. Interrupt worker thread
         worker?.interrupt()
 
-        // 3. Join worker thread with 1000ms bounded timeout
-        if (worker != null && worker != Thread.currentThread()) {
+        // 3. Wait on workerTerminated latch with 1000ms bounded timeout
+        var exited = false
+        if (worker != null && worker != Thread.currentThread() && latch != null) {
             try {
-                worker.join(1000)
-                if (worker.isAlive) {
-                    Log.e(TAG, "MicStreamer worker thread did not terminate within 1000ms")
+                exited = latch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                if (!exited && worker.isAlive) {
+                    Log.w(TAG, "MicStreamer worker thread alive after 1000ms (state=${worker.state}), retrying interrupt")
+                    worker.interrupt()
+                    exited = latch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS)
                 }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                Log.w(TAG, "Interrupted while joining MicStreamer worker")
+                Log.w(TAG, "Interrupted while waiting for MicStreamer worker")
             }
+        } else {
+            exited = true
         }
 
-        // 4. Release AudioRecord and audio effects strictly after worker has exited
-        try {
-            ns?.release()
-        } catch (_: Exception) {}
-        try {
-            aec?.release()
-        } catch (_: Exception) {}
-        try {
-            autoGain?.release()
-        } catch (_: Exception) {}
-        try {
-            rec?.release()
-        } catch (_: Exception) {}
+        if (exited) {
+            workerThread = null
+            audioRecord = null
+            noiseSuppressor = null
+            echoCanceler = null
+            agc = null
+            workerTerminated = null
+
+            try { ns?.release() } catch (_: Exception) {}
+            try { aec?.release() } catch (_: Exception) {}
+            try { autoGain?.release() } catch (_: Exception) {}
+            try { rec?.release() } catch (_: Exception) {}
+            Log.i(TAG, "MicStreamer stopped cleanly (wasRunning=$wasRunning)")
+        } else {
+            // Worker is still alive after second wait:
+            // Do NOT release AudioRecord or effects that the worker may still access!
+            isFailedStuck.set(true)
+            Log.e(TAG, "CRITICAL: MicStreamer worker failed to exit after 2000ms. Resources retained to prevent crash.")
+        }
 
         txPps.set(0)
-        Log.i(TAG, "MicStreamer stopped cleanly (wasRunning=$wasRunning)")
     }
 }

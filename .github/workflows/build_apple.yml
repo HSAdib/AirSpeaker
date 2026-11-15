@@ -1,35 +1,137 @@
-name: Build & Publish All Deliverables (GitHub Releases & Packages)
+name: PhoneSpeaker CI & Release Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]
-    tags: [ "v*" ]
+    branches: [ "main", "master", "fix/*" ]
+    tags: [ "v2.0.1*" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
-  build-and-publish:
-    name: Build macOS DMG, iOS IPA & Publish to Releases + Packages
-    runs-on: macos-latest
-    permissions:
-      contents: write
-      packages: write
-
+  # ====================================================
+  # 1. ANDROID BUILD JOB (Java 17 Temurin & assembleRelease)
+  # ====================================================
+  build-android:
+    name: Build Android APK (Release & Debug)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # ----------------------------------------------------
-      # 1. BUILD MACOS DMG (PhoneSpeaker-v2-macOS.dmg)
-      # ----------------------------------------------------
-      - name: Set up Python 3.11 for macOS
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Android SDK & CMake
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK & CMake
+        run: |
+          sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
+
+      - name: Decode Android Release Keystore
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+          echo "PHONESPEAKER_KEYSTORE_PATH=/tmp/release.keystore" >> $GITHUB_ENV
+          echo "PHONESPEAKER_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "PHONESPEAKER_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "PHONESPEAKER_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
+
+      - name: Run Android Unit Tests
+        run: |
+          cd PhoneSpeakerAndroid
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest
+
+      - name: Build Android Release APK
+        run: |
+          cd PhoneSpeakerAndroid
+          ./gradlew assembleRelease
+          rm -f /tmp/release.keystore
+
+      - name: Locate and Package Android Artifact
+        run: |
+          APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "Release APK not found, checking debug build..."
+            cd PhoneSpeakerAndroid && ./gradlew assembleDebug && cd ..
+            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          fi
+          echo "Selected APK: $APK_PATH"
+          cp "$APK_PATH" PhoneSpeaker.v2.0.1.apk
+          sha256sum PhoneSpeaker.v2.0.1.apk | tee PhoneSpeaker.v2.0.1.apk.sha256
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneSpeaker-v2.0.1-APK
+          path: PhoneSpeaker.v2.0.1.apk
+
+  # ====================================================
+  # 2. WINDOWS BUILD JOB (Python 3.11, Tests & PyInstaller)
+  # ====================================================
+  build-windows:
+    name: Build Windows 64-bit Executable
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install macOS Audio & Build Dependencies via Homebrew
+      - name: Install Dependencies & Run Verification Tests
+        run: |
+          cd phonespeaker-pc
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python tests/verify_pc.py
+
+      - name: Compile Windows Standalone Executable
+        run: |
+          cd phonespeaker-pc
+          python build_exe.py
+
+      - name: Package Windows Artifact
+        shell: pwsh
+        run: |
+          Copy-Item "PhoneSpeaker.v2.exe" "PhoneSpeaker.v2.0.1.exe" -Force
+          Get-FileHash -Algorithm SHA256 "PhoneSpeaker.v2.0.1.exe" | Out-File "PhoneSpeaker.v2.0.1.exe.sha256"
+          Write-Host "Windows EXE SHA256:"
+          Get-Content "PhoneSpeaker.v2.0.1.exe.sha256"
+
+      - name: Upload Windows Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneSpeaker-v2.0.1-EXE
+          path: PhoneSpeaker.v2.0.1.exe
+
+  # ====================================================
+  # 3. MACOS & IOS BUILD JOB (Xcode & DMG / IPA Packaging)
+  # ====================================================
+  build-apple:
+    name: Build macOS DMG & iOS IPA
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 for macOS
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install macOS Audio & Build Dependencies
         run: |
           brew install opus portaudio python@3.11 python-tk@3.11 xcodegen oras
 
@@ -38,13 +140,6 @@ jobs:
           cd phonespeaker-pc
           /opt/homebrew/bin/python3.11 build_macos.py || python3 build_macos.py
 
-      - name: Verify macOS DMG Artifact
-        run: |
-          ls -lh PhoneSpeaker-v2-macOS.dmg
-
-      # ----------------------------------------------------
-      # 2. BUILD IOS APP & IPA (PhoneSpeaker-v2-iOS.ipa)
-      # ----------------------------------------------------
       - name: Select Xcode Version
         run: |
           sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -67,7 +162,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Package IPA (Payload zip for AltStore / SideStore / Sideloadly)
+      - name: Package IPA
         run: |
           cd PhoneSpeakeriOS
           rm -rf Payload
@@ -75,124 +170,87 @@ jobs:
           cp -R "build/PhoneSpeaker.xcarchive/Products/Applications/PhoneSpeaker.app" Payload/
           zip -r -q ../PhoneSpeaker-v2-iOS.ipa Payload
           cd ..
-          ls -lh PhoneSpeaker-v2-iOS.ipa
 
-      # ----------------------------------------------------
-      # 3. UPLOAD WORKFLOW ARTIFACTS
-      # ----------------------------------------------------
-      - name: Upload macOS DMG Artifact
+      - name: Upload Apple Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneSpeaker-v2-macOS-DMG
-          path: PhoneSpeaker-v2-macOS.dmg
+          name: PhoneSpeaker-v2-Apple-Deliverables
+          path: |
+            PhoneSpeaker-v2-macOS.dmg
+            PhoneSpeaker-v2-iOS.ipa
 
-      - name: Upload iOS IPA Artifact
-        uses: actions/upload-artifact@v4
+  # ====================================================
+  # 4. OFFICIAL RELEASE PUBLICATION (Only on v2.0.1 Tag)
+  # ====================================================
+  release-publish:
+    name: Publish Official v2.0.1 Release
+    needs: [build-android, build-windows, build-apple]
+    if: startsWith(github.ref, 'refs/tags/v2.0.1')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
         with:
-          name: PhoneSpeaker-v2-iOS-IPA
-          path: PhoneSpeaker-v2-iOS.ipa
+          name: PhoneSpeaker-v2.0.1-APK
+          path: release-artifacts/
 
-      # ----------------------------------------------------
-      # 4. PUBLISH ALL DEVICE INSTALLERS TO GITHUB RELEASE (v2.0.0 / Latest)
-      # ----------------------------------------------------
-      - name: Publish All Device Installers to GitHub Release
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PhoneSpeaker-v2.0.1-EXE
+          path: release-artifacts/
+
+      - name: Download Apple Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: PhoneSpeaker-v2-Apple-Deliverables
+          path: release-artifacts/
+
+      - name: Generate Checksums & Build Manifest
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [[ ! "$TAG_NAME" =~ ^v ]]; then
-            TAG_NAME="v2.0.0"
-          fi
+          cd release-artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-          cat << 'EOF' > RELEASE_NOTES.md
-          ### PhoneSpeaker v2.0 Studio
+          EXE_SHA=$(sha256sum PhoneSpeaker.v2.0.1.exe | awk '{print $1}')
+          EXE_SIZE=$(stat -c%s PhoneSpeaker.v2.0.1.exe)
+          APK_SHA=$(sha256sum PhoneSpeaker.v2.0.1.apk | awk '{print $1}')
+          APK_SIZE=$(stat -c%s PhoneSpeaker.v2.0.1.apk)
 
-          Low-latency wireless audio streaming & wireless mic studio for Windows 11/10, Android, Linux, macOS, and iOS.
-
-          Turn your phone into a low-latency wireless speaker or wireless microphone for your PC, Mac, or Linux machine over Wi-Fi, USB, Hotspot, or Bluetooth tethering. Featuring bidirectional control sync, multi-device party broadcast & relay, virtual microphone routing, and live latency telemetry.
-
-          ---
-
-          #### 📦 Official Platform Deliverables:
-
-          - 🪟 **Windows 11 / 10**: [`PhoneSpeaker.v2.exe`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker.v2.exe) *(or `PhoneSpeaker v2.exe`)*
-            - Standalone 64-bit executable with CoreAudio/WASAPI volume sync, Opus codec & soft-knee limiter.
-          - 🤖 **Android (8.0–15+)**: [`PhoneSpeaker.v2.apk`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker.v2.apk) *(or `PhoneSpeaker v2.apk`)*
-            - Native client powered by C++ Oboe / AAudio ultra-low-latency engine, audio focus management & wireless mic server. Universal APK for `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`.
-          - 🐧 **Linux (PipeWire / PulseAudio)**: [`PhoneSpeaker-v2-Linux-Installer.run`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-Linux-Installer.run)
-            - One-click self-extracting installer with automatic virtual sink & source routing (`PhoneSpeaker_Sink` / `PhoneSpeaker_Mic`).
-            - *Quick terminal install:* `curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_linux.sh | bash`
-          - 🍏 **macOS (Apple Silicon & Intel)**: [`PhoneSpeaker-v2-macOS.dmg`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-macOS.dmg) & [`PhoneSpeaker-v2-macOS-Installer.command`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-macOS-Installer.command)
-            - Drag-and-drop `.dmg` app bundle and interactive terminal installer supporting BlackHole 2ch loopback and system volume sync.
-          - 📱 **iOS (iPhone & iPad)**: [`PhoneSpeaker-v2-iOS.ipa`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-iOS.ipa)
-            - Native Swift / AVAudioEngine client for AltStore, SideStore, and Sideloadly.
-
-          ---
-
-          #### 🌟 Key Capabilities:
-          - **Ultra-Low Latency**: Sub-30ms wireless streaming using 5ms PCM16 / Opus frame pacing.
-          - **Bi-directional Audio**: Stream PC audio to phones, and stream phone microphone to PC (Discord, Zoom, OBS).
-          - **Party Mode & Multi-Device Fan-Out**: Broadcast from 1 Host PC/Phone to unlimited joiners with mesh relaying.
-          - **Two-Way Studio Sync**: Automatic bidirectional synchronization of volume, mute, audio profile, bitrate, and buffer latency.
-          - **Universal Container Mirror**: All packages mirrored to GitHub Packages OCI Registry at `ghcr.io/hsadib/phonespeaker:2.0.0`.
+          cat << EOF > build-manifest.json
+          {
+            "version": "2.0.1",
+            "gitCommit": "${{ github.sha }}",
+            "artifacts": [
+              {
+                "name": "PhoneSpeaker.v2.0.1.exe",
+                "sha256": "$EXE_SHA",
+                "size": $EXE_SIZE,
+                "builder": "github-actions"
+              },
+              {
+                "name": "PhoneSpeaker.v2.0.1.apk",
+                "sha256": "$APK_SHA",
+                "size": $APK_SIZE,
+                "builder": "github-actions"
+              }
+            ]
+          }
           EOF
+          cat build-manifest.json
 
-          gh release view "$TAG_NAME" >/dev/null 2>&1 || \
-            gh release create "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio" --notes-file RELEASE_NOTES.md
-
-          gh release edit "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio" --notes-file RELEASE_NOTES.md || true
-
-          if [ ! -f "PhoneSpeaker v2.exe" ] && [ ! -f "PhoneSpeaker.v2.exe" ]; then
-            gh release download "$TAG_NAME" -p "*.exe" --clobber 2>/dev/null || true
-          fi
-          if [ ! -f "PhoneSpeaker v2.apk" ] && [ ! -f "PhoneSpeaker.v2.apk" ]; then
-            gh release download "$TAG_NAME" -p "*.apk" --clobber 2>/dev/null || true
-          fi
-
-          cp -f "PhoneSpeaker v2.exe" "PhoneSpeaker.v2.exe" 2>/dev/null || true
-          cp -f "PhoneSpeaker v2.apk" "PhoneSpeaker.v2.apk" 2>/dev/null || true
-
-          for f in \
-            "PhoneSpeaker.v2.exe" \
-            "PhoneSpeaker.v2.apk" \
-            "PhoneSpeaker-v2-Linux-Installer.run" \
-            "PhoneSpeaker-v2-macOS-Installer.command" \
-            "PhoneSpeaker-v2-macOS.dmg" \
-            "PhoneSpeaker-v2-iOS.ipa" \
-            "install_linux.sh"; do
-            if [ -f "$f" ]; then
-              echo "Uploading $f to Release $TAG_NAME..."
-              gh release upload "$TAG_NAME" "$f" --clobber
-            fi
-          done
-
-      # ----------------------------------------------------
-      # 5. PUBLISH TO GITHUB PACKAGES SECTION (ghcr.io/hsadib/phonespeaker)
-      # ----------------------------------------------------
-      - name: Publish Installers to GitHub Packages (GHCR OCI Registry)
-        if: github.event_name != 'pull_request'
+      - name: Create GitHub Release v2.0.1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
-          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          PKG_REF="ghcr.io/${OWNER_LC}/phonespeaker"
-
-          ORAS_FILES=()
-          [ -f "PhoneSpeaker.v2.exe" ] && ORAS_FILES+=("PhoneSpeaker.v2.exe:application/vnd.microsoft.portable-executable")
-          [ -f "PhoneSpeaker.v2.apk" ] && ORAS_FILES+=("PhoneSpeaker.v2.apk:application/vnd.android.package-archive")
-          [ -f "PhoneSpeaker-v2-Linux-Installer.run" ] && ORAS_FILES+=("PhoneSpeaker-v2-Linux-Installer.run:application/x-executable")
-          [ -f "PhoneSpeaker-v2-macOS-Installer.command" ] && ORAS_FILES+=("PhoneSpeaker-v2-macOS-Installer.command:application/x-sh")
-          [ -f "PhoneSpeaker-v2-macOS.dmg" ] && ORAS_FILES+=("PhoneSpeaker-v2-macOS.dmg:application/x-apple-diskimage")
-          [ -f "PhoneSpeaker-v2-iOS.ipa" ] && ORAS_FILES+=("PhoneSpeaker-v2-iOS.ipa:application/octet-stream")
-          [ -f "install_linux.sh" ] && ORAS_FILES+=("install_linux.sh:application/x-sh")
-
-          echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF..."
-          oras push "${PKG_REF}:latest" \
-            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-            --annotation "org.opencontainers.image.description=PhoneSpeaker v2.0 Studio — Official Installers for Windows (.exe), Linux (.run), macOS (.dmg & .command), Android (.apk), and iOS (.ipa)" \
-            --annotation "org.opencontainers.image.version=2.0.0" \
-            "${ORAS_FILES[@]}"
-
-          oras tag "${PKG_REF}:latest" "2.0.0"
+          TAG_NAME="v2.0.1"
+          gh release create "$TAG_NAME" \
+            --title "PhoneSpeaker v2.0.1 Studio" \
+            --notes "### PhoneSpeaker v2.0.1 Studio\n\nRelease v2.0.1 addressing thread concurrency, lifecycle synchronization, lock-free SPSC PCM ring buffer, Opus in-band FEC sequencing, and real-time audio callback safety." \
+            release-artifacts/*

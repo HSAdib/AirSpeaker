@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +14,8 @@ android {
         applicationId = "com.hasan.phonespeaker.v2"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 21
+        versionName = "2.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
@@ -26,13 +29,37 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePropFile = rootProject.file("keystore.properties")
+            val props = Properties()
+            if (keystorePropFile.exists()) {
+                FileInputStream(keystorePropFile).use { props.load(it) }
+            }
+
+            val storePath = System.getenv("PHONESPEAKER_KEYSTORE_PATH")
+                ?: props.getProperty("storeFile")
+            if (!storePath.isNullOrBlank() && file(storePath).exists()) {
+                storeFile = file(storePath)
+                storePassword = System.getenv("PHONESPEAKER_KEYSTORE_PASSWORD") ?: props.getProperty("storePassword")
+                keyAlias = System.getenv("PHONESPEAKER_KEY_ALIAS") ?: props.getProperty("keyAlias")
+                keyPassword = System.getenv("PHONESPEAKER_KEY_PASSWORD") ?: props.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val releaseSign = signingConfigs.getByName("release")
+            if (releaseSign.storeFile != null && releaseSign.storeFile!!.exists()) {
+                signingConfig = releaseSign
+            }
         }
         debug {
             isMinifyEnabled = false

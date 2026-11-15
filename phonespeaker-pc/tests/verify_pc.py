@@ -512,6 +512,69 @@ def test_audio_queue_drop_oldest() -> None:
         check(name, False, str(exc))
 
 
+def test_audio_queue_stress_10000() -> None:
+    name = "AudioQueue 10,000-frame rapid producer stress & drop consistency"
+    try:
+        from network import AudioQueue
+        import threading
+        import time
+
+        capacity = 10
+        q = AudioQueue(maxsize=capacity)
+        total_frames = 10000
+
+        consumed = []
+        stop_consumer = threading.Event()
+
+        def consumer():
+            while not stop_consumer.is_set() or not q.empty():
+                frame = q.get_nowait()
+                if frame is not None:
+                    consumed.append(frame)
+                else:
+                    time.sleep(0.0001)
+
+        consumer_thread = threading.Thread(target=consumer, daemon=True)
+        consumer_thread.start()
+
+        # Rapid producer (faster than consumer)
+        for i in range(total_frames):
+            frame_data = f"frame_{i}".encode("utf-8")
+            q.put_latest(frame_data)
+
+        time.sleep(0.05)
+        stop_consumer.set()
+        consumer_thread.join(timeout=2.0)
+
+        remaining_items = []
+        while not q.empty():
+            it = q.get_nowait()
+            if it is not None:
+                remaining_items.append(it)
+
+        all_received = consumed + remaining_items
+        drops = q.capture_overflow_drops
+
+        if q.qsize() > capacity:
+            check(name, False, f"queue exceeded capacity: size={q.qsize()} > {capacity}")
+            return
+
+        expected_total = len(all_received) + drops
+        if expected_total != total_frames:
+            check(name, False, f"drop accounting inconsistent: received={len(all_received)} + drops={drops} != {total_frames}")
+            return
+
+        if remaining_items:
+            last_frame_num = int(remaining_items[-1].decode("utf-8").split("_")[1])
+            if last_frame_num != total_frames - 1:
+                check(name, False, f"newest frame not retained: got {last_frame_num}, expected {total_frames - 1}")
+                return
+
+        check(name, True, f"10k frames: received={len(all_received)}, drops={drops}, sum={expected_total}, newest frame retained")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -534,6 +597,7 @@ def main() -> None:
     test_phone_mic_receiver_no_drops()
     test_udp_sender_party_fanout()
     test_audio_queue_drop_oldest()
+    test_audio_queue_stress_10000()
 
     print()
     print("=" * 60)

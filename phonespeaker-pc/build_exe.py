@@ -114,12 +114,13 @@ def main() -> None:
         size_mb = exe.stat().st_size / (1024 * 1024)
         print(f"\nSUCCESS: {exe} ({size_mb:.1f} MB)", flush=True)
 
-        root_exe = ROOT.parent / "PhoneSpeaker v2.exe"
-        try:
-            shutil.copy2(exe, root_exe)
-            print(f"Copied to root: {root_exe}", flush=True)
-        except Exception as exc:
-            print(f"Warning: Could not copy to {root_exe}: {exc}", flush=True)
+        for target_name in ["PhoneSpeaker v2.exe", "PhoneSpeaker.v2.exe", "PhoneSpeaker.v2.0.1.exe"]:
+            target_path = ROOT.parent / target_name
+            try:
+                shutil.copy2(exe, target_path)
+                print(f"Copied to root: {target_path}", flush=True)
+            except Exception as exc:
+                print(f"Warning: Could not copy to {target_path}: {exc}", flush=True)
     else:
         print("\nWARNING: PhoneSpeaker v2.exe not found in dist/", flush=True)
 

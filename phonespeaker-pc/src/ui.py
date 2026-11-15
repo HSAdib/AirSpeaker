@@ -333,7 +333,7 @@ class PhoneSpeakerApp:
         self._schedule_ui_update()
 
     def _setup_window(self) -> None:
-        self.root.title("PhoneSpeaker v2.0 Studio")
+        self.root.title("PhoneSpeaker v2.0.1 Studio")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
         self.root.minsize(560, 650)
@@ -404,7 +404,7 @@ class PhoneSpeakerApp:
         title_frame = tk.Frame(self.root, bg=BG, bd=1, relief="solid")
         title_frame.pack(fill="x", padx=8, pady=(8, 4))
         tk.Label(
-            title_frame, text="◀ PhoneSpeaker v2.0 Studio ▶",
+            title_frame, text="◀ PhoneSpeaker v2.0.1 Studio ▶",
             bg=BG, fg=FG, font=FONT_MONO_LG
         ).pack(side="left", padx=8, pady=4)
 
@@ -3020,7 +3020,7 @@ class PhoneSpeakerApp:
 
     def _show_help_dialog(self) -> None:
         dlg = tk.Toplevel(self.root)
-        dlg.title("PhoneSpeaker v2.0 Studio — User Guide & Help")
+        dlg.title("PhoneSpeaker v2.0.1 Studio — User Guide & Help")
         dlg.configure(bg=BG)
         dlg.geometry("680x580")
         dlg.resizable(True, True)
@@ -3028,7 +3028,7 @@ class PhoneSpeakerApp:
         header = tk.Frame(dlg, bg=BG)
         header.pack(fill="x", padx=12, pady=(10, 6))
         tk.Label(
-            header, text="◀ PhoneSpeaker v2.0 Studio Guide ▶",
+            header, text="◀ PhoneSpeaker v2.0.1 Studio Guide ▶",
             bg=BG, fg=ACCENT, font=FONT_MONO_LG
         ).pack(side="left")
         ttk.Button(header, text="✕ Close", command=dlg.destroy).pack(side="right")
@@ -3119,7 +3119,7 @@ PLATFORMS SUPPORTED:
             img = _make_tray_image(64)
             if img is None:
                 return
-            self._tray_icon = pystray.Icon("PhoneSpeaker", img, "PhoneSpeaker v2.0", menu)
+            self._tray_icon = pystray.Icon("PhoneSpeaker", img, "PhoneSpeaker v2.0.1", menu)
             threading.Thread(target=self._tray_icon.run, daemon=True).start()
         except Exception as e:
             logger.warning("Failed to start tray icon: %s", e)

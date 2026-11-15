@@ -5,11 +5,11 @@
 
 #pragma pack(push, 1)
 struct AudioHeader {
-    uint32_t seq;
-    uint32_t timestamp_ms;
-    uint8_t codec;
-    uint8_t channels;
-    uint16_t sample_rate_div100;
+    uint32_t seq{0};
+    uint32_t timestamp_ms{0};
+    uint8_t codec{0};
+    uint8_t channels{2};
+    uint16_t sample_rate_div100{480};
 };
 #pragma pack(pop)
 
@@ -21,8 +21,15 @@ enum AudioCodec : uint8_t {
 };
 
 struct AudioPacket {
-    AudioHeader header;
+    AudioHeader header{};
     std::vector<uint8_t> payload;
-    int64_t recv_time_ns;
+    int64_t recv_time_ns{0};
+
+    bool deserialize(const uint8_t* data, size_t size) {
+        if (!data || size < sizeof(AudioHeader)) return false;
+        std::memcpy(&header, data, sizeof(AudioHeader));
+        payload.assign(data + sizeof(AudioHeader), data + size);
+        return true;
+    }
 };
 
