@@ -104,8 +104,44 @@ jobs:
           if [[ ! "$TAG_NAME" =~ ^v ]]; then
             TAG_NAME="v2.0.0"
           fi
+
+          cat << 'EOF' > RELEASE_NOTES.md
+          ### PhoneSpeaker v2.0 Studio
+
+          Low-latency wireless audio streaming & wireless mic studio for Windows 11/10, Android, Linux, macOS, and iOS.
+
+          Turn your phone into a low-latency wireless speaker or wireless microphone for your PC, Mac, or Linux machine over Wi-Fi, USB, Hotspot, or Bluetooth tethering. Featuring bidirectional control sync, multi-device party broadcast & relay, virtual microphone routing, and live latency telemetry.
+
+          ---
+
+          #### 📦 Official Platform Deliverables:
+
+          - 🪟 **Windows 11 / 10**: [`PhoneSpeaker.v2.exe`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker.v2.exe) *(or `PhoneSpeaker v2.exe`)*
+            - Standalone 64-bit executable with CoreAudio/WASAPI volume sync, Opus codec & soft-knee limiter.
+          - 🤖 **Android (8.0–15+)**: [`PhoneSpeaker.v2.apk`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker.v2.apk) *(or `PhoneSpeaker v2.apk`)*
+            - Native client powered by C++ Oboe / AAudio ultra-low-latency engine, audio focus management & wireless mic server. Universal APK for `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`.
+          - 🐧 **Linux (PipeWire / PulseAudio)**: [`PhoneSpeaker-v2-Linux-Installer.run`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-Linux-Installer.run)
+            - One-click self-extracting installer with automatic virtual sink & source routing (`PhoneSpeaker_Sink` / `PhoneSpeaker_Mic`).
+            - *Quick terminal install:* `curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_linux.sh | bash`
+          - 🍏 **macOS (Apple Silicon & Intel)**: [`PhoneSpeaker-v2-macOS.dmg`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-macOS.dmg) & [`PhoneSpeaker-v2-macOS-Installer.command`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-macOS-Installer.command)
+            - Drag-and-drop `.dmg` app bundle and interactive terminal installer supporting BlackHole 2ch loopback and system volume sync.
+          - 📱 **iOS (iPhone & iPad)**: [`PhoneSpeaker-v2-iOS.ipa`](https://github.com/HSAdib/PhoneSpeaker/releases/download/v2.0.0/PhoneSpeaker-v2-iOS.ipa)
+            - Native Swift / AVAudioEngine client for AltStore, SideStore, and Sideloadly.
+
+          ---
+
+          #### 🌟 Key Capabilities:
+          - **Ultra-Low Latency**: Sub-30ms wireless streaming using 5ms PCM16 / Opus frame pacing.
+          - **Bi-directional Audio**: Stream PC audio to phones, and stream phone microphone to PC (Discord, Zoom, OBS).
+          - **Party Mode & Multi-Device Fan-Out**: Broadcast from 1 Host PC/Phone to unlimited joiners with mesh relaying.
+          - **Two-Way Studio Sync**: Automatic bidirectional synchronization of volume, mute, audio profile, bitrate, and buffer latency.
+          - **Universal Container Mirror**: All packages mirrored to GitHub Packages OCI Registry at `ghcr.io/hsadib/phonespeaker:2.0.0`.
+          EOF
+
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
-            gh release create "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio (All Platforms)" --notes "Latest cross-platform installers for Windows, Linux, macOS, Android, and iOS."
+            gh release create "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio" --notes-file RELEASE_NOTES.md
+
+          gh release edit "$TAG_NAME" --title "PhoneSpeaker v2.0 Studio" --notes-file RELEASE_NOTES.md || true
 
           if [ ! -f "PhoneSpeaker v2.exe" ] && [ ! -f "PhoneSpeaker.v2.exe" ]; then
             gh release download "$TAG_NAME" -p "*.exe" --clobber 2>/dev/null || true
