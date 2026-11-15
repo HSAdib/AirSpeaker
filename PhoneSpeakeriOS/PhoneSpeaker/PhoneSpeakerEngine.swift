@@ -464,7 +464,8 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 pcmBuf.frameLength = frameCount
                 let left = pcmBuf.floatChannelData![0]
                 let right = pcmBuf.floatChannelData![1]
-                let gain: Float = curMuted ? 0.0 : min(2.0, max(0.0, curVolume))
+                // Stream gain (0%..200%) is already applied by PC UDPSender relative to phone hardware volume
+                let gain: Float = curMuted ? 0.0 : 1.0
 
                 // Alignment-safe byte reading directly from buffer + soft-knee limiter
                 if channels == 1 {
@@ -867,6 +868,12 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 } else if !active && isMicStreaming {
                     stopMicStreaming()
                 }
+            }
+
+        case "PARTY_KICK":
+            let targetIp = payload["target_ip"] as? String ?? ""
+            if targetIp.isEmpty || PhoneSpeakerEngine.getLocalIpv4Addresses().contains(targetIp) {
+                leaveParty()
             }
 
         default:

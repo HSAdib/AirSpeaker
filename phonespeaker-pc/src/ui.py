@@ -136,6 +136,78 @@ class _QueueAdapter:
 
 
 # ---------------------------------------------------------------------------
+# Cross-Platform Dark Studio Button
+# ---------------------------------------------------------------------------
+
+class StudioButton(ttk.Button):
+    """Cross-platform dark studio button that honors bg/fg/font on Windows, Linux, and macOS."""
+
+    def __init__(self, master=None, **kwargs):
+        self._style_name = f"StudioBtn_{id(self)}.TButton"
+        self._style = ttk.Style()
+        self._bg = kwargs.pop("bg", kwargs.pop("background", "#1A1A1A"))
+        self._fg = kwargs.pop("fg", kwargs.pop("foreground", FG))
+        self._abg = kwargs.pop("activebackground", "#2A2A2A")
+        self._afg = kwargs.pop("activeforeground", self._fg)
+        self._font = kwargs.pop("font", FONT_MONO_BOLD)
+        padx = kwargs.pop("padx", 8)
+        pady = kwargs.pop("pady", 4)
+        kwargs.pop("relief", None)
+        kwargs.pop("bd", None)
+        kwargs.pop("borderwidth", None)
+        kwargs.pop("highlightthickness", None)
+        self._padding = (padx, pady)
+        self._sync_style()
+        super().__init__(master, style=self._style_name, **kwargs)
+
+    def _sync_style(self) -> None:
+        self._style.configure(
+            self._style_name,
+            background=self._bg,
+            foreground=self._fg,
+            font=self._font,
+            padding=self._padding,
+            borderwidth=1,
+            relief="solid",
+            focusthickness=0,
+        )
+        self._style.map(
+            self._style_name,
+            background=[("active", self._abg), ("pressed", self._abg)],
+            foreground=[("active", self._afg), ("pressed", self._afg)],
+        )
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        style_dirty = False
+        if "bg" in kwargs or "background" in kwargs:
+            self._bg = kwargs.pop("bg", kwargs.pop("background", self._bg))
+            style_dirty = True
+        if "fg" in kwargs or "foreground" in kwargs:
+            self._fg = kwargs.pop("fg", kwargs.pop("foreground", self._fg))
+            style_dirty = True
+        if "activebackground" in kwargs:
+            self._abg = kwargs.pop("activebackground")
+            style_dirty = True
+        if "activeforeground" in kwargs:
+            self._afg = kwargs.pop("activeforeground")
+            style_dirty = True
+        if "font" in kwargs:
+            self._font = kwargs.pop("font")
+            style_dirty = True
+        kwargs.pop("relief", None)
+        kwargs.pop("bd", None)
+        if style_dirty:
+            self._sync_style()
+        if kwargs:
+            return super().configure(**kwargs)
+        return None
+
+    config = configure
+
+
+# ---------------------------------------------------------------------------
 # Main Application Window
 # ---------------------------------------------------------------------------
 
@@ -325,7 +397,7 @@ class PhoneSpeakerApp:
             bg=BG, fg=FG, font=FONT_MONO_LG
         ).pack(side="left", padx=8, pady=4)
 
-        tk.Button(
+        StudioButton(
             title_frame, text="? Help", bg="#222222", fg=ACCENT,
             font=FONT_MONO_BOLD, relief="ridge", bd=1, padx=6, pady=2,
             command=self._show_help_dialog
@@ -411,7 +483,7 @@ class PhoneSpeakerApp:
         )
         self.conn_vol_pct_label.pack(side="left", padx=(0, 6))
 
-        self.conn_mute_icon_btn = tk.Button(
+        self.conn_mute_icon_btn = StudioButton(
             vol_bar_row, text="🔊", bg="#1E262E", fg=FG,
             font=(_MONO_FAMILY, 11), relief="raised", bd=1, padx=6, pady=0,
             command=self._toggle_mute
@@ -519,7 +591,7 @@ class PhoneSpeakerApp:
         btn_container = tk.Frame(f, bg=BG)
         btn_container.pack(fill="x", padx=8, pady=4)
 
-        self.start_btn = tk.Button(
+        self.start_btn = StudioButton(
             btn_container, text="▶  START SPEAKER STREAM (PC → PHONE :5004)",
             bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
@@ -528,7 +600,7 @@ class PhoneSpeakerApp:
         )
         self.start_btn.pack(fill="x", pady=(0, 4))
 
-        self.mic_btn = tk.Button(
+        self.mic_btn = StudioButton(
             btn_container, text="🎤  START MIC STREAM / RECEIVER (PHONE → PC :5006)",
             bg="#112222", fg="#00EEEE", font=FONT_MONO_BOLD,
             activebackground="#003B55", activeforeground="#00EEEE",
@@ -600,7 +672,7 @@ class PhoneSpeakerApp:
             bg=BG, fg=FG, font=FONT_MONO, justify="center"
         ).pack(pady=(10, 16))
 
-        btn_choose_host = tk.Button(
+        btn_choose_host = StudioButton(
             chooser_card,
             text="👑  HOST A PARTY\n(Generate Host IP & QR Code • Broadcast PC Sound to Multiple Phones)",
             bg="#002B00", fg="#00FF00", font=FONT_MONO_BOLD,
@@ -610,7 +682,7 @@ class PhoneSpeakerApp:
         )
         btn_choose_host.pack(fill="x", padx=12, pady=(8, 12))
 
-        btn_choose_join = tk.Button(
+        btn_choose_join = StudioButton(
             chooser_card,
             text="🎧  JOIN A PARTY\n(Scan for Hosts on Wi-Fi / Hotspot • Listen & Optionally Extend via Hotspot)",
             bg="#001822", fg="#00EEEE", font=FONT_MONO_BOLD,
@@ -663,7 +735,7 @@ class PhoneSpeakerApp:
             bg="#101820", fg=FG, font=FONT_MONO_SM, justify="left", anchor="w"
         ).pack(fill="x", pady=(2, 6))
 
-        self.party_start_btn = tk.Button(
+        self.party_start_btn = StudioButton(
             host_info_left, text="👑  START PARTY BROADCAST (HOST)",
             bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
@@ -822,7 +894,7 @@ class PhoneSpeakerApp:
         ttk.Button(addr_row, text="📋 Paste QR / Join Link", command=self._on_paste_party_join_link).pack(side="left", padx=(0, 6))
 
         # Join Action Button & Status
-        self.party_join_btn = tk.Button(
+        self.party_join_btn = StudioButton(
             self.party_join_frame, text="🎧  JOIN PARTY STREAM (LISTEN TO HOST)",
             bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
@@ -851,7 +923,7 @@ class PhoneSpeakerApp:
             bg=BG, fg=FG, font=FONT_MONO_SM, justify="left", anchor="w"
         ).pack(fill="x", pady=(0, 4))
 
-        self.btn_party_extend = tk.Button(
+        self.btn_party_extend = StudioButton(
             self.party_extend_card,
             text="[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR & IP) ]",
             bg="#002B00", fg="#00EEEE", font=FONT_MONO_BOLD,
@@ -962,7 +1034,7 @@ class PhoneSpeakerApp:
         self.gain_val_label = tk.Label(v_row, text=f"{int(self.volume_gain_var.get() * 100)}%", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
         self.gain_val_label.pack(side="left")
 
-        self.mute_btn = tk.Button(
+        self.mute_btn = StudioButton(
             v_row, text="MUTE", bg="#333333", fg=FG, font=FONT_MONO_SM,
             command=self._toggle_mute
         )

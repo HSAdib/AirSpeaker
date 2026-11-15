@@ -79,17 +79,19 @@ public struct ContentView: View {
                 .padding(.vertical, 8)
 
                 // Tab Content
-                TabView(selection: $selectedTab) {
-                    PlayerStudioTab(engine: engine)
-                        .tag(0)
-                    ServerStudioTab(engine: engine)
-                        .tag(1)
-                    PartyStudioTab(engine: engine)
-                        .tag(2)
-                    SettingsStudioTab(engine: engine)
-                        .tag(3)
+                Group {
+                    switch selectedTab {
+                    case 0:
+                        PlayerStudioTab(engine: engine)
+                    case 1:
+                        ServerStudioTab(engine: engine)
+                    case 2:
+                        PartyStudioTab(engine: engine)
+                    default:
+                        SettingsStudioTab(engine: engine)
+                    }
                 }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .sheet(isPresented: $showHelpModal) {
@@ -564,6 +566,26 @@ struct PartyStudioTab: View {
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
+                        Button(action: {
+                            if engine.isAudioPlaying {
+                                engine.stopSpeakerPlayer()
+                            } else {
+                                engine.startSpeakerPlayer()
+                                engine.broadcastBeacon()
+                            }
+                        }) {
+                            Text(engine.isAudioPlaying ? "[ ■ STOP PARTY BROADCAST (HOST) ]" : "[ 👑 START PARTY BROADCAST (HOST) ]")
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundColor(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .frame(maxWidth: .infinity, minHeight: 46)
+                                .background(engine.isAudioPlaying ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.17, blue: 0.0))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
+                        }
+
+                        Text(engine.isAudioPlaying ? "PARTY STATUS: HOSTING / RELAYING (\(engine.partyMembers.count) peer(s) connected)" : "PARTY STATUS: STANDBY — Tap Start Party Broadcast")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(engine.isAudioPlaying ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+
                         // Manual Add Peer
                         HStack(spacing: 6) {
                             TextField("Peer IP (e.g. 192.168.1.55)", text: $manualPeerInput)
@@ -710,18 +732,33 @@ struct PartyStudioTab: View {
                         }
 
                         Button(action: {
-                            if !manualJoinIp.isEmpty {
-                                let (ip, port) = PhoneSpeakerEngine.parseHostIpFromUri(manualJoinIp)
-                                engine.joinParty(hostIp: ip, port: port)
+                            if engine.isAudioPlaying && engine.isPartyJoined {
+                                engine.leaveParty()
+                            } else {
+                                let target = manualJoinIp.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !target.isEmpty {
+                                    let (ip, port) = PhoneSpeakerEngine.parseHostIpFromUri(target)
+                                    engine.joinParty(hostIp: ip, port: port)
+                                } else if let firstHost = engine.discoveredPartyHosts.first {
+                                    manualJoinIp = firstHost.ip
+                                    engine.joinParty(hostIp: firstHost.ip, port: firstHost.port)
+                                }
                             }
                         }) {
-                            Text("[ 🎧 JOIN PARTY STREAM ]")
+                            Text(engine.isAudioPlaying && engine.isPartyJoined ? (engine.isPartyExtending ? "[ ■ STOP EXTENDING & LEAVE PARTY ]" : "[ ■ LEAVE PARTY STREAM ]") : "[ 🎧 JOIN PARTY STREAM ]")
                                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(Color(red: 0.0, green: 0.09, blue: 0.13))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1.5))
+                                .foregroundColor(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .frame(maxWidth: .infinity, minHeight: 46)
+                                .background(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.17, blue: 0.0))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
                         }
+
+                        Text(engine.isAudioPlaying && engine.isPartyJoined ? "PARTY JOINER: Connected to \(engine.currentPartyHostIp):5004 • Playing host sound in sync" : "PARTY JOINER: Standby — Select a host above or enter Host IP")
+                            .font(.system(size: 11, design: .monospaced))
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(red: 0.07, green: 0.07, blue: 0.07))
+                            .foregroundColor(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
 
                         // Post-Join: Extend This Party (Hotspot Repeater)
                         if engine.isPartyJoined {
