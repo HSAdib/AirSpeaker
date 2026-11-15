@@ -682,13 +682,13 @@ class MainActivity : AppCompatActivity() {
         // Buffer target slider
         val initialTarget = quantizeTarget(AudioNative.nativeGetTargetBufferMs())
         binding.sliderTargetBuffer.value = initialTarget
-        binding.tvTargetBufferValue.text = "${initialTarget.toInt()} ms"
+        binding.tvTargetBufferValue.text = if (initialTarget % 1f == 0f) "${initialTarget.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", initialTarget)
 
         binding.sliderTargetBuffer.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 val qVal = quantizeTarget(value)
                 AudioNative.nativeSetTargetBufferMs(qVal)
-                binding.tvTargetBufferValue.text = "${qVal.toInt()} ms"
+                binding.tvTargetBufferValue.text = if (qVal % 1f == 0f) "${qVal.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", qVal)
                 binding.rbBufCustom.isChecked = true
                 if (!suppressSync) binding.rbProfileCustom.isChecked = true
                 onLocalSettingChanged()
@@ -967,7 +967,14 @@ class MainActivity : AppCompatActivity() {
                 AudioNative.nativeSetPartyRelay(false)
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
+                handler.postDelayed({
+                    if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                        startPreStreamDiscoveryIfNeeded()
+                    }
+                    refreshServiceButtonState()
+                }, 500L)
             } else {
+                stopPreStreamDiscovery()
                 ControlChannel.isHostingOrExtendingParty = true
                 ControlChannel.isExtendingParty = false
                 AudioNative.nativeSetPartyRelay(true)
@@ -1003,6 +1010,12 @@ class MainActivity : AppCompatActivity() {
                 binding.btnToggleExtendParty.text = "[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR & IP) ]"
                 binding.btnToggleExtendParty.setTextColor(0xFF00EEEE.toInt())
                 binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(0xFF00EEEE.toInt())
+                handler.postDelayed({
+                    if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                        startPreStreamDiscoveryIfNeeded()
+                    }
+                    refreshServiceButtonState()
+                }, 500L)
             } else {
                 var hostIp = binding.etJoinPartyHostIp.text?.toString()?.trim().orEmpty()
                 if (hostIp.isEmpty()) {
@@ -1039,6 +1052,7 @@ class MainActivity : AppCompatActivity() {
 
                 binding.layoutPartyExtendCard.visibility = View.VISIBLE
 
+                stopPreStreamDiscovery()
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_START
                     putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
@@ -1138,6 +1152,12 @@ class MainActivity : AppCompatActivity() {
                     action = AudioStreamService.ACTION_STOP
                 }
                 startService(intent)
+                handler.postDelayed({
+                    if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                        startPreStreamDiscoveryIfNeeded()
+                    }
+                    refreshServiceButtonState()
+                }, 500L)
             } else {
                 AudioNative.nativeSetPartyRelay(false)
                 ControlChannel.isHostingOrExtendingParty = false
@@ -1323,9 +1343,11 @@ class MainActivity : AppCompatActivity() {
             binding.tvSyncRev.text = "REV: $localRev"
 
             if (json.has("custom_buffer_ms")) {
-                val buf = json.getDouble("custom_buffer_ms").toFloat().coerceIn(10f, 200f)
-                binding.sliderTargetBuffer.value = quantizeTarget(buf)
-                binding.tvTargetBufferValue.text = "${buf.toInt()} ms"
+                val buf = quantizeTarget(json.getDouble("custom_buffer_ms").toFloat())
+                if (!binding.sliderTargetBuffer.isPressed && kotlin.math.abs(binding.sliderTargetBuffer.value - buf) > 0.1f) {
+                    binding.sliderTargetBuffer.value = buf
+                }
+                binding.tvTargetBufferValue.text = if (buf % 1f == 0f) "${buf.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", buf)
                 AudioNative.nativeSetTargetBufferMs(buf)
             }
             if (json.has("buffer_mode")) {
@@ -1429,6 +1451,12 @@ class MainActivity : AppCompatActivity() {
                 action = AudioStreamService.ACTION_STOP_MIC
             }
             startService(intent)
+            handler.postDelayed({
+                if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                    startPreStreamDiscoveryIfNeeded()
+                }
+                refreshServiceButtonState()
+            }, 500L)
         } else {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 201)
@@ -1520,7 +1548,6 @@ class MainActivity : AppCompatActivity() {
         if (statusParts.isEmpty()) {
             binding.tvStatus.text = "STATUS: STOPPED"
             binding.tvStatus.setTextColor(0xFF888888.toInt())
-            startPreStreamDiscoveryIfNeeded()
         } else {
             binding.tvStatus.text = "ACTIVE: " + statusParts.joinToString(" | ")
             binding.tvStatus.setTextColor(0xFF00FF00.toInt())
@@ -1537,7 +1564,14 @@ class MainActivity : AppCompatActivity() {
             binding.latencyGraph.pushSample(safeBuffer, target, estTotal.toFloat())
 
             binding.tvBufferLevel.text = String.format("%.1f ms", safeBuffer)
-            binding.tvActiveTarget.text = "${target.toInt()} ms"
+            val targetText = if (target % 1f == 0f) "${target.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", target)
+            binding.tvActiveTarget.text = targetText
+            if (binding.rbBufAuto.isChecked && !binding.sliderTargetBuffer.isPressed) {
+                if (kotlin.math.abs(binding.sliderTargetBuffer.value - target) > 0.1f) {
+                    binding.sliderTargetBuffer.value = target
+                    binding.tvTargetBufferValue.text = targetText
+                }
+            }
             binding.tvPps.text = "${stats.rxPps} pps"
             binding.tvUnderruns.text = "${stats.underruns}"
             binding.tvLostPackets.text = "${stats.lostPackets}"

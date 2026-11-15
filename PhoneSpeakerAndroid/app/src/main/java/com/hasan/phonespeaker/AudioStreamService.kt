@@ -142,6 +142,7 @@ class AudioStreamService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "AudioStreamService.onDestroy")
         try { unregisterReceiver(noisyReceiver) } catch (_: Exception) {}
         stopAll()
     }
@@ -214,6 +215,7 @@ class AudioStreamService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notif)
             }
+            Log.d(TAG, "startForeground success")
         } catch (e: Exception) {
             Log.e(TAG, "startForeground error: ${e.message}")
         }
@@ -234,6 +236,7 @@ class AudioStreamService : Service() {
         AudioNative.nativeSetLowLatencyMode(lowLatency)
 
         val started = AudioNative.nativeStart(5004)
+        Log.d(TAG, "nativeStart result: $started")
         if (!started) {
             Log.e(TAG, "Failed to start native audio engine on port 5004")
             isStreaming = false
@@ -241,6 +244,7 @@ class AudioStreamService : Service() {
             if (!isMicStreaming) {
                 releaseLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             } else {
                 updateForegroundState()
             }
@@ -256,6 +260,7 @@ class AudioStreamService : Service() {
     }
 
     private fun stopAudioPlayer() {
+        Log.d(TAG, "stopAudioPlayer entry")
         isStreaming = false
         try {
             loudnessEnhancer?.release()

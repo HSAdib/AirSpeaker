@@ -88,17 +88,38 @@ class ControlChannel(
             listener = listenerThread
             beacon = beaconThread
             stats = statsThread
-
-            listenerThread = null
-            beaconThread = null
-            statsThread = null
         }
 
         listener?.interrupt()
         beacon?.interrupt()
         stats?.interrupt()
-        if (listener != null && listener != Thread.currentThread()) {
-            try { listener.join(150) } catch (_: Exception) {}
+
+        try {
+            listener?.join(1000)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        try {
+            beacon?.join(1000)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        try {
+            stats?.join(1000)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+
+        synchronized(this) {
+            if (listenerThread === listener) {
+                listenerThread = null
+            }
+            if (beaconThread === beacon) {
+                beaconThread = null
+            }
+            if (statsThread === stats) {
+                statsThread = null
+            }
         }
     }
 
@@ -248,7 +269,7 @@ class ControlChannel(
                     } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
-                if (isRunning) Log.e(TAG, "Failed to bind UDP $controlPort", e)
+                Log.e(TAG, "Failed to bind UDP $controlPort", e)
             } finally {
                 try { listenerSocket?.close() } catch (_: Exception) {}
             }
