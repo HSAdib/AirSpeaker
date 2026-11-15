@@ -68,6 +68,11 @@ private:
     std::thread mReopenThread;
     std::shared_ptr<oboe::AudioStream> mAudioStream;
 
+    std::atomic<uint32_t> mMaxCallbackMicros{0};
+    std::atomic<uint32_t> mAvgCallbackMicros{0};
+    std::atomic<uint32_t> mDeadlineMisses{0};
+    std::atomic<uint32_t> mBurstPeriodMicros{4000};
+
     JitterBuffer mJitterBuffer;
 };
 

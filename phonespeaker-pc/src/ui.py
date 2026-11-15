@@ -131,8 +131,18 @@ class _QueueAdapter:
             except Exception:
                 pass
 
+    def put(self, frame: bytes) -> None:
+        self.put_nowait(frame)
+
+    def put_latest(self, frame: bytes) -> None:
+        self.put_nowait(frame)
+
     def qsize(self) -> int:
         return self._q.qsize()
+
+    @property
+    def capture_overflow_drops(self) -> int:
+        return self._q.capture_overflow_drops
 
 
 # ---------------------------------------------------------------------------

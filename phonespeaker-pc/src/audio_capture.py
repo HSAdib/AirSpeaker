@@ -429,7 +429,28 @@ class AudioCapture:
         self._in_format: Optional[int] = (
             pyaudio.paFloat32 if _PYAUDIO_AVAILABLE else None
         )
+        self.capture_overflow_drops: int = 0
         self._last_diag_time: float = 0.0
+
+    def _enqueue_frame(self, frame: bytes) -> None:
+        if hasattr(self._output_queue, "put_latest"):
+            self._output_queue.put_latest(frame)
+            return
+
+        try:
+            self._output_queue.put_nowait(frame)
+        except queue.Full:
+            try:
+                self._output_queue.get_nowait()
+                self.capture_overflow_drops += 1
+            except queue.Empty:
+                pass
+            try:
+                self._output_queue.put_nowait(frame)
+            except queue.Full:
+                self.capture_overflow_drops += 1
+        except Exception:
+            pass
 
     def _report_error(self, msg: str) -> None:
         logger.error(msg)
@@ -486,8 +507,7 @@ class AudioCapture:
                     int16_arr = np.frombuffer(frame, dtype=np.int16)
                     if len(int16_arr) > 0:
                         self.peak_level = float(np.max(np.abs(int16_arr))) / 32768.0
-                    if self._output_queue.qsize() < 50:
-                        self._output_queue.put_nowait(frame)
+                    self._enqueue_frame(frame)
             except Exception as exc:
                 if self._running:
                     logger.debug("Linux parec read error: %s", exc)
@@ -634,9 +654,7 @@ class AudioCapture:
                     )
                     continue
 
-                if self._output_queue.qsize() < 50:
-                    self._output_queue.put_nowait(chunk)
-                # else: drop oldest — bounded queue overflow
+                self._enqueue_frame(chunk)
 
             # Periodic diagnostic log (every ~2s)
             now = time.monotonic()

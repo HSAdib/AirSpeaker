@@ -466,6 +466,53 @@ def test_udp_sender_party_fanout() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 12: AudioQueue drop-oldest overflow policy (Checkpoint 1)
+# ---------------------------------------------------------------------------
+def test_audio_queue_drop_oldest() -> None:
+    name = "AudioQueue drop-oldest overflow policy"
+    try:
+        from network import AudioQueue
+
+        capacity = 10
+        q = AudioQueue(maxsize=capacity)
+        for i in range(capacity):
+            q.put(f"frame_{i}".encode("ascii"))
+
+        if q.qsize() != capacity or q.capture_overflow_drops != 0:
+            check(name, False, f"queue fill failed: size={q.qsize()}, drops={q.capture_overflow_drops}")
+            return
+
+        new_frame = b"new_frame_unique"
+        q.put(new_frame)
+
+        if q.capture_overflow_drops != 1:
+            check(name, False, f"expected 1 drop, got {q.capture_overflow_drops}")
+            return
+
+        if q.qsize() != capacity:
+            check(name, False, f"expected capacity {capacity}, got {q.qsize()}")
+            return
+
+        items = []
+        while not q.empty():
+            it = q.get_nowait()
+            if it is not None:
+                items.append(it)
+
+        if b"frame_0" in items:
+            check(name, False, "oldest frame was not dropped")
+            return
+
+        if items[0] != b"frame_1" or items[-1] != new_frame:
+            check(name, False, f"frame ordering mismatch: head={items[0]}, tail={items[-1]}")
+            return
+
+        check(name, True, f"capacity={capacity}, drops={q.capture_overflow_drops}, oldest dropped, newest retained")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -486,6 +533,7 @@ def main() -> None:
     test_win_volume()
     test_phone_mic_receiver_no_drops()
     test_udp_sender_party_fanout()
+    test_audio_queue_drop_oldest()
 
     print()
     print("=" * 60)

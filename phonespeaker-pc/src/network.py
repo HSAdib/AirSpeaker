@@ -145,7 +145,7 @@ def list_real_adapters() -> List[Dict[str, Any]]:
 # Bounded audio frame ring buffer (lock-free via queue)
 # ---------------------------------------------------------------------------
 
-QUEUE_MAX_FRAMES = 60  # ~300ms cushion at 5ms/frame
+QUEUE_MAX_FRAMES = 10  # ~50ms low-latency cushion at 5ms/frame (Gaming / Low-latency default)
 
 
 class AudioQueue:
@@ -153,17 +153,32 @@ class AudioQueue:
 
     def __init__(self, maxsize: int = QUEUE_MAX_FRAMES):
         self._q: queue.Queue = queue.Queue(maxsize=maxsize)
+        self.maxsize: int = maxsize
+        self.capture_overflow_drops: int = 0
 
     def put(self, frame: bytes) -> None:
-        while self._q.full():
-            try:
-                self._q.get_nowait()  # Drop oldest
-            except queue.Empty:
-                break
+        try:
+            self._q.put_nowait(frame)
+            return
+        except queue.Full:
+            pass
+
+        try:
+            self._q.get_nowait()
+            self.capture_overflow_drops += 1
+        except queue.Empty:
+            pass
+
         try:
             self._q.put_nowait(frame)
         except queue.Full:
-            pass
+            self.capture_overflow_drops += 1
+
+    def put_nowait(self, frame: bytes) -> None:
+        self.put(frame)
+
+    def put_latest(self, frame: bytes) -> None:
+        self.put(frame)
 
     def get_nowait(self) -> Optional[bytes]:
         try:
@@ -179,6 +194,12 @@ class AudioQueue:
 
     def qsize(self) -> int:
         return self._q.qsize()
+
+    def empty(self) -> bool:
+        return self._q.empty()
+
+    def full(self) -> bool:
+        return self._q.full()
 
     def clear(self) -> None:
         while True:

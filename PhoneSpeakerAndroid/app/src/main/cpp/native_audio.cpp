@@ -19,7 +19,7 @@ bool NativeAudioEngine::start(int audio_port) {
 
     mAudioPort = audio_port;
     mIsRunning.store(true);
-    mJitterBuffer.reset();
+    mJitterBuffer.start();
 
     // 1. Open UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -86,7 +86,7 @@ void NativeAudioEngine::stop() {
     }
 
     closeOboeStream();
-    mJitterBuffer.reset();
+    mJitterBuffer.stop();
     LOGI("NativeAudioEngine stopped");
 }
 
@@ -125,6 +125,7 @@ bool NativeAudioEngine::openAndStartOboeStream() {
 
     // Configure burst buffer size for optimal latency/stability balance
     int32_t burst = std::max(192, mAudioStream->getFramesPerBurst());
+    mBurstPeriodMicros.store(static_cast<uint32_t>((burst * 1000000) / 48000), std::memory_order_relaxed);
     int32_t mult = mLowLatencyMode.load() ? 3 : 4;
     mAudioStream->setBufferSizeInFrames(burst * mult);
 
@@ -248,22 +249,44 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(oboe::AudioStream* /*st
     if (!audioData || numFrames <= 0) {
         return oboe::DataCallbackResult::Continue;
     }
+
+    auto tStart = std::chrono::steady_clock::now();
+
     int16_t* pcmOut = static_cast<int16_t*>(audioData);
+
+    // Guaranteed lock-free read from SPSC ring buffer: ZERO mutexes, ZERO allocations!
     mJitterBuffer.readAudio(pcmOut, numFrames);
-    if (mMuted.load() || mVolumeGain.load() <= 0.0001f) {
+
+    if (mMuted.load(std::memory_order_relaxed) || mVolumeGain.load(std::memory_order_relaxed) <= 0.0001f) {
         std::memset(pcmOut, 0, numFrames * 2 * sizeof(int16_t));
-        return oboe::DataCallbackResult::Continue;
-    }
-    float gain = mVolumeGain.load();
-    if (gain != 1.0f) {
-        int total = numFrames * 2;
-        for (int i = 0; i < total; i++) {
-            int32_t val = static_cast<int32_t>(pcmOut[i] * gain);
-            if (val > 32767) val = 32767;
-            else if (val < -32768) val = -32768;
-            pcmOut[i] = static_cast<int16_t>(val);
+    } else {
+        float gain = mVolumeGain.load(std::memory_order_relaxed);
+        if (gain != 1.0f) {
+            int total = numFrames * 2;
+            for (int i = 0; i < total; i++) {
+                int32_t val = static_cast<int32_t>(pcmOut[i] * gain);
+                if (val > 32767) val = 32767;
+                else if (val < -32768) val = -32768;
+                pcmOut[i] = static_cast<int16_t>(val);
+            }
         }
     }
+
+    auto tEnd = std::chrono::steady_clock::now();
+    uint32_t elapsedMicros = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(tEnd - tStart).count()
+    );
+
+    uint32_t curMax = mMaxCallbackMicros.load(std::memory_order_relaxed);
+    while (elapsedMicros > curMax && !mMaxCallbackMicros.compare_exchange_weak(curMax, elapsedMicros, std::memory_order_relaxed));
+
+    uint32_t curAvg = mAvgCallbackMicros.load(std::memory_order_relaxed);
+    mAvgCallbackMicros.store((curAvg * 63 + elapsedMicros) / 64, std::memory_order_relaxed);
+
+    if (elapsedMicros > mBurstPeriodMicros.load(std::memory_order_relaxed)) {
+        mDeadlineMisses.fetch_add(1, std::memory_order_relaxed);
+    }
+
     return oboe::DataCallbackResult::Continue;
 }
 
@@ -373,7 +396,11 @@ int32_t NativeAudioEngine::getAudioSessionId() const {
 }
 
 JitterStats NativeAudioEngine::getStats() {
-    return mJitterBuffer.getStats();
+    JitterStats stats = mJitterBuffer.getStats();
+    stats.max_callback_micros = mMaxCallbackMicros.load(std::memory_order_relaxed);
+    stats.avg_callback_micros = mAvgCallbackMicros.load(std::memory_order_relaxed);
+    stats.deadline_misses = mDeadlineMisses.load(std::memory_order_relaxed);
+    return stats;
 }
 
 std::string NativeAudioEngine::getSenderIp() {

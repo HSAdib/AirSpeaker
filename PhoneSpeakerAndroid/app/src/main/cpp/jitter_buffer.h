@@ -2,12 +2,15 @@
 
 #include "protocol.h"
 #include "opus_wrapper.h"
+#include "pcm_ring_buffer.h"
 #include <mutex>
+#include <condition_variable>
 #include <map>
 #include <vector>
 #include <atomic>
 #include <cstring>
 #include <chrono>
+#include <thread>
 
 struct JitterStats {
     float buffer_ms{0.0f};
@@ -18,6 +21,13 @@ struct JitterStats {
     uint32_t rx_pps{0};
     uint8_t active_codec{0};
     bool auto_mode{true};
+    uint32_t ring_occupied_frames{0};
+    uint32_t ring_overflow_drops{0};
+    uint32_t concealed_packets{0};
+    uint32_t intentional_drift_drops{0};
+    uint32_t max_callback_micros{0};
+    uint32_t avg_callback_micros{0};
+    uint32_t deadline_misses{0};
 };
 
 class JitterBuffer {
@@ -25,26 +35,45 @@ public:
     JitterBuffer();
     ~JitterBuffer();
 
+    void start();
+    void stop();
+    void reset();
+
     void pushPacket(const AudioPacket& packet);
+
+    // Guaranteed real-time safe for Oboe onAudioReady():
+    // ZERO mutexes, ZERO allocations, ZERO opus_decode, ZERO vector erases.
     int readAudio(int16_t* out_samples, int num_frames);
 
     void setTargetBufferMs(float target_ms);
     float getTargetBufferMs() const;
     void setAutoMode(bool enabled);
     bool isAutoMode() const;
-    void reset();
 
     JitterStats getStats();
 
-private:
-    void adaptTargetBuffer();
-    void popNextPacketOrConceal();
-    void concealPcmGap(int frames);
-    void concealOpusGap(int frames, uint32_t missing_seq);
+    PcmRingBuffer& getRingBuffer() { return mPcmRingBuffer; }
 
-    mutable std::mutex mMutex;
+    // Instrumentation counters
+    uint32_t getConcealedPackets() const { return mConcealedPackets.load(std::memory_order_relaxed); }
+    uint32_t getIntentionalDriftDrops() const { return mIntentionalDriftDrops.load(std::memory_order_relaxed); }
+    uint32_t getDuplicatePackets() const { return mDuplicatePackets.load(std::memory_order_relaxed); }
+
+private:
+    void decodeWorkerLoop();
+    void processPackets(int16_t* decoded_buf);
+    void adaptTargetBuffer();
+    void concealPcmGap(int frames, int16_t* out_buf);
+
+    PcmRingBuffer mPcmRingBuffer;
+
+    mutable std::mutex mPacketMutex;
     std::map<uint32_t, AudioPacket> mPacketMap;
-    std::vector<int16_t> mPcmFifo;
+
+    std::atomic<bool> mIsRunning{false};
+    std::thread mDecodeThread;
+    std::mutex mConditionMutex;
+    std::condition_variable mCondition;
 
     bool mHasStarted{false};
     bool mIsPrebuffering{true};
@@ -67,6 +96,9 @@ private:
     std::atomic<uint32_t> mLateCount{0};
     std::atomic<uint32_t> mRxPacketsInterval{0};
     std::atomic<uint32_t> mCurrentRxPps{0};
+    std::atomic<uint32_t> mConcealedPackets{0};
+    std::atomic<uint32_t> mIntentionalDriftDrops{0};
+    std::atomic<uint32_t> mDuplicatePackets{0};
 
     std::chrono::steady_clock::time_point mLastPacketRecvTime;
     std::chrono::steady_clock::time_point mLastPpsTime;

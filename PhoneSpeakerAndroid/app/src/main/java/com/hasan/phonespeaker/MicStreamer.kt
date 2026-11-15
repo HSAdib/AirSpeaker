@@ -255,25 +255,57 @@ class MicStreamer {
     }
 
     fun stop() {
-        isRunning.set(false)
-        workerThread?.interrupt()
-        workerThread = null
+        val wasRunning = isRunning.getAndSet(false)
+        val worker = workerThread
+        val rec = audioRecord
+        val ns = noiseSuppressor
+        val aec = echoCanceler
+        val autoGain = agc
 
-        try {
-            noiseSuppressor?.release()
-            echoCanceler?.release()
-            agc?.release()
-        } catch (_: Exception) {}
+        workerThread = null
+        audioRecord = null
         noiseSuppressor = null
         echoCanceler = null
         agc = null
 
+        // 1. Unblock AudioRecord.read() by stopping the recorder
         try {
-            audioRecord?.stop()
-            audioRecord?.release()
+            rec?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecord.stop error during shutdown: ${e.message}")
+        }
+
+        // 2. Interrupt worker thread
+        worker?.interrupt()
+
+        // 3. Join worker thread with 1000ms bounded timeout
+        if (worker != null && worker != Thread.currentThread()) {
+            try {
+                worker.join(1000)
+                if (worker.isAlive) {
+                    Log.e(TAG, "MicStreamer worker thread did not terminate within 1000ms")
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                Log.w(TAG, "Interrupted while joining MicStreamer worker")
+            }
+        }
+
+        // 4. Release AudioRecord and audio effects strictly after worker has exited
+        try {
+            ns?.release()
         } catch (_: Exception) {}
-        audioRecord = null
+        try {
+            aec?.release()
+        } catch (_: Exception) {}
+        try {
+            autoGain?.release()
+        } catch (_: Exception) {}
+        try {
+            rec?.release()
+        } catch (_: Exception) {}
+
         txPps.set(0)
-        Log.i(TAG, "MicStreamer stopped")
+        Log.i(TAG, "MicStreamer stopped cleanly (wasRunning=$wasRunning)")
     }
 }

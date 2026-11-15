@@ -17,13 +17,34 @@ JitterBuffer::JitterBuffer() {
 }
 
 JitterBuffer::~JitterBuffer() {
+    stop();
+}
+
+void JitterBuffer::start() {
+    if (mIsRunning.exchange(true)) return;
+    reset();
+    mIsRunning.store(true);
+    mDecodeThread = std::thread(&JitterBuffer::decodeWorkerLoop, this);
+}
+
+void JitterBuffer::stop() {
+    if (!mIsRunning.exchange(false)) return;
+    {
+        std::lock_guard<std::mutex> lock(mConditionMutex);
+        mCondition.notify_all();
+    }
+    if (mDecodeThread.joinable()) {
+        mDecodeThread.join();
+    }
     reset();
 }
 
 void JitterBuffer::reset() {
-    std::lock_guard<std::mutex> lock(mMutex);
-    mPacketMap.clear();
-    mPcmFifo.clear();
+    {
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+        mPacketMap.clear();
+    }
+    mPcmRingBuffer.reset();
     mHasStarted = false;
     mIsPrebuffering = true;
     mExpectedSeq = 0;
@@ -34,54 +55,315 @@ void JitterBuffer::reset() {
 }
 
 void JitterBuffer::pushPacket(const AudioPacket& packet) {
-    std::lock_guard<std::mutex> lock(mMutex);
-
     auto now = std::chrono::steady_clock::now();
-    auto idleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPacketRecvTime).count();
     mLastPacketRecvTime = now;
 
-    mRxPacketsInterval++;
+    mRxPacketsInterval.fetch_add(1, std::memory_order_relaxed);
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPpsTime).count();
     if (elapsed >= 1000) {
-        mCurrentRxPps = (mRxPacketsInterval.load() * 1000) / elapsed;
-        mRxPacketsInterval = 0;
+        mCurrentRxPps.store((mRxPacketsInterval.exchange(0) * 1000) / elapsed, std::memory_order_relaxed);
         mLastPpsTime = now;
     }
 
     mCurrentCodec = packet.header.codec;
-    mChannels = 2; // Oboe output stream is always stereo (2 channels)
+    mChannels = 2; // Output stream is always stereo
     if (packet.header.sample_rate_div100 > 0) {
         mSampleRate = packet.header.sample_rate_div100 * 100;
     }
 
-    if (!mHasStarted || idleMs > 500) {
-        mPacketMap.clear();
-        mPcmFifo.clear();
-        mExpectedSeq = packet.header.seq;
-        mConsecutiveLosses = 0;
-        mIsPrebuffering = true;
-        mHasStarted = true;
-    } else {
-        int32_t diff = seqDiff(packet.header.seq, mExpectedSeq);
-        if (diff < -100 || diff > 1000) {
+    {
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+
+        if (!mHasStarted) {
             mPacketMap.clear();
-            mPcmFifo.clear();
+            mPcmRingBuffer.reset();
             mExpectedSeq = packet.header.seq;
             mConsecutiveLosses = 0;
-            mIsPrebuffering = false;
-        } else if (diff < 0) {
-            mLateCount++;
+            mIsPrebuffering = true;
+            mHasStarted = true;
+        } else {
+            int32_t diff = seqDiff(packet.header.seq, mExpectedSeq);
+            if (diff < -100 || diff > 1000) {
+                // Large sequence discontinuity (sender restarted or jumped)
+                mPacketMap.clear();
+                mPcmRingBuffer.reset();
+                mExpectedSeq = packet.header.seq;
+                mConsecutiveLosses = 0;
+                mIsPrebuffering = false;
+            } else if (diff < 0) {
+                mLateCount.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+        }
+
+        if (mPacketMap.find(packet.header.seq) != mPacketMap.end()) {
+            mDuplicatePackets.fetch_add(1, std::memory_order_relaxed);
             return;
+        }
+
+        mPacketMap[packet.header.seq] = packet;
+
+        // Bounded capacity on packet map (100 packets = ~500ms)
+        while (mPacketMap.size() > 100) {
+            mPacketMap.erase(mPacketMap.begin());
+            if (!mPacketMap.empty() && seqDiff(mPacketMap.begin()->first, mExpectedSeq) > 0) {
+                mExpectedSeq = mPacketMap.begin()->first;
+            }
         }
     }
 
-    mPacketMap[packet.header.seq] = packet;
+    // Notify decode worker that new data has arrived
+    mCondition.notify_one();
+}
 
-    while (mPacketMap.size() > 100) {
-        mPacketMap.erase(mPacketMap.begin());
-        if (!mPacketMap.empty() && seqDiff(mPacketMap.begin()->first, mExpectedSeq) > 0) {
+int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
+    // REAL-TIME SAFE: No mutex, no allocations, no decoding, no vector resizing!
+    return mPcmRingBuffer.readFrames(out_samples, num_frames);
+}
+
+void JitterBuffer::decodeWorkerLoop() {
+    int16_t decoded_buf[960 * 2]; // Scratch buffer for up to 20ms at 48kHz stereo
+
+    while (mIsRunning.load(std::memory_order_relaxed)) {
+        {
+            std::unique_lock<std::mutex> lock(mConditionMutex);
+            mCondition.wait_for(lock, std::chrono::milliseconds(3), [this] {
+                if (!mIsRunning.load(std::memory_order_relaxed)) return true;
+                std::lock_guard<std::mutex> pLock(mPacketMutex);
+                return !mPacketMap.empty();
+            });
+        }
+
+        if (!mIsRunning.load(std::memory_order_relaxed)) break;
+
+        processPackets(decoded_buf);
+    }
+}
+
+void JitterBuffer::processPackets(int16_t* decoded_buf) {
+    auto now = std::chrono::steady_clock::now();
+    auto sinceLastRxMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPacketRecvTime).count();
+    if (sinceLastRxMs > 1500) {
+        mCurrentRxPps.store(0, std::memory_order_relaxed);
+    }
+    if (!mHasStarted || sinceLastRxMs > 800) {
+        mHasStarted = false;
+        mIsPrebuffering = true;
+        return;
+    }
+
+    adaptTargetBuffer();
+
+    float ringOccupiedMs = mPcmRingBuffer.getOccupiedMs(mSampleRate);
+    size_t packetQueueSize = 0;
+    {
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+        packetQueueSize = mPacketMap.size();
+    }
+    float totalQueuedMs = (packetQueueSize * mPacketDurationMs) + ringOccupiedMs;
+
+    // Startup prebuffering: wait until queued audio reaches configured target buffer
+    if (mIsPrebuffering) {
+        float startThreshold = std::clamp(mTargetBufferMs, 10.0f, 200.0f);
+        int minPackets = std::max(2, static_cast<int>(startThreshold / std::max(1.0f, mPacketDurationMs)));
+        if (totalQueuedMs < startThreshold && static_cast<int>(packetQueueSize) < minPackets) {
+            return;
+        }
+        mIsPrebuffering = false;
+        mConsecutiveLosses = 0;
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+        if (!mPacketMap.empty()) {
             mExpectedSeq = mPacketMap.begin()->first;
         }
+    }
+
+    // Decode packets and push PCM to the SPSC ring buffer while space permits
+    while (mPcmRingBuffer.getOccupiedFrames() + 480 <= PcmRingBuffer::CAPACITY_FRAMES) {
+        // Drift trimming: if total queued duration exceeds target + 15ms, discard oldest packet
+        {
+            std::lock_guard<std::mutex> lock(mPacketMutex);
+            float currentQueuedMs = (mPacketMap.size() * mPacketDurationMs) + mPcmRingBuffer.getOccupiedMs(mSampleRate);
+            if (currentQueuedMs > (mTargetBufferMs + 15.0f) && mPacketMap.size() > 4) {
+                auto oldest = mPacketMap.begin();
+                mExpectedSeq = oldest->first + 1;
+                mPacketMap.erase(oldest);
+                mIntentionalDriftDrops.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+        bool has_packet = false;
+        AudioPacket pkt;
+        bool has_next_fec_candidate = false;
+        AudioPacket next_pkt;
+
+        {
+            std::lock_guard<std::mutex> lock(mPacketMutex);
+            if (mPacketMap.empty()) {
+                if (mConsecutiveLosses >= 8) {
+                    mIsPrebuffering = true;
+                }
+                break;
+            }
+
+            // If sequence is far behind, catch up
+            uint32_t earliestSeq = mPacketMap.begin()->first;
+            int32_t gap = seqDiff(earliestSeq, mExpectedSeq);
+            if (gap > 4 || (mConsecutiveLosses >= 2 && gap > 0)) {
+                mExpectedSeq = earliestSeq;
+            }
+
+            auto it = mPacketMap.find(mExpectedSeq);
+            if (it != mPacketMap.end()) {
+                pkt = it->second;
+                mPacketMap.erase(it);
+                has_packet = true;
+            } else {
+                // Gap detected: check if next packet N+1 is available for Opus in-band FEC
+                if (mCurrentCodec != CODEC_PCM16) {
+                    auto nextIt = mPacketMap.find(mExpectedSeq + 1);
+                    if (nextIt != mPacketMap.end() && !nextIt->second.payload.empty()) {
+                        next_pkt = nextIt->second;
+                        has_next_fec_candidate = true;
+                    }
+                }
+            }
+        }
+
+        if (has_packet) {
+            // Normal decode
+            int total_frames = 0;
+            const int pktChannels = (pkt.header.channels == 1) ? 1 : 2;
+
+            if (pkt.header.codec == CODEC_PCM16) {
+                int frame_count = pkt.payload.size() / (pktChannels * sizeof(int16_t));
+                if (frame_count <= 0) frame_count = 240;
+                mLastFrameSamplesPerCh = frame_count;
+                mPacketDurationMs = (frame_count * 1000.0f) / mSampleRate;
+                total_frames = frame_count;
+
+                if (pktChannels == 2) {
+                    int copyBytes = std::min(static_cast<size_t>(frame_count * 2 * sizeof(int16_t)), pkt.payload.size());
+                    std::memcpy(decoded_buf, pkt.payload.data(), copyBytes);
+                } else {
+                    const int16_t* monoPtr = reinterpret_cast<const int16_t*>(pkt.payload.data());
+                    int availMono = std::min(frame_count, static_cast<int>(pkt.payload.size() / sizeof(int16_t)));
+                    for (int i = 0; i < availMono; i++) {
+                        decoded_buf[i * 2] = monoPtr[i];
+                        decoded_buf[i * 2 + 1] = monoPtr[i];
+                    }
+                }
+            } else {
+                int max_frames = 960;
+                int decoded = mOpusDecoder.decode(pkt.payload.data(), pkt.payload.size(), decoded_buf, max_frames, false);
+                if (decoded > 0) {
+                    mLastFrameSamplesPerCh = decoded;
+                    mPacketDurationMs = (decoded * 1000.0f) / mSampleRate;
+                    total_frames = decoded;
+                } else {
+                    total_frames = mLastFrameSamplesPerCh;
+                    std::memset(decoded_buf, 0, total_frames * 2 * sizeof(int16_t));
+                }
+            }
+
+            // Stereo-coherent crossfade if recovering from packet loss (Checkpoint 5)
+            if (mConsecutiveLosses > 0 && total_frames > 0 && !mLastValidFrame.empty()) {
+                int fade_frames = std::min({32, total_frames, static_cast<int>(mLastValidFrame.size() / 2)});
+                if (fade_frames > 0) {
+                    size_t tailOffset = mLastValidFrame.size() - static_cast<size_t>(fade_frames * 2);
+                    for (size_t f = 0; f < static_cast<size_t>(fade_frames); ++f) {
+                        const float alpha = static_cast<float>(f + 1) / static_cast<float>(fade_frames);
+                        for (int ch = 0; ch < 2; ++ch) {
+                            size_t idx = f * 2 + ch;
+                            decoded_buf[idx] = static_cast<int16_t>(
+                                mLastValidFrame[tailOffset + idx] * (1.0f - alpha) + decoded_buf[idx] * alpha
+                            );
+                        }
+                    }
+                }
+            }
+
+            if (total_frames > 0) {
+                mLastValidFrame.assign(decoded_buf, decoded_buf + total_frames * 2);
+                mPcmRingBuffer.writeFrames(decoded_buf, total_frames);
+            }
+
+            mConsecutiveLosses = 0;
+            mExpectedSeq++;
+        } else {
+            // Gap detected: frame mExpectedSeq is missing
+            mLostCount.fetch_add(1, std::memory_order_relaxed);
+
+            auto underrunNow = std::chrono::steady_clock::now();
+            if (mAutoMode.load()) {
+                auto sinceLastBumpMs = std::chrono::duration_cast<std::chrono::milliseconds>(underrunNow - mLastUnderrunAdaptTime).count();
+                if (sinceLastBumpMs >= 300) {
+                    mTargetBufferMs = std::min(200.0f, mTargetBufferMs + 5.0f);
+                    mLastUnderrunAdaptTime = underrunNow;
+                }
+            }
+
+            int total_frames = 0;
+
+            // Checkpoint 4: Opus FEC Sequencing
+            // If next packet N+1 is available in mPacketMap, decode it with decode_fec=true to reconstruct frame N.
+            // Packet N+1 remains in mPacketMap to be decoded normally with decode_fec=false on the next step!
+            if (has_next_fec_candidate) {
+                int fec_decoded = mOpusDecoder.decode(next_pkt.payload.data(), next_pkt.payload.size(),
+                                                      decoded_buf, mLastFrameSamplesPerCh, /*decode_fec=*/true);
+                if (fec_decoded > 0) {
+                    total_frames = fec_decoded;
+                    mConcealedPackets.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+
+            if (total_frames <= 0) {
+                // Fallback PLC concealment (no N+1 available or PCM mode)
+                if (mCurrentCodec != CODEC_PCM16) {
+                    int plc_decoded = mOpusDecoder.decode(nullptr, 0, decoded_buf, mLastFrameSamplesPerCh, false);
+                    if (plc_decoded > 0) {
+                        total_frames = plc_decoded;
+                    } else {
+                        total_frames = mLastFrameSamplesPerCh;
+                        std::memset(decoded_buf, 0, total_frames * 2 * sizeof(int16_t));
+                    }
+                } else {
+                    total_frames = mLastFrameSamplesPerCh;
+                    concealPcmGap(total_frames, decoded_buf);
+                }
+                mConcealedPackets.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            if (total_frames > 0) {
+                mLastValidFrame.assign(decoded_buf, decoded_buf + total_frames * 2);
+                mPcmRingBuffer.writeFrames(decoded_buf, total_frames);
+            }
+
+            mConsecutiveLosses++;
+            mExpectedSeq++;
+
+            if (mConsecutiveLosses >= 8) {
+                mIsPrebuffering = true;
+                break;
+            }
+        }
+    }
+}
+
+void JitterBuffer::concealPcmGap(int frames, int16_t* out_buf) {
+    int total_samples = frames * mChannels;
+    if (mConsecutiveLosses >= 6 || mLastValidFrame.empty()) {
+        std::memset(out_buf, 0, total_samples * sizeof(int16_t));
+        return;
+    }
+
+    float factor = std::pow(0.8f, static_cast<float>(mConsecutiveLosses + 1));
+    int copyCount = std::min(static_cast<int>(mLastValidFrame.size()), total_samples);
+
+    for (int i = 0; i < copyCount; i++) {
+        out_buf[i] = static_cast<int16_t>(mLastValidFrame[i] * factor);
+    }
+    if (copyCount < total_samples) {
+        std::memset(out_buf + copyCount, 0, (total_samples - copyCount) * sizeof(int16_t));
     }
 }
 
@@ -97,249 +379,11 @@ void JitterBuffer::adaptTargetBuffer() {
     }
 }
 
-int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
-    std::lock_guard<std::mutex> lock(mMutex);
-
-    size_t needed_samples = static_cast<size_t>(num_frames * mChannels);
-
-    auto now = std::chrono::steady_clock::now();
-    auto sinceLastRxMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPacketRecvTime).count();
-    if (sinceLastRxMs > 1500) {
-        mCurrentRxPps = 0;
-    }
-
-    if (!mHasStarted || sinceLastRxMs > 800) {
-        mHasStarted = false;
-        mIsPrebuffering = true;
-        std::memset(out_samples, 0, needed_samples * sizeof(int16_t));
-        return num_frames;
-    }
-
-    adaptTargetBuffer();
-
-    float fifoMs = (mPcmFifo.size() > 0 && mSampleRate > 0)
-        ? (mPcmFifo.size() * 1000.0f / (mChannels * mSampleRate))
-        : 0.0f;
-    float currentBufferMs = (mPacketMap.size() * mPacketDurationMs) + fifoMs;
-
-    // Only prebuffer once at stream startup (never re-enter prebuffering mid-stream!)
-    if (mIsPrebuffering) {
-        float startThreshold = std::clamp(mTargetBufferMs, 10.0f, 200.0f);
-        int minPackets = std::max(2, static_cast<int>(startThreshold / std::max(1.0f, mPacketDurationMs)));
-        if (currentBufferMs < startThreshold && static_cast<int>(mPacketMap.size()) < minPackets) {
-            std::memset(out_samples, 0, needed_samples * sizeof(int16_t));
-            return num_frames;
-        }
-        mIsPrebuffering = false;
-        mConsecutiveLosses = 0;
-        if (!mPacketMap.empty()) {
-            mExpectedSeq = mPacketMap.begin()->first;
-        }
-    }
-
-    while (mPcmFifo.size() < needed_samples) {
-        if (mPacketMap.empty() && mConsecutiveLosses >= 8) {
-            mIsPrebuffering = true;
-            break;
-        }
-        popNextPacketOrConceal();
-    }
-
-    size_t available = std::min(needed_samples, mPcmFifo.size());
-    if (available > 0) {
-        std::memcpy(out_samples, mPcmFifo.data(), available * sizeof(int16_t));
-        mPcmFifo.erase(mPcmFifo.begin(), mPcmFifo.begin() + available);
-    }
-    if (available < needed_samples) {
-        std::memset(reinterpret_cast<uint8_t*>(out_samples) + (available * sizeof(int16_t)), 0,
-                    (needed_samples - available) * sizeof(int16_t));
-    }
-
-    return num_frames;
-}
-
-void JitterBuffer::popNextPacketOrConceal() {
-    float fifoMs = (mPcmFifo.size() > 0 && mSampleRate > 0)
-        ? (mPcmFifo.size() * 1000.0f / (mChannels * mSampleRate))
-        : 0.0f;
-    float totalQueuedMs = (mPacketMap.size() * mPacketDurationMs) + fifoMs;
-
-    // Soft anti-drift: only trim if excess exceeds target + 35ms (and at least 45ms total)
-    float maxAllowedMs = std::max(45.0f, mTargetBufferMs + 35.0f);
-    if (totalQueuedMs > maxAllowedMs && mPacketMap.size() > 8) {
-        auto oldest = mPacketMap.begin();
-        if (oldest->second.header.codec != CODEC_PCM16 && !oldest->second.payload.empty()) {
-            int16_t discard_buf[960 * 2];
-            int dec = mOpusDecoder.decode(oldest->second.payload.data(), oldest->second.payload.size(), discard_buf, 960, false);
-            if (dec > 0) {
-                int total_samples = dec * mChannels;
-                if (mLastValidFrame.size() < static_cast<size_t>(total_samples)) {
-                    mLastValidFrame.resize(total_samples);
-                }
-                std::memcpy(mLastValidFrame.data(), discard_buf, total_samples * sizeof(int16_t));
-                mConsecutiveLosses = 1;
-            }
-        }
-        mExpectedSeq = oldest->first + 1;
-        mPacketMap.erase(oldest);
-    }
-
-    // If mExpectedSeq is missing but newer packets are already waiting in mPacketMap, snap forward after 1 loss or gap > 2
-    if (!mPacketMap.empty()) {
-        uint32_t earliestSeq = mPacketMap.begin()->first;
-        int32_t gap = seqDiff(earliestSeq, mExpectedSeq);
-        if (gap > 2 || (mConsecutiveLosses >= 1 && gap > 0)) {
-            mExpectedSeq = earliestSeq;
-        }
-    }
-
-    auto it = mPacketMap.find(mExpectedSeq);
-    if (it != mPacketMap.end()) {
-        const auto& pkt = it->second;
-        size_t old_size = mPcmFifo.size();
-        int total_samples = 0;
-
-        const int pktChannels = (pkt.header.channels == 1) ? 1 : 2;
-        mChannels = 2; // Oboe output stream is always stereo (2 channels)
-
-        if (pkt.header.codec == CODEC_PCM16) {
-            int frame_count = pkt.payload.size() / (pktChannels * sizeof(int16_t));
-            if (frame_count <= 0) frame_count = 240;
-            mLastFrameSamplesPerCh = frame_count;
-            mPacketDurationMs = (frame_count * 1000.0f) / mSampleRate;
-
-            total_samples = frame_count * 2;
-            mPcmFifo.resize(old_size + total_samples);
-
-            if (pktChannels == 2) {
-                int copyBytes = std::min(static_cast<size_t>(total_samples * sizeof(int16_t)), pkt.payload.size());
-                std::memcpy(mPcmFifo.data() + old_size, pkt.payload.data(), copyBytes);
-            } else {
-                const int16_t* monoPtr = reinterpret_cast<const int16_t*>(pkt.payload.data());
-                int16_t* stereoOut = mPcmFifo.data() + old_size;
-                int availMono = std::min(frame_count, static_cast<int>(pkt.payload.size() / sizeof(int16_t)));
-                for (int i = 0; i < availMono; i++) {
-                    stereoOut[i * 2] = monoPtr[i];
-                    stereoOut[i * 2 + 1] = monoPtr[i];
-                }
-            }
-        } else {
-            int max_frames = 960;
-            int16_t decoded_buf[960 * 2];
-            int decoded = mOpusDecoder.decode(pkt.payload.data(), pkt.payload.size(), decoded_buf, max_frames, false);
-            if (decoded > 0) {
-                mLastFrameSamplesPerCh = decoded;
-                mPacketDurationMs = (decoded * 1000.0f) / mSampleRate;
-
-                total_samples = decoded * 2;
-                mPcmFifo.resize(old_size + total_samples);
-                std::memcpy(mPcmFifo.data() + old_size, decoded_buf, total_samples * sizeof(int16_t));
-            } else {
-                total_samples = mLastFrameSamplesPerCh * 2;
-                mPcmFifo.resize(old_size + total_samples, 0);
-            }
-        }
-
-        // Smooth 32-sample crossfade if recovering from packet loss/concealment
-        if (mConsecutiveLosses > 0 && total_samples > 0 && !mLastValidFrame.empty()) {
-            int fade_samples = std::min({32 * mChannels, total_samples, static_cast<int>(mLastValidFrame.size())});
-            int16_t* new_ptr = mPcmFifo.data() + old_size;
-            size_t tailOffset = mLastValidFrame.size() - static_cast<size_t>(fade_samples);
-            for (int i = 0; i < fade_samples; i++) {
-                float alpha = static_cast<float>(i) / static_cast<float>(fade_samples);
-                new_ptr[i] = static_cast<int16_t>(mLastValidFrame[tailOffset + i] * (1.0f - alpha) + new_ptr[i] * alpha);
-            }
-        }
-
-        if (total_samples > 0) {
-            if (mLastValidFrame.size() < static_cast<size_t>(total_samples)) {
-                mLastValidFrame.resize(total_samples);
-            }
-            std::memcpy(mLastValidFrame.data(), mPcmFifo.data() + old_size, total_samples * sizeof(int16_t));
-        }
-
-        mPacketMap.erase(it);
-        mExpectedSeq++;
-        mConsecutiveLosses = 0;
-    } else {
-        if (!mPacketMap.empty()) {
-            mLostCount++;
-        } else if (mConsecutiveLosses == 0) {
-            mUnderrunCount++;
-        }
-
-        auto now = std::chrono::steady_clock::now();
-        if (mAutoMode.load()) {
-            auto sinceLastBumpMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastUnderrunAdaptTime).count();
-            if (sinceLastBumpMs >= 300) {
-                mTargetBufferMs = std::min(200.0f, mTargetBufferMs + 5.0f);
-                mLastUnderrunAdaptTime = now;
-            }
-        }
-
-        int conceal_frames = mLastFrameSamplesPerCh;
-        if (mCurrentCodec == CODEC_PCM16 || mPacketMap.empty()) {
-            // When mPacketMap is empty (jitter underrun), use smooth PCM decay so we don't corrupt Opus decoder state for the arriving packet!
-            concealPcmGap(conceal_frames);
-        } else {
-            concealOpusGap(conceal_frames, mExpectedSeq);
-        }
-
-        mConsecutiveLosses++;
-        if (!mPacketMap.empty()) {
-            mExpectedSeq++;
-        }
-    }
-}
-
-void JitterBuffer::concealPcmGap(int frames) {
-    int total_samples = frames * mChannels;
-    size_t old_size = mPcmFifo.size();
-    mPcmFifo.resize(old_size + total_samples);
-    int16_t* dest = mPcmFifo.data() + old_size;
-
-    if (mConsecutiveLosses >= 6 || mLastValidFrame.empty()) {
-        std::memset(dest, 0, total_samples * sizeof(int16_t));
-        return;
-    }
-
-    float factor = std::pow(0.8f, static_cast<float>(mConsecutiveLosses + 1));
-    int copyCount = std::min(static_cast<int>(mLastValidFrame.size()), total_samples);
-
-    for (int i = 0; i < copyCount; i++) {
-        dest[i] = static_cast<int16_t>(mLastValidFrame[i] * factor);
-    }
-    if (copyCount < total_samples) {
-        std::memset(dest + copyCount, 0, (total_samples - copyCount) * sizeof(int16_t));
-    }
-}
-
-void JitterBuffer::concealOpusGap(int frames, uint32_t missing_seq) {
-    size_t old_size = mPcmFifo.size();
-    mPcmFifo.resize(old_size + frames * mChannels);
-    int16_t* dest = mPcmFifo.data() + old_size;
-
-    auto nextIt = mPacketMap.find(missing_seq + 1);
-    if (nextIt != mPacketMap.end() && !nextIt->second.payload.empty()) {
-        int decoded = mOpusDecoder.decode(nextIt->second.payload.data(),
-                                          nextIt->second.payload.size(),
-                                          dest, frames, true);
-        if (decoded > 0) return;
-    }
-
-    int decoded = mOpusDecoder.decode(nullptr, 0, dest, frames, false);
-    if (decoded <= 0) {
-        std::memset(dest, 0, frames * mChannels * sizeof(int16_t));
-    }
-}
-
 void JitterBuffer::setTargetBufferMs(float target_ms) {
-    std::lock_guard<std::mutex> lock(mMutex);
     mTargetBufferMs = std::clamp(target_ms, 10.0f, 200.0f);
 }
 
 float JitterBuffer::getTargetBufferMs() const {
-    std::lock_guard<std::mutex> lock(mMutex);
     return mTargetBufferMs;
 }
 
@@ -352,18 +396,24 @@ bool JitterBuffer::isAutoMode() const {
 }
 
 JitterStats JitterBuffer::getStats() {
-    std::lock_guard<std::mutex> lock(mMutex);
     JitterStats stats;
-    float fifo_ms = (mPcmFifo.size() > 0 && mSampleRate > 0)
-        ? (mPcmFifo.size() * 1000.0f / (mChannels * mSampleRate))
-        : 0.0f;
-    stats.buffer_ms = (mPacketMap.size() * mPacketDurationMs) + fifo_ms;
+    size_t packetCount = 0;
+    {
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+        packetCount = mPacketMap.size();
+    }
+    float ringMs = mPcmRingBuffer.getOccupiedMs(mSampleRate);
+    stats.buffer_ms = (packetCount * mPacketDurationMs) + ringMs;
     stats.target_ms = mTargetBufferMs;
-    stats.underruns = mUnderrunCount.load();
-    stats.lost_packets = mLostCount.load();
-    stats.late_packets = mLateCount.load();
-    stats.rx_pps = mCurrentRxPps.load();
+    stats.underruns = mUnderrunCount.load(std::memory_order_relaxed) + mPcmRingBuffer.getUnderrunFrames() / 240;
+    stats.lost_packets = mLostCount.load(std::memory_order_relaxed);
+    stats.late_packets = mLateCount.load(std::memory_order_relaxed);
+    stats.rx_pps = mCurrentRxPps.load(std::memory_order_relaxed);
     stats.active_codec = mCurrentCodec;
     stats.auto_mode = mAutoMode.load();
+    stats.ring_occupied_frames = static_cast<uint32_t>(mPcmRingBuffer.getOccupiedFrames());
+    stats.ring_overflow_drops = mPcmRingBuffer.getOverflowDrops();
+    stats.concealed_packets = mConcealedPackets.load(std::memory_order_relaxed);
+    stats.intentional_drift_drops = mIntentionalDriftDrops.load(std::memory_order_relaxed);
     return stats;
 }
