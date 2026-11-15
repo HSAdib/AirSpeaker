@@ -156,7 +156,7 @@ void NativeAudioEngine::closeOboeStream() {
 }
 
 void NativeAudioEngine::socketReceiverLoop() {
-    uint8_t buffer[2048];
+    uint8_t buffer[4096];
     struct sockaddr_in clientaddr{};
     socklen_t addrlen = sizeof(clientaddr);
 
@@ -167,14 +167,8 @@ void NativeAudioEngine::socketReceiverLoop() {
         ssize_t n = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&clientaddr, &addrlen);
         if (n < 0) {
             if (!mIsRunning.load()) break;
+            usleep(2000);
             continue;
-        }
-
-        // Cache the sender IP address for the Port 5005 stats back-channel
-        char ipStr[INET_ADDRSTRLEN] = {0};
-        if (inet_ntop(AF_INET, &clientaddr.sin_addr, ipStr, sizeof(ipStr))) {
-            std::lock_guard<std::mutex> lock(mSenderIpMutex);
-            mLastSenderIp = ipStr;
         }
 
         // Validate 12-byte header
@@ -201,6 +195,13 @@ void NativeAudioEngine::socketReceiverLoop() {
         if (header.sample_rate_div100 != 480) {
             LOGE("Dropping packet with unexpected sample_rate_div100: %d", header.sample_rate_div100);
             continue;
+        }
+
+        // Cache the sender IP address for the Port 5005 stats back-channel only after header is valid
+        char ipStr[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &clientaddr.sin_addr, ipStr, sizeof(ipStr))) {
+            std::lock_guard<std::mutex> lock(mSenderIpMutex);
+            mLastSenderIp = ipStr;
         }
 
         size_t payload_len = n - sizeof(AudioHeader);
@@ -248,11 +249,11 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(oboe::AudioStream* /*st
         return oboe::DataCallbackResult::Continue;
     }
     int16_t* pcmOut = static_cast<int16_t*>(audioData);
+    mJitterBuffer.readAudio(pcmOut, numFrames);
     if (mMuted.load() || mVolumeGain.load() <= 0.0001f) {
         std::memset(pcmOut, 0, numFrames * 2 * sizeof(int16_t));
         return oboe::DataCallbackResult::Continue;
     }
-    mJitterBuffer.readAudio(pcmOut, numFrames);
     float gain = mVolumeGain.load();
     if (gain != 1.0f) {
         int total = numFrames * 2;
@@ -283,7 +284,12 @@ void NativeAudioEngine::scheduleStreamReopen() {
     mReopenThread = std::thread([this]() {
         if (mIsRunning.load()) {
             closeOboeStream();
-            openAndStartOboeStream();
+            for (int attempt = 0; attempt < 5 && mIsRunning.load(); attempt++) {
+                if (openAndStartOboeStream()) {
+                    break;
+                }
+                usleep(100000); // 100ms backoff
+            }
         }
         mReopenPending.store(false);
     });

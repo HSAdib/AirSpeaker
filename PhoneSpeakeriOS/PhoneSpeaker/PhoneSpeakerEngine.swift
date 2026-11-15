@@ -156,6 +156,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     private let stateLock = NSLock()
     private let atomicUnderruns = AtomicInt()
     private var lastSyncId: Int = Int(Date().timeIntervalSince1970 * 1000) & 0x7FFFFFFF
+    private var seenSyncIds: [Int] = []
     private var suppressSync: Bool = false
 
     // Thread-safe snapshots read by background audio/network threads
@@ -671,15 +672,6 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
                 if !curServerIp.isEmpty && curServerIp != "255.255.255.255" {
                     self.sendMicPacket(packet, toIp: curServerIp)
-                } else {
-                    // Fallback to local subnet broadcast (<subnet>.255:5006) & 255.255.255.255:5006
-                    let localIp = self.localIpAddress
-                    let parts = localIp.split(separator: ".")
-                    if parts.count == 4 {
-                        let subnetBcast = "\(parts[0]).\(parts[1]).\(parts[2]).255"
-                        self.sendMicPacket(packet, toIp: subnetBcast)
-                    }
-                    self.sendMicPacket(packet, toIp: "255.255.255.255")
                 }
             }
             tapLock.unlock()
@@ -818,9 +810,16 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
         case "CONFIG_SYNC":
             let inSyncId = (payload["sync_id"] as? NSNumber)?.intValue
-            if let sid = inSyncId, sid == lastSyncId { return }
-            if let sid = inSyncId { lastSyncId = sid }
             let inRev = (payload["rev"] as? NSNumber)?.intValue ?? 0
+            if let sid = inSyncId {
+                if seenSyncIds.contains(sid) { return }
+                if inRev < localRev { return }
+                if seenSyncIds.count >= 32 { seenSyncIds.removeFirst() }
+                seenSyncIds.append(sid)
+                lastSyncId = sid
+            } else if inRev <= localRev {
+                return
+            }
             localRev = max(localRev, inRev) + 1
             localSyncRev = localRev
             suppressSync = true

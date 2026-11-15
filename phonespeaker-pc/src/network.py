@@ -2,9 +2,11 @@
 network.py — UDP sender, control listener, adapter enumeration, and frame pacing.
 """
 
+import ipaddress
 import json
 import logging
 import queue
+import re
 import socket
 import threading
 import time
@@ -55,8 +57,10 @@ def clear_timer_resolution(period_ms: int = 1) -> None:
 
 _EXCLUDE_PATTERNS = [
     "virtualbox", "host-only", "vmware", "vethernet", "hyper-v",
-    "wsl", "loopback", "tap", "tun", "vpn", "local area connection*",
+    "wsl", "loopback",
 ]
+
+_SHORT_EXCLUDE_TOKENS = ["tap", "tun", "vpn"]
 
 _EXCLUDE_IP_PREFIXES = [
     "192.168.56.",
@@ -69,12 +73,17 @@ _EXCLUDE_IP_PREFIXES = [
 def _is_excluded_iface(name: str, addrs) -> bool:
     name_lower = name.lower()
     for pat in _EXCLUDE_PATTERNS:
-        pat_clean = pat.rstrip("*")
-        if pat_clean in name_lower:
+        if pat in name_lower:
             return True
+    # Match short tokens 'tap', 'tun', 'vpn' as whole words or prefix/suffix tokens
+    tokens = re.findall(r"[a-zA-Z0-9]+", name_lower)
+    for tok in tokens:
+        for st in _SHORT_EXCLUDE_TOKENS:
+            if tok == st or tok.startswith(st):
+                return True
     # Check IPs on this interface
     for addr in addrs:
-        ip = addr.address or ""
+        ip = getattr(addr, "address", "") or ""
         for prefix in _EXCLUDE_IP_PREFIXES:
             if ip.startswith(prefix):
                 return True
@@ -86,7 +95,7 @@ def list_real_adapters() -> List[Dict[str, Any]]:
     Enumerate real network adapters (Wi-Fi, Ethernet, USB RNDIS, Mobile Hotspot),
     excluding virtual/VM/loopback interfaces.
 
-    Returns list of dicts: {name, ip, is_up}
+    Returns list of dicts: {name, ip, netmask, broadcast, is_up}
     """
     result = []
     try:
@@ -101,22 +110,30 @@ def list_real_adapters() -> List[Dict[str, Any]]:
             is_up = stats.isup if stats else False
 
             # Collect IPv4 addresses
-            ipv4s = [
-                a.address for a in addrs
-                if a.family == socket.AF_INET
-                and not a.address.startswith("127.")
-                and not a.address.startswith("169.254.")
-                and not a.address.startswith("192.168.56.")
-            ]
-            if not ipv4s:
-                continue
+            for a in addrs:
+                if a.family == socket.AF_INET:
+                    ip = a.address or ""
+                    if (
+                        ip
+                        and not ip.startswith("127.")
+                        and not ip.startswith("169.254.")
+                        and not ip.startswith("192.168.56.")
+                    ):
+                        netmask = getattr(a, "netmask", "") or "255.255.255.0"
+                        bcast = None
+                        try:
+                            bcast = str(ipaddress.IPv4Interface(f"{ip}/{netmask}").network.broadcast_address)
+                        except Exception:
+                            prefix = ".".join(ip.split(".")[:3])
+                            bcast = f"{prefix}.255"
 
-            for ip in ipv4s:
-                result.append({
-                    "name": iface_name,
-                    "ip": ip,
-                    "is_up": is_up,
-                })
+                        result.append({
+                            "name": iface_name,
+                            "ip": ip,
+                            "netmask": netmask,
+                            "broadcast": bcast,
+                            "is_up": is_up,
+                        })
         result.sort(key=lambda a: (not a["is_up"], a["name"]))
     except Exception as exc:
         logger.error("Error enumerating adapters: %s", exc)
@@ -403,14 +420,16 @@ class UDPSender:
         elif abs(gain - 1.0) > 0.01:
             try:
                 import numpy as np
-                pcm_arr = np.frombuffer(pcm_frame, dtype="<i2").astype(np.float32) * gain
+                norm = (np.frombuffer(pcm_frame, dtype="<i2").astype(np.float32) * gain) / 32767.0
                 if gain > 1.0:
-                    # Soft-knee limiting above 100% so 100%-200% boost never clips harshly
-                    norm = pcm_arr / 32767.0
-                    pcm_arr = np.tanh(norm) * 32767.0
+                    knee = 0.85
+                    above = norm > knee
+                    below = norm < -knee
+                    norm = np.where(above, knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)), norm)
+                    norm = np.where(below, -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)), norm)
                 else:
-                    pcm_arr = np.clip(pcm_arr, -32768.0, 32767.0)
-                pcm_frame = pcm_arr.astype("<i2").tobytes()
+                    norm = np.clip(norm, -1.0, 1.0)
+                pcm_frame = np.rint(norm * 32767.0).astype("<i2").tobytes()
             except Exception:
                 pass
 
@@ -632,21 +651,20 @@ class ControlListener:
                         sock.sendto(msg, ("255.255.255.255", self._bind_port))
                     except Exception:
                         pass
-                    # 3. Subnet broadcast & gateway for each adapter
+                    # 3. Subnet broadcast for each adapter
                     for a in adapters:
-                        ip = a.get("ip", "")
-                        parts = ip.split(".")
-                        if len(parts) == 4 and not parts[0].startswith("127"):
-                            prefix = f"{parts[0]}.{parts[1]}.{parts[2]}"
+                        bcast = a.get("broadcast")
+                        if not bcast:
+                            ip = a.get("ip", "")
+                            parts = ip.split(".")
+                            if len(parts) == 4 and not parts[0].startswith("127"):
+                                prefix = f"{parts[0]}.{parts[1]}.{parts[2]}"
+                                bcast = f"{prefix}.255"
+                        if bcast:
                             try:
-                                sock.sendto(msg, (f"{prefix}.255", self._bind_port))
+                                sock.sendto(msg, (bcast, self._bind_port))
                             except Exception:
                                 pass
-                            if parts[3] != "1":
-                                try:
-                                    sock.sendto(msg, (f"{prefix}.1", self._bind_port))
-                                except Exception:
-                                    pass
             except Exception as exc:
                 logger.debug("Announce loop error: %s", exc)
 

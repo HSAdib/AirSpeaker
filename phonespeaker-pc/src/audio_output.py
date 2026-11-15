@@ -310,6 +310,9 @@ class PhoneAudioReceiver:
         self._pcm_queue: collections.deque = collections.deque(maxlen=40)
         self._is_prebuffering = True
         self._last_rx_time = 0.0
+        self._last_seq: Optional[int] = None
+        self._last_sender_ip: str = ""
+        self._conceal_count: int = 0
         self._last_valid_frame = b"\x00" * 960
         self._last_channels = CHANNELS
         self._queue_event = threading.Event()
@@ -490,6 +493,15 @@ class PhoneAudioReceiver:
                         pass
                 header = parse_header(data)
                 if header:
+                    seq = header["seq"]
+                    sender_ip = addr[0]
+                    if sender_ip == self._last_sender_ip and self._last_seq is not None:
+                        diff = (self._last_seq - seq) & 0xFFFFFFFF
+                        if seq == self._last_seq or (0 < diff < 500):
+                            continue
+                    self._last_seq = seq
+                    self._last_sender_ip = sender_ip
+
                     payload = data[12:]
                     codec = header["codec"]
                     channels = header["channels"]
@@ -595,6 +607,7 @@ class PhoneAudioReceiver:
                     self._is_prebuffering = False
 
                 if self._pcm_queue:
+                    self._conceal_count = 0
                     while len(self._pcm_queue) > 18:
                         try:
                             self._pcm_queue.popleft()
@@ -614,11 +627,14 @@ class PhoneAudioReceiver:
                     self._render_and_write(decoded_pcm, channels)
                 else:
                     now = time.monotonic()
-                    if (now - self._last_rx_time) < 0.150 and not self._muted:
+                    if (now - self._last_rx_time) < 0.060 and self._conceal_count < 4 and not self._muted:
+                        self._conceal_count += 1
                         # Wi-Fi micro-jitter gap during active speech: conceal 5ms gap by decaying last frame (* 0.80)
                         arr = np.frombuffer(self._last_valid_frame, dtype="<i2").astype(np.float32) * 0.80
                         self._last_valid_frame = arr.astype("<i2").tobytes()
                         self._render_and_write(self._last_valid_frame, getattr(self, "_last_channels", CHANNELS))
+                        if self._stream is None and self._pacat_proc is None:
+                            time.sleep(0.005)
                     else:
                         self._is_prebuffering = True
                         self._queue_event.wait(timeout=0.02)

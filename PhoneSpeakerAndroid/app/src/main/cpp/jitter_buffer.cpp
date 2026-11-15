@@ -124,8 +124,9 @@ int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
 
     // Only prebuffer once at stream startup (never re-enter prebuffering mid-stream!)
     if (mIsPrebuffering) {
-        float startThreshold = std::min(mTargetBufferMs * 0.5f, 15.0f);
-        if (currentBufferMs < startThreshold && mPacketMap.size() < 3) {
+        float startThreshold = std::clamp(mTargetBufferMs, 10.0f, 200.0f);
+        int minPackets = std::max(2, static_cast<int>(startThreshold / std::max(1.0f, mPacketDurationMs)));
+        if (currentBufferMs < startThreshold && static_cast<int>(mPacketMap.size()) < minPackets) {
             std::memset(out_samples, 0, needed_samples * sizeof(int16_t));
             return num_frames;
         }
@@ -137,7 +138,8 @@ int JitterBuffer::readAudio(int16_t* out_samples, int num_frames) {
     }
 
     while (mPcmFifo.size() < needed_samples) {
-        if (mPacketMap.empty() && mConsecutiveLosses >= 12) {
+        if (mPacketMap.empty() && mConsecutiveLosses >= 8) {
+            mIsPrebuffering = true;
             break;
         }
         popNextPacketOrConceal();
@@ -162,8 +164,8 @@ void JitterBuffer::popNextPacketOrConceal() {
         : 0.0f;
     float totalQueuedMs = (mPacketMap.size() * mPacketDurationMs) + fifoMs;
 
-    // Soft anti-drift: only trim if excess exceeds target + 85ms (and at least 100ms total)
-    float maxAllowedMs = std::max(100.0f, mTargetBufferMs + 85.0f);
+    // Soft anti-drift: only trim if excess exceeds target + 35ms (and at least 45ms total)
+    float maxAllowedMs = std::max(45.0f, mTargetBufferMs + 35.0f);
     if (totalQueuedMs > maxAllowedMs && mPacketMap.size() > 8) {
         auto oldest = mPacketMap.begin();
         if (oldest->second.header.codec != CODEC_PCM16 && !oldest->second.payload.empty()) {
@@ -242,9 +244,10 @@ void JitterBuffer::popNextPacketOrConceal() {
         if (mConsecutiveLosses > 0 && total_samples > 0 && !mLastValidFrame.empty()) {
             int fade_samples = std::min({32 * mChannels, total_samples, static_cast<int>(mLastValidFrame.size())});
             int16_t* new_ptr = mPcmFifo.data() + old_size;
+            size_t tailOffset = mLastValidFrame.size() - static_cast<size_t>(fade_samples);
             for (int i = 0; i < fade_samples; i++) {
                 float alpha = static_cast<float>(i) / static_cast<float>(fade_samples);
-                new_ptr[i] = static_cast<int16_t>(mLastValidFrame[i] * (1.0f - alpha) + new_ptr[i] * alpha);
+                new_ptr[i] = static_cast<int16_t>(mLastValidFrame[tailOffset + i] * (1.0f - alpha) + new_ptr[i] * alpha);
             }
         }
 
@@ -261,7 +264,7 @@ void JitterBuffer::popNextPacketOrConceal() {
     } else {
         if (!mPacketMap.empty()) {
             mLostCount++;
-        } else {
+        } else if (mConsecutiveLosses == 0) {
             mUnderrunCount++;
         }
 

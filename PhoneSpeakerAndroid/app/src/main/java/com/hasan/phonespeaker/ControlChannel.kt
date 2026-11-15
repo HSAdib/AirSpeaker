@@ -223,19 +223,25 @@ class ControlChannel(
                             }
                             Log.i(TAG, "Discovered active PC IP via PC_ANNOUNCE: $senderIp ($activePcName)")
                         } else if (msgType == "CONFIG_SYNC") {
-                            activePcIp = senderIp
-                            lastKnownPcIp = senderIp
-                            AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
-                            val pcName = json.optString("pc_name", "")
-                            if (pcName.isNotBlank()) {
-                                activePcName = pcName
-                                lastKnownPcName = pcName
+                            val allowOverwrite = (activePcIp == null || activePcIp == senderIp || !AudioStreamService.isStreaming)
+                            if (allowOverwrite) {
+                                activePcIp = senderIp
+                                lastKnownPcIp = senderIp
+                                AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
+                                val pcName = json.optString("pc_name", "")
+                                if (pcName.isNotBlank()) {
+                                    activePcName = pcName
+                                    lastKnownPcName = pcName
+                                }
                             }
                             onConfigSyncReceived?.invoke(json)
                         } else if (msgType == "MIC_CONTROL") {
-                            activePcIp = senderIp
-                            lastKnownPcIp = senderIp
-                            AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
+                            val allowOverwrite = (activePcIp == null || activePcIp == senderIp || !AudioStreamService.isStreaming)
+                            if (allowOverwrite) {
+                                activePcIp = senderIp
+                                lastKnownPcIp = senderIp
+                                AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
+                            }
                             val wantActive = json.optBoolean("active", false)
                             onMicControlReceived?.invoke(wantActive)
                         }
@@ -516,7 +522,14 @@ class ControlChannel(
                    lower.startsWith("p2p")
         }
 
+        private var cachedLocalIps: List<String> = emptyList()
+        private var lastIpCacheTimeMs: Long = 0L
+
         fun getLocalIpv4Addresses(): List<String> {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (cachedLocalIps.isNotEmpty() && (now - lastIpCacheTimeMs) < 3000L) {
+                return cachedLocalIps
+            }
             val prioritized = mutableListOf<String>()
             val fallback = mutableListOf<String>()
             try {
@@ -546,7 +559,10 @@ class ControlChannel(
             } catch (e: Exception) {
                 Log.e("ControlChannel", "Error enumerating IP addresses", e)
             }
-            return prioritized + fallback
+            val res = prioritized + fallback
+            cachedLocalIps = res
+            lastIpCacheTimeMs = now
+            return res
         }
 
         fun getPhoneModelName(): String {

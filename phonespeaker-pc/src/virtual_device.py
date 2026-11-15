@@ -77,21 +77,21 @@ def setup_linux_virtual_audio() -> Tuple[bool, str]:
             ["pactl", "list", "short", "modules"], capture_output=True, text=True, timeout=3
         ).stdout
 
-        if "PhoneSpeaker_Sink" not in existing:
+        if "sink_name=PhoneSpeaker_Sink" not in existing:
             subprocess.run([
                 "pactl", "load-module", "module-null-sink",
                 "sink_name=PhoneSpeaker_Sink",
                 "sink_properties=device.description=PhoneSpeaker_Virtual_Speaker"
             ], check=True, timeout=3)
 
-        if "PhoneSpeaker_Mic_Sink" not in existing:
+        if "sink_name=PhoneSpeaker_Mic_Sink" not in existing:
             subprocess.run([
                 "pactl", "load-module", "module-null-sink",
                 "sink_name=PhoneSpeaker_Mic_Sink",
                 "sink_properties=device.description=PhoneSpeaker_Mic_Bridge"
             ], check=True, timeout=3)
 
-        if "PhoneSpeaker_Mic" not in existing:
+        if "source_name=PhoneSpeaker_Mic" not in existing:
             subprocess.run([
                 "pactl", "load-module", "module-remap-source",
                 "master=PhoneSpeaker_Mic_Sink.monitor",
@@ -359,14 +359,21 @@ foreach ($base in $mmPaths) {{
 Restart-Service -Name "Audiosrv" -Force
 '''
     try:
-        script_path = Path(tempfile.gettempdir()) / "phonespeaker_rename_device.ps1"
+        import base64
+        app_dir = Path(os.environ.get("APPDATA", tempfile.gettempdir())) / "PhoneSpeaker"
+        app_dir.mkdir(parents=True, exist_ok=True)
+        script_path = app_dir / "phonespeaker_rename_device.ps1"
         script_path.write_text(ps_content, encoding="utf-8")
+        inner_cmd = f"& '{script_path}'"
+        inner_b64 = base64.b64encode(inner_cmd.encode("utf-16le")).decode("ascii")
+        outer_cmd = f"Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand {inner_b64}'"
+        outer_b64 = base64.b64encode(outer_cmd.encode("utf-16le")).decode("ascii")
         cmd = [
             "powershell.exe",
             "-NoProfile",
             "-WindowStyle", "Hidden",
-            "-Command",
-            f"Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"{script_path}\"'"
+            "-EncodedCommand",
+            outer_b64,
         ]
         ret = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
         if ret.returncode == 0:
@@ -381,7 +388,7 @@ def download_and_install_vbcable(target_dir: Optional[Path] = None) -> Tuple[boo
     """
     On macOS, installs BlackHole 2ch via Homebrew or downloads pkg.
     On Linux, creates PipeWire/PulseAudio virtual audio devices via pactl.
-    On Windows, downloads official VB-CABLE package into %TEMP%\\PhoneSpeaker_VBCable,
+    On Windows, downloads official VB-CABLE package into %APPDATA%\\PhoneSpeaker\\PhoneSpeaker_VBCable,
     extracts it, and runs VBCABLE_Setup_x64.exe elevated with the correct WorkingDirectory.
     """
     if _IS_MAC:
@@ -391,7 +398,7 @@ def download_and_install_vbcable(target_dir: Optional[Path] = None) -> Tuple[boo
         return setup_linux_virtual_audio()
 
     if target_dir is None:
-        target_dir = Path(tempfile.gettempdir()) / "PhoneSpeaker_VBCable"
+        target_dir = Path(os.environ.get("APPDATA", tempfile.gettempdir())) / "PhoneSpeaker" / "PhoneSpeaker_VBCable"
 
     target_dir.mkdir(parents=True, exist_ok=True)
     zip_dest = target_dir / "vbcable.zip"
@@ -420,12 +427,14 @@ def download_and_install_vbcable(target_dir: Optional[Path] = None) -> Tuple[boo
             installer_exe = target_dir / "VBCABLE_Setup.exe"
 
         if installer_exe.exists():
+            import base64
             ps_cmd = (
                 f"Start-Process -FilePath '{installer_exe}' "
                 f"-WorkingDirectory '{target_dir}' -Verb RunAs -Wait"
             )
+            b64_cmd = base64.b64encode(ps_cmd.encode("utf-16le")).decode("ascii")
             subprocess.run(
-                ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+                ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-EncodedCommand", b64_cmd],
                 timeout=180,
             )
             return True, (

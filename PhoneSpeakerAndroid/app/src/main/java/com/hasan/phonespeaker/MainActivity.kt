@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
 
     private var localRev = 1
     private var lastSyncId = (System.currentTimeMillis() and 0x7FFFFFFF).toInt()
+    private val seenSyncIds = ArrayDeque<Int>(32)
     private var suppressSync = false
     private var currentFrameMs = 5
     private var userEditedPcIp: String? = null
@@ -1300,11 +1301,17 @@ class MainActivity : AppCompatActivity() {
         val incomingRev = json.optInt("rev", 0)
         val incomingSyncId = if (json.has("sync_id")) json.getInt("sync_id") else null
 
-        if (incomingSyncId != null && incomingSyncId == lastSyncId) {
-            return
-        }
-
         if (incomingSyncId != null) {
+            if (seenSyncIds.contains(incomingSyncId)) {
+                return
+            }
+            if (incomingRev < localRev) {
+                return
+            }
+            if (seenSyncIds.size >= 32) {
+                seenSyncIds.removeFirst()
+            }
+            seenSyncIds.addLast(incomingSyncId)
             lastSyncId = incomingSyncId
         } else if (incomingRev <= localRev) {
             return
@@ -1316,7 +1323,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvSyncRev.text = "REV: $localRev"
 
             if (json.has("custom_buffer_ms")) {
-                val buf = json.getDouble("custom_buffer_ms").toFloat()
+                val buf = json.getDouble("custom_buffer_ms").toFloat().coerceIn(10f, 200f)
                 binding.sliderTargetBuffer.value = quantizeTarget(buf)
                 binding.tvTargetBufferValue.text = "${buf.toInt()} ms"
                 AudioNative.nativeSetTargetBufferMs(buf)
@@ -1334,7 +1341,7 @@ class MainActivity : AppCompatActivity() {
                 AudioNative.nativeSetAutoMode(json.getBoolean("auto_buffer"))
             }
             if (json.has("volume_gain")) {
-                val g = json.getDouble("volume_gain").toFloat()
+                val g = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
                 try {
                     binding.sliderGain.value = quantizeGain(g)
                     binding.tvGainValue.text = "${(g * 100).toInt()}%"

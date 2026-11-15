@@ -320,10 +320,19 @@ def _linux_set_pc_mute(mute: bool) -> bool:
                 capture_output=True, timeout=2,
             )
         else:
-            subprocess.run(
-                ["pactl", "unload-module", "module-null-sink"],
-                capture_output=True, timeout=2,
+            res_mods = subprocess.run(
+                ["pactl", "list", "short", "modules"],
+                capture_output=True, text=True, timeout=2,
             )
+            if res_mods.returncode == 0:
+                for line in res_mods.stdout.splitlines():
+                    if "PhoneSpeaker_Only" in line:
+                        mod_id = line.split("\t")[0].strip()
+                        if mod_id.isdigit():
+                            subprocess.run(
+                                ["pactl", "unload-module", mod_id],
+                                capture_output=True, timeout=2,
+                            )
         return True
     except Exception:
         logger.warning("_linux_set_pc_mute(%s) failed", mute, exc_info=True)

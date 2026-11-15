@@ -2,6 +2,7 @@
 config.py — Cross-platform configuration (Windows %APPDATA% & Linux ~/.config).
 """
 
+import copy
 import json
 import logging
 import os
@@ -57,7 +58,7 @@ def ensure_config_dir() -> None:
 
 def load() -> Dict[str, Any]:
     ensure_config_dir()
-    cfg = dict(_DEFAULTS)
+    cfg = copy.deepcopy(_DEFAULTS)
     if _CONFIG_FILE.exists():
         try:
             with open(_CONFIG_FILE, "r", encoding="utf-8") as fh:
@@ -72,8 +73,10 @@ def load() -> Dict[str, Any]:
 def save(cfg: Dict[str, Any]) -> None:
     ensure_config_dir()
     try:
-        with open(_CONFIG_FILE, "w", encoding="utf-8") as fh:
+        tmp_file = _CONFIG_FILE.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as fh:
             json.dump(cfg, fh, indent=2)
+        os.replace(tmp_file, _CONFIG_FILE)
     except Exception as exc:
         logger.error("Could not save config file: %s", exc)
 

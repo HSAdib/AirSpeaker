@@ -151,43 +151,6 @@ class MicStreamer {
         }
     }
 
-    private fun isCellularOrDummyInterface(name: String): Boolean {
-        val lower = name.lowercase()
-        return lower.startsWith("rmnet") ||
-               lower.startsWith("ccmni") ||
-               lower.startsWith("dummy") ||
-               lower.startsWith("lo") ||
-               lower.startsWith("p2p")
-    }
-
-    private fun getSubnetBroadcasts(): List<InetAddress> {
-        val results = mutableSetOf<InetAddress>()
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val iface = interfaces.nextElement()
-                if (iface.isLoopback || !iface.isUp || isCellularOrDummyInterface(iface.name)) continue
-                for (ia in iface.interfaceAddresses) {
-                    val addr = ia.address
-                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                        if (ia.broadcast != null) {
-                            results.add(ia.broadcast)
-                        }
-                        val host = addr.hostAddress ?: continue
-                        val parts = host.split(".")
-                        if (parts.size == 4) {
-                            try {
-                                results.add(InetAddress.getByName("${parts[0]}.${parts[1]}.${parts[2]}.255"))
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        try { results.add(InetAddress.getByName("255.255.255.255")) } catch (_: Exception) {}
-        return results.toList()
-    }
-
     private fun readFullShorts(rec: AudioRecord, buf: ShortArray, count: Int): Boolean {
         var offset = 0
         while (offset < count && isRunning.get()) {
@@ -204,7 +167,7 @@ class MicStreamer {
         } catch (_: Exception) {}
 
         val socket = DatagramSocket().apply {
-            broadcast = true
+            broadcast = false
             sendBufferSize = 262144
         }
         val packetData = ByteArray(12 + payloadSize)
@@ -213,6 +176,7 @@ class MicStreamer {
 
         var seq = 0
         var lastPpsTime = SystemClock.elapsedRealtime()
+        var lastBeaconTime = 0L
         var cachedIp = ""
         var cachedInet: InetAddress? = null
 
@@ -227,6 +191,17 @@ class MicStreamer {
                 Log.i(TAG, "MicStreamer locked onto discovered PC IP: $discovered")
             }
 
+            val currentIp = dynamicTargetIp
+            if (currentIp == "255.255.255.255" || currentIp.isBlank()) {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBeaconTime >= 1000L) {
+                    lastBeaconTime = now
+                    ControlChannel.sendPreStreamBeacon()
+                }
+                SystemClock.sleep(10)
+                continue
+            }
+
             if (readFullShorts(rec, inShorts, inShorts.size)) {
                 val nowMs = (SystemClock.elapsedRealtime() and 0xFFFFFFFFL).toInt()
                 packetBuf.clear()
@@ -236,12 +211,17 @@ class MicStreamer {
                 packetBuf.put(outChannels.toByte())  // 2 stereo channels
                 packetBuf.putShort(480.toShort())    // 48000 / 100
 
+                val applyBoost = (agc == null)
                 if (actualInputChannels == 1) {
                     for (i in 0 until samplesPerCh) {
-                        // Clean 1.25x voice boost with clamp
-                        val boosted = ((inShorts[i].toInt() * 5) shr 2).coerceIn(-32768, 32767).toShort()
-                        packetBuf.putShort(boosted)
-                        packetBuf.putShort(boosted)
+                        val raw = inShorts[i].toInt()
+                        val outSample = if (applyBoost) {
+                            ((raw * 5) shr 2).coerceIn(-32768, 32767).toShort()
+                        } else {
+                            raw.coerceIn(-32768, 32767).toShort()
+                        }
+                        packetBuf.putShort(outSample)
+                        packetBuf.putShort(outSample)
                     }
                 } else {
                     for (i in 0 until samplesPerCh) {
@@ -253,19 +233,11 @@ class MicStreamer {
                 }
 
                 try {
-                    val currentIp = dynamicTargetIp
-                    if (currentIp != "255.255.255.255" && currentIp.isNotBlank()) {
-                        if (currentIp != cachedIp || cachedInet == null) {
-                            cachedInet = InetAddress.getByName(currentIp)
-                            cachedIp = currentIp
-                        }
-                        socket.send(DatagramPacket(packetData, packetData.size, cachedInet, targetPort))
+                    if (currentIp != cachedIp || cachedInet == null) {
+                        cachedInet = InetAddress.getByName(currentIp)
+                        cachedIp = currentIp
                     }
-                    if (AudioStreamService.activeControlChannel?.getActivePcIp() == null || currentIp == "255.255.255.255" || currentIp.isBlank()) {
-                        for (bcast in getSubnetBroadcasts()) {
-                            socket.send(DatagramPacket(packetData, packetData.size, bcast, targetPort))
-                        }
-                    }
+                    socket.send(DatagramPacket(packetData, packetData.size, cachedInet, targetPort))
                     ppsCounter.incrementAndGet()
                 } catch (_: Exception) {}
 

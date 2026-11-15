@@ -227,6 +227,7 @@ class PhoneSpeakerApp:
         self._phone_stats: dict = {}
         self._config_rev = int(cfg.get("config_rev", 1))
         self._last_sync_id = int(time.time() * 1000) & 0x7FFFFFFF
+        self._seen_sync_ids = collections.deque(maxlen=32)
         self._suppress_sync = False
         self._delay_history = collections.deque([0.0] * 60, maxlen=60)
         self._target_history = collections.deque([30.0] * 60, maxlen=60)
@@ -2107,14 +2108,23 @@ class PhoneSpeakerApp:
         self._ui_queue.put(("config_sync", msg))
 
     def _apply_incoming_config(self, msg: dict) -> None:
-        incoming_rev = msg.get("rev", 0)
+        if not isinstance(msg, dict):
+            return
+
+        try:
+            incoming_rev = int(msg.get("rev", 0))
+        except (ValueError, TypeError):
+            incoming_rev = 0
+
         incoming_sync_id = msg.get("sync_id")
         force_pcm = (msg.get("force_pcm") is True or msg.get("platform") == "ios")
 
-        if incoming_sync_id is not None and incoming_sync_id == self._last_sync_id and not force_pcm:
-            return
-
         if incoming_sync_id is not None:
+            if incoming_sync_id in self._seen_sync_ids and not force_pcm:
+                return
+            if incoming_rev < self._config_rev and not force_pcm:
+                return
+            self._seen_sync_ids.append(incoming_sync_id)
             self._last_sync_id = incoming_sync_id
         elif incoming_rev <= self._config_rev and not force_pcm:
             return
@@ -2130,17 +2140,30 @@ class PhoneSpeakerApp:
                 self._connected_phone_name = dev_name
                 self.conn_device_name_var.set(dev_name)
             if sender_ip:
-                if not self.ip_var.get().strip():
-                    self.ip_var.set(sender_ip)
+                if self._manual_ip_override is None and (not self._streaming or not self.ip_var.get().strip()):
+                    if not self.ip_var.get().strip():
+                        self.ip_var.set(sender_ip)
                 self.conn_device_ip_var.set(f"{sender_ip}  •  CONNECTED")
 
             if force_pcm or ("iphone" in dev_name.lower()) or ("ipad" in dev_name.lower()):
                 self.codec_var.set(CODEC_PCM16)
                 self._update_codec_ui_state()
             elif "codec" in msg:
-                self.codec_var.set(int(msg["codec"]))
+                try:
+                    c_val = int(msg["codec"])
+                    if c_val in (CODEC_PCM16, CODEC_OPUS):
+                        self.codec_var.set(c_val)
+                except (ValueError, TypeError):
+                    pass
+
             if "opus_bitrate_kbps" in msg:
-                self.bitrate_var.set(str(msg["opus_bitrate_kbps"]))
+                try:
+                    b_val = str(int(msg["opus_bitrate_kbps"]))
+                    if b_val in OPUS_BITRATES:
+                        self.bitrate_var.set(b_val)
+                except (ValueError, TypeError):
+                    pass
+
             if "audio_profile" in msg:
                 prof = msg["audio_profile"]
                 self.audio_profile_var.set(prof)
@@ -2149,28 +2172,52 @@ class PhoneSpeakerApp:
                         self.frame_ms_var.set("10")
                     elif prof in ("GAMING", "BALANCED"):
                         self.frame_ms_var.set("5")
+
             if "frame_ms" in msg:
-                self.frame_ms_var.set(str(msg["frame_ms"]))
+                try:
+                    f_val = str(int(msg["frame_ms"]))
+                    if f_val in FRAME_SIZES_MS:
+                        self.frame_ms_var.set(f_val)
+                except (ValueError, TypeError):
+                    pass
+
             if "buffer_mode" in msg:
-                self.buffer_mode_var.set(msg["buffer_mode"])
+                bmode = str(msg["buffer_mode"])
+                if bmode in ("LOW", "MEDIUM", "HIGH", "AUTO", "CUSTOM"):
+                    self.buffer_mode_var.set(bmode)
+
             if "custom_buffer_ms" in msg:
-                c = float(msg["custom_buffer_ms"])
-                self.custom_buffer_var.set(c)
-                self.buffer_val_label.config(text=f"{c:.1f} ms")
+                try:
+                    c = float(msg["custom_buffer_ms"])
+                    c = max(10.0, min(200.0, c))
+                    self.custom_buffer_var.set(c)
+                    self.buffer_val_label.config(text=f"{c:.1f} ms")
+                except (ValueError, TypeError):
+                    pass
+
             if "volume_gain" in msg:
-                g = float(msg["volume_gain"])
-                self.volume_gain_var.set(g)
-                self.gain_val_label.config(text=f"{int(round(g * 100))}%")
-                if hasattr(self, "conn_vol_pct_label"):
-                    self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
+                try:
+                    g = float(msg["volume_gain"])
+                    g = max(0.0, min(2.0, g))
+                    self.volume_gain_var.set(g)
+                    self.gain_val_label.config(text=f"{int(round(g * 100))}%")
+                    if hasattr(self, "conn_vol_pct_label"):
+                        self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
+                except (ValueError, TypeError):
+                    pass
+
             if "muted" in msg:
                 m = bool(msg["muted"])
                 self.muted_var.set(m)
                 self.mute_btn.config(bg="#990000" if m else "#333333", text="MUTED" if m else "MUTE")
                 if hasattr(self, "conn_mute_icon_btn"):
                     self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
+
             if "direction" in msg:
-                self.direction_var.set(msg["direction"])
+                d = str(msg["direction"])
+                if d in ("PC_TO_PHONE", "PHONE_TO_PC", "FULL_DUPLEX"):
+                    self.direction_var.set(d)
+
             if "audio_output_engine" in msg:
                 self._phone_audio_engine = str(msg["audio_output_engine"])
             if "enable_audio_effects" in msg:
@@ -2524,325 +2571,327 @@ class PhoneSpeakerApp:
             c.create_line(*points, fill=line_color, width=2)
 
     def _schedule_ui_update(self) -> None:
-        self._process_ui_queue()
+        try:
+            self._process_ui_queue()
 
-        cap_level = getattr(self._audio_capture, "peak_level", 0.0) if (self._streaming and self._audio_capture) else 0.0
-        recv_level = getattr(self._phone_receiver, "peak_level", 0.0) if self._phone_receiver else 0.0
-        target_level = max(cap_level, recv_level)
-        if self._audio_capture:
-            self._audio_capture.peak_level = 0.0
-        if self._phone_receiver:
-            self._phone_receiver.peak_level = 0.0
+            cap_level = getattr(self._audio_capture, "peak_level", 0.0) if (self._streaming and self._audio_capture) else 0.0
+            recv_level = getattr(self._phone_receiver, "peak_level", 0.0) if self._phone_receiver else 0.0
+            target_level = max(cap_level, recv_level)
+            if self._audio_capture:
+                self._audio_capture.peak_level = 0.0
+            if self._phone_receiver:
+                self._phone_receiver.peak_level = 0.0
 
-        if target_level > self._peak_level:
-            self._peak_level = target_level
-        else:
-            self._peak_level = max(0.0, self._peak_level * 0.80 - 0.01)
-        canvas_w = max(100, self._level_canvas.winfo_width())
-        bar_w = int(min(1.0, self._peak_level) * canvas_w)
-        self._level_canvas.coords(self._level_bar, 0, 0, bar_w, 12)
+            if target_level > self._peak_level:
+                self._peak_level = target_level
+            else:
+                self._peak_level = max(0.0, self._peak_level * 0.80 - 0.01)
+            canvas_w = max(100, self._level_canvas.winfo_width())
+            bar_w = int(min(1.0, self._peak_level) * canvas_w)
+            self._level_canvas.coords(self._level_bar, 0, 0, bar_w, 12)
 
-        # Live Delay Graph update at 100 ms interval
-        now = time.monotonic()
-        if (now - self._last_graph_tick) >= 0.1:
-            self._last_graph_tick = now
-            buf_val = 0.0
-            tgt_val = float(self.custom_buffer_var.get() or 30.0)
-            losses = 0
-            if self._phone_stats:
-                b = self._phone_stats.get("buffer_ms")
-                if isinstance(b, (int, float)):
-                    buf_val = float(b)
-                t = self._phone_stats.get("target_ms")
-                if isinstance(t, (int, float)):
-                    tgt_val = float(t)
-                losses = self._phone_stats.get("lost_packets", 0)
-            est_total, _ = self._compute_expected_delay_ms()
-            self._draw_delay_graph(buf_val, tgt_val, est_total, losses)
+            # Live Delay Graph update at 100 ms interval
+            now = time.monotonic()
+            if (now - self._last_graph_tick) >= 0.1:
+                self._last_graph_tick = now
+                buf_val = 0.0
+                tgt_val = float(self.custom_buffer_var.get() or 30.0)
+                losses = 0
+                if self._phone_stats:
+                    b = self._phone_stats.get("buffer_ms")
+                    if isinstance(b, (int, float)):
+                        buf_val = float(b)
+                    t = self._phone_stats.get("target_ms")
+                    if isinstance(t, (int, float)):
+                        tgt_val = float(t)
+                    losses = self._phone_stats.get("lost_packets", 0)
+                est_total, _ = self._compute_expected_delay_ms()
+                self._draw_delay_graph(buf_val, tgt_val, est_total, losses)
 
-        # Poll Windows Sound Bar / Linux system volume (every ~100ms)
-        if getattr(self, "sync_os_vol_var", None) and self.sync_os_vol_var.get():
-            if not hasattr(self, "_last_vol_poll"):
-                self._last_vol_poll = 0.0
-            poll_interval = 1.0 if not sys.platform.startswith("win") else 0.25
-            if (now - self._last_vol_poll) >= poll_interval:
-                self._last_vol_poll = now
-                os_state = get_system_volume_and_mute()
-                if os_state is not None:
-                    os_vol, os_mute = os_state
-                    if self._last_os_vol is None:
-                        self._last_os_vol = os_vol
-                        self._last_os_mute = os_mute
-                    elif abs(os_vol - self._last_os_vol) >= 0.015 or os_mute != self._last_os_mute:
-                        self._last_os_vol = os_vol
-                        self._last_os_mute = os_mute
-                        self._suppress_sync = True
+            # Poll Windows Sound Bar / Linux system volume (every ~100ms)
+            if getattr(self, "sync_os_vol_var", None) and self.sync_os_vol_var.get():
+                if not hasattr(self, "_last_vol_poll"):
+                    self._last_vol_poll = 0.0
+                poll_interval = 1.0 if not sys.platform.startswith("win") else 0.25
+                if (now - self._last_vol_poll) >= poll_interval:
+                    self._last_vol_poll = now
+                    os_state = get_system_volume_and_mute()
+                    if os_state is not None:
+                        os_vol, os_mute = os_state
+                        if self._last_os_vol is None:
+                            self._last_os_vol = os_vol
+                            self._last_os_mute = os_mute
+                        elif abs(os_vol - self._last_os_vol) >= 0.015 or os_mute != self._last_os_mute:
+                            self._last_os_vol = os_vol
+                            self._last_os_mute = os_mute
+                            self._suppress_sync = True
+                            try:
+                                self.volume_gain_var.set(round(os_vol, 2))
+                                self.muted_var.set(os_mute)
+                                self.gain_val_label.config(text=f"{int(os_vol * 100)}%")
+                                if hasattr(self, "conn_vol_pct_label"):
+                                    self.conn_vol_pct_label.config(text=f"{int(os_vol * 100)}%")
+                                self.mute_btn.config(bg="#990000" if os_mute else "#333333", text="MUTED" if os_mute else "MUTE")
+                                if hasattr(self, "conn_mute_icon_btn"):
+                                    self.conn_mute_icon_btn.config(text="🔇" if os_mute else "🔊")
+                            finally:
+                                self._suppress_sync = False
+                            self._on_local_setting_changed()
+
+            # Check phone connection timeout (heartbeat > 5.0s)
+            if hasattr(self, "_last_phone_seen_time") and self._last_phone_seen_time > 0:
+                if (now - self._last_phone_seen_time) > 5.0:
+                    self.conn_device_ip_var.set(f"{self.ip_var.get().strip() or 'Phone'}  •  WAITING / OFFLINE")
+
+            if not hasattr(self, "_last_party_refresh"):
+                self._last_party_refresh = 0.0
+            if (now - self._last_party_refresh) >= 1.0:
+                self._last_party_refresh = now
+                self._refresh_party_ui()
+                self._refresh_discovered_hosts_ui()
+                if getattr(self, "_party_view_state", "CHOOSER") == "HOST":
+                    self._refresh_party_qr()
+                elif getattr(self, "party_extend_var", None) and self.party_extend_var.get():
+                    self._refresh_party_extend_qr()
+
+                # Keep-alive re-announcement to host if PC is an active party joiner
+                if getattr(self, "_party_joined_active", False) and self._party_join_receiver and self._party_join_receiver.is_running:
+                    host_ip = self.party_join_host_ip_var.get().strip()
+                    if host_ip:
                         try:
-                            self.volume_gain_var.set(round(os_vol, 2))
-                            self.muted_var.set(os_mute)
-                            self.gain_val_label.config(text=f"{int(os_vol * 100)}%")
-                            if hasattr(self, "conn_vol_pct_label"):
-                                self.conn_vol_pct_label.config(text=f"{int(os_vol * 100)}%")
-                            self.mute_btn.config(bg="#990000" if os_mute else "#333333", text="MUTED" if os_mute else "MUTE")
-                            if hasattr(self, "conn_mute_icon_btn"):
-                                self.conn_mute_icon_btn.config(text="🔇" if os_mute else "🔊")
-                        finally:
-                            self._suppress_sync = False
-                        self._on_local_setting_changed()
-
-        # Check phone connection timeout (heartbeat > 5.0s)
-        if hasattr(self, "_last_phone_seen_time") and self._last_phone_seen_time > 0:
-            if (now - self._last_phone_seen_time) > 5.0:
-                self.conn_device_ip_var.set(f"{self.ip_var.get().strip() or 'Phone'}  •  WAITING / OFFLINE")
-
-        if not hasattr(self, "_last_party_refresh"):
-            self._last_party_refresh = 0.0
-        if (now - self._last_party_refresh) >= 1.0:
-            self._last_party_refresh = now
-            self._refresh_party_ui()
-            self._refresh_discovered_hosts_ui()
-            if getattr(self, "_party_view_state", "CHOOSER") == "HOST":
-                self._refresh_party_qr()
-            elif getattr(self, "party_extend_var", None) and self.party_extend_var.get():
-                self._refresh_party_extend_qr()
-
-            # Keep-alive re-announcement to host if PC is an active party joiner
-            if getattr(self, "_party_joined_active", False) and self._party_join_receiver and self._party_join_receiver.is_running:
-                host_ip = self.party_join_host_ip_var.get().strip()
-                if host_ip:
-                    try:
-                        port = int(self.party_join_port_var.get().strip())
-                    except ValueError:
-                        port = AUDIO_PORT
-                    try:
-                        send_control_message(
-                            host_ip,
-                            {
-                                "type": "BEACON",
-                                "app": "PhoneSpeaker",
-                                "version": 2,
-                                "party_join": True,
-                                "is_party_host": False,
-                                "is_extended_host": bool(self.party_extend_var.get()),
-                                "device": socket.gethostname(),
-                                "audio_port": port,
-                            },
-                            CONTROL_PORT,
-                        )
-                    except Exception:
-                        pass
-
-        self.root.after(50, self._schedule_ui_update)
+                            port = int(self.party_join_port_var.get().strip())
+                        except ValueError:
+                            port = AUDIO_PORT
+                        try:
+                            send_control_message(
+                                host_ip,
+                                {
+                                    "type": "BEACON",
+                                    "app": "PhoneSpeaker",
+                                    "version": 2,
+                                    "party_join": True,
+                                    "is_party_host": False,
+                                    "is_extended_host": bool(self.party_extend_var.get()),
+                                    "device": socket.gethostname(),
+                                    "audio_port": port,
+                                },
+                                CONTROL_PORT,
+                            )
+                        except Exception:
+                            pass
+        except Exception as exc:
+            logger.debug("UI update error: %s", exc)
+        finally:
+            self.root.after(50, self._schedule_ui_update)
 
     def _process_ui_queue(self) -> None:
         try:
             while True:
                 item = self._ui_queue.get_nowait()
-                kind, data = item[0], item[1]
+                try:
+                    kind, data = item[0], item[1]
 
-                if kind in ("beacon", "stats", "config_sync"):
-                    self._last_phone_seen_time = time.monotonic()
+                    if kind in ("beacon", "stats", "config_sync"):
+                        self._last_phone_seen_time = time.monotonic()
 
-                if kind == "pps":
-                    self.pps_var.set(f"Speaker Packets: {data}/s")
-                elif kind == "rx_pps":
-                    self._rx_pps = data
-                    self.rx_pps_var.set(f"Mic Packets: {data}/s")
-                    if data > 0 and time.monotonic() >= getattr(self, "_mic_control_cooldown_until", 0.0):
-                        self._mic_active_requested = True
-                        self._last_phone_mic_state = True
-                        if self._phone_receiver:
-                            self._phone_receiver.set_muted(False, manual=False)
-                        self.mic_btn.config(
-                            text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                            bg="#003344", fg="#00FF00"
-                        )
-                        self.mic_state_var.set("Phone Mic: STREAMING")
-                    else:
-                        self.mic_state_var.set("Phone Mic: STREAMING" if data > 0 else "Phone Mic: LISTENING")
-                    self._update_combined_status()
-                elif kind == "driver_done":
-                    ok, msg = data
-                    if ok:
-                        messagebox.showinfo("Virtual Audio Setup", msg)
-                        self._check_virtual_device_status()
-                        self._refresh_audio_devices()
-                        self._refresh_pc_outputs()
-                        self._status_set("VIRTUAL AUDIO READY", ACCENT)
-                    else:
-                        messagebox.showerror("Virtual Audio Error", msg)
-                        self._status_set("VIRTUAL AUDIO FAILED", ERROR_COLOR)
-                elif kind == "error":
-                    self._status_set(f"ERROR: {data}", ERROR_COLOR)
-                    if self._streaming:
-                        self._stop_streaming()
-                elif kind == "config_sync":
-                    sender_ip = data.get("_sender_ip")
-                    if sender_ip:
-                        if data.get("party_join") or (self._party_view_state == "HOST" and self.party_mode_var.get()):
-                            self._register_party_device(sender_ip, data.get("device", "Android Phone"), data.get("audio_port", AUDIO_PORT), force=True)
-                        if data.get("party_mode") or data.get("party_host") or data.get("role") == "HOST":
-                            self._discovered_party_hosts[sender_ip] = {
-                                "name": data.get("device", "Phone Host"),
-                                "last_seen": time.monotonic(),
-                                "port": data.get("audio_port", AUDIO_PORT),
-                            }
-                    self._apply_incoming_config(data)
-                elif kind == "beacon":
-                    msg = data
-                    sender_ip = msg.get("_sender_ip")
-                    ips = msg.get("ips", [])
-                    candidates = []
-                    if sender_ip and sender_ip not in candidates:
-                        candidates.append(sender_ip)
-                    for ip in ips:
-                        if ip and ip not in candidates:
-                            candidates.append(ip)
-
-                    if not candidates:
-                        continue
-
-                    adapter_sel = self.adapter_combo.current()
-                    active_adapter_ip = ""
-                    if 0 <= adapter_sel < len(self._adapter_data):
-                        active_adapter_ip = self._adapter_data[adapter_sel].get("ip", "")
-
-                    all_up_adapters = [(i, a) for i, a in enumerate(self._adapter_data) if a.get("is_up")]
-                    best_ip = None
-                    matching_adapter_idx = None
-
-                    if active_adapter_ip:
-                        act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
-                        for c in candidates:
-                            if c.startswith(act_prefix):
-                                best_ip = c
-                                break
-
-                    if not best_ip:
-                        for idx, a in all_up_adapters:
-                            a_ip = a.get("ip", "")
-                            if a_ip:
-                                a_prefix = ".".join(a_ip.split(".")[:3]) + "."
-                                for c in candidates:
-                                    if c.startswith(a_prefix):
-                                        best_ip = c
-                                        matching_adapter_idx = idx
-                                        break
-                            if best_ip:
-                                break
-
-                    if not best_ip:
-                        best_ip = candidates[0]
-
-                    dev_name = msg.get("device", "")
-                    if dev_name and dev_name != "Android":
-                        self._connected_phone_name = dev_name
-                        self.conn_device_name_var.set(dev_name)
-                    elif self._connected_phone_name == "Waiting for phone...":
-                        self.conn_device_name_var.set("Android Phone")
-                    self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED")
-
-                    is_ios = (msg.get("platform") == "ios" or msg.get("force_pcm") is True or
-                              "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
-                    if is_ios and self.codec_var.get() != CODEC_PCM16:
-                        self.codec_var.set(CODEC_PCM16)
-                        self._update_codec_ui_state()
-                        self._on_local_setting_changed()
-                    if (self._party_view_state == "HOST" and self.party_mode_var.get()) or msg.get("party_join"):
-                        if self._party_view_state == "HOST" or getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get():
-                            self._register_party_device(best_ip, dev_name or "Android Phone", msg.get("audio_port", AUDIO_PORT), force=True)
-                    if msg.get("party_mode") or msg.get("party_host") or msg.get("is_party_host") or msg.get("is_extended_host") or msg.get("role") == "HOST":
-                        self._discovered_party_hosts[best_ip] = {
-                            "name": dev_name or "Phone Host",
-                            "last_seen": time.monotonic(),
-                            "port": msg.get("audio_port", AUDIO_PORT),
-                        }
-
-                    if matching_adapter_idx is not None and matching_adapter_idx != adapter_sel:
-                        self.adapter_combo.current(matching_adapter_idx)
-                        self._on_adapter_selected()
-
-                    self.phone_ip_var.set(f"Phone: {best_ip}")
-
-                    is_ip_focused = False
-                    try:
-                        is_ip_focused = (self.root.focus_get() == self.ip_entry)
-                    except Exception:
-                        pass
-
-                    if not is_ip_focused:
-                        current_ip = self.ip_var.get().strip()
-                        should_update_ip = (not current_ip) or (current_ip not in candidates)
-                        if not should_update_ip and active_adapter_ip:
-                            act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
-                            if not current_ip.startswith(act_prefix) and best_ip.startswith(act_prefix):
-                                should_update_ip = True
-
-                        if should_update_ip:
-                            old_ip = current_ip
-                            self.ip_var.set(best_ip)
-                            if self._streaming and self._udp_sender and best_ip != current_ip:
-                                try:
-                                    target_port = int(self.ip_port_var.get().strip())
-                                except ValueError:
-                                    target_port = AUDIO_PORT
-                                self._udp_sender.update_target(best_ip, target_port)
-                                self._update_combined_status()
-                            if old_ip != best_ip or not old_ip:
-                                try:
-                                    send_control_message(best_ip, self._get_current_config(), CONTROL_PORT)
-                                except Exception:
-                                    pass
-
-                elif kind == "stats":
-                    s = data
-                    dev_name = s.get("device", "")
-                    if dev_name and dev_name != "Android":
-                        self._connected_phone_name = dev_name
-                        self.conn_device_name_var.set(dev_name)
-                    elif self._connected_phone_name == "Waiting for phone...":
-                        self.conn_device_name_var.set("Android Phone")
-
-                    is_ios = (s.get("platform") == "ios" or s.get("force_pcm") is True or
-                              "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
-                    if is_ios and self.codec_var.get() != CODEC_PCM16:
-                        self.codec_var.set(CODEC_PCM16)
-                        self._update_codec_ui_state()
-                        self._on_local_setting_changed()
-                    cur_ip = self.ip_var.get().strip()
-                    sender_ip = s.get("_sender_ip") or cur_ip
-                    if cur_ip:
-                        self.conn_device_ip_var.set(f"{cur_ip}  •  CONNECTED")
-                    if sender_ip and self._party_view_state == "HOST" and self.party_mode_var.get():
-                        self._register_party_device(sender_ip, dev_name or "Android Phone", s.get("audio_port", AUDIO_PORT))
-
-                    phone_mic_active = bool(s.get("mic_streaming", False))
-                    if time.monotonic() >= getattr(self, "_mic_control_cooldown_until", 0.0):
-                        effective_mic_active = phone_mic_active or (self._rx_pps > 0)
-                        if effective_mic_active != getattr(self, "_last_phone_mic_state", None):
-                            self._last_phone_mic_state = effective_mic_active
+                    if kind == "pps":
+                        self.pps_var.set(f"Speaker Packets: {data}/s")
+                    elif kind == "rx_pps":
+                        self._rx_pps = data
+                        self.rx_pps_var.set(f"Mic Packets: {data}/s")
+                        if data > 0 and time.monotonic() >= getattr(self, "_mic_control_cooldown_until", 0.0):
+                            self._mic_active_requested = True
+                            self._last_phone_mic_state = True
                             if self._phone_receiver:
-                                self._phone_receiver.set_muted(not effective_mic_active, manual=False)
-                            if effective_mic_active:
-                                self.mic_btn.config(
-                                    text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                                    bg="#003344", fg="#00FF00"
-                                )
-                                self.mic_state_var.set("Phone Mic: STREAMING")
-                            else:
-                                self.mic_btn.config(
-                                    text="🎤  START MIC STREAM / RECEIVER (PHONE → PC :5006)",
-                                    bg="#112222", fg="#00EEEE"
-                                )
-                                self.mic_state_var.set("Phone Mic: READY")
-                            self._update_combined_status()
+                                self._phone_receiver.set_muted(False, manual=False)
+                            self.mic_btn.config(
+                                text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
+                                bg="#003344", fg="#00FF00"
+                            )
+                            self.mic_state_var.set("Phone Mic: STREAMING")
+                        else:
+                            self.mic_state_var.set("Phone Mic: STREAMING" if data > 0 else "Phone Mic: LISTENING")
+                        self._update_combined_status()
+                    elif kind == "driver_done":
+                        ok, msg = data
+                        if ok:
+                            messagebox.showinfo("Virtual Audio Setup", msg)
+                            self._check_virtual_device_status()
+                            self._refresh_audio_devices()
+                            self._refresh_pc_outputs()
+                            self._status_set("VIRTUAL AUDIO READY", ACCENT)
+                        else:
+                            messagebox.showerror("Virtual Audio Error", msg)
+                            self._status_set("VIRTUAL AUDIO FAILED", ERROR_COLOR)
+                    elif kind == "error":
+                        self._status_set(f"ERROR: {data}", ERROR_COLOR)
+                        if self._streaming:
+                            self._stop_streaming()
+                    elif kind == "config_sync":
+                        sender_ip = data.get("_sender_ip")
+                        if sender_ip:
+                            if data.get("party_join") or (self._party_view_state == "HOST" and self.party_mode_var.get()):
+                                self._register_party_device(sender_ip, data.get("device", "Android Phone"), data.get("audio_port", AUDIO_PORT), force=True)
+                            if data.get("party_mode") or data.get("party_host") or data.get("role") == "HOST":
+                                self._discovered_party_hosts[sender_ip] = {
+                                    "name": data.get("device", "Phone Host"),
+                                    "last_seen": time.monotonic(),
+                                    "port": data.get("audio_port", AUDIO_PORT),
+                                }
+                        self._apply_incoming_config(data)
+                    elif kind == "beacon":
+                        msg = data
+                        sender_ip = msg.get("_sender_ip")
+                        ips = msg.get("ips", [])
+                        candidates = []
+                        if sender_ip and sender_ip not in candidates:
+                            candidates.append(sender_ip)
+                        for ip in ips:
+                            if ip and ip not in candidates:
+                                candidates.append(ip)
 
-                    self.latency_var.set(
-                        f"Phone Buffer: {s.get('buffer_ms', '--'):.1f} ms"
-                        if isinstance(s.get("buffer_ms"), (int, float)) else "Phone Buffer: --"
-                    )
-                    lost = s.get("lost_packets", "--")
-                    self.loss_var.set(f"Dropped: {lost}")
+                        if not candidates:
+                            continue
+
+                        adapter_sel = self.adapter_combo.current()
+                        active_adapter_ip = ""
+                        if 0 <= adapter_sel < len(self._adapter_data):
+                            active_adapter_ip = self._adapter_data[adapter_sel].get("ip", "")
+
+                        all_up_adapters = [(i, a) for i, a in enumerate(self._adapter_data) if a.get("is_up")]
+                        best_ip = None
+                        matching_adapter_idx = None
+
+                        if active_adapter_ip:
+                            act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
+                            for c in candidates:
+                                if c.startswith(act_prefix):
+                                    best_ip = c
+                                    break
+
+                        if not best_ip:
+                            for idx, a in all_up_adapters:
+                                a_ip = a.get("ip", "")
+                                if a_ip:
+                                    a_prefix = ".".join(a_ip.split(".")[:3]) + "."
+                                    for c in candidates:
+                                        if c.startswith(a_prefix):
+                                            best_ip = c
+                                            matching_adapter_idx = idx
+                                            break
+                                if best_ip:
+                                    break
+
+                        if not best_ip:
+                            best_ip = candidates[0]
+
+                        dev_name = msg.get("device", "")
+                        if dev_name and dev_name != "Android":
+                            self._connected_phone_name = dev_name
+                            self.conn_device_name_var.set(dev_name)
+                        elif self._connected_phone_name == "Waiting for phone...":
+                            self.conn_device_name_var.set("Android Phone")
+                        self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED")
+
+                        is_ios = (msg.get("platform") == "ios" or msg.get("force_pcm") is True or
+                                  "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
+                        if is_ios and self.codec_var.get() != CODEC_PCM16:
+                            self.codec_var.set(CODEC_PCM16)
+                            self._update_codec_ui_state()
+                            self._on_local_setting_changed()
+                        if (self._party_view_state == "HOST" and self.party_mode_var.get()) or msg.get("party_join"):
+                            if self._party_view_state == "HOST" or getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get():
+                                self._register_party_device(best_ip, dev_name or "Android Phone", msg.get("audio_port", AUDIO_PORT), force=True)
+                        if msg.get("party_mode") or msg.get("party_host") or msg.get("is_party_host") or msg.get("is_extended_host") or msg.get("role") == "HOST":
+                            self._discovered_party_hosts[best_ip] = {
+                                "name": dev_name or "Phone Host",
+                                "last_seen": time.monotonic(),
+                                "port": msg.get("audio_port", AUDIO_PORT),
+                            }
+
+                        if matching_adapter_idx is not None and matching_adapter_idx != adapter_sel:
+                            self.adapter_combo.current(matching_adapter_idx)
+                            self._on_adapter_selected()
+
+                        self.phone_ip_var.set(f"Phone: {best_ip}")
+
+                        is_ip_focused = False
+                        try:
+                            is_ip_focused = (self.root.focus_get() == self.ip_entry)
+                        except Exception:
+                            pass
+
+                        if not is_ip_focused and self._manual_ip_override is None:
+                            current_ip = self.ip_var.get().strip()
+                            if not self._streaming or not current_ip:
+                                should_update_ip = (not current_ip) or (current_ip not in candidates)
+                                if not should_update_ip and active_adapter_ip:
+                                    act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
+                                    if not current_ip.startswith(act_prefix) and best_ip.startswith(act_prefix):
+                                        should_update_ip = True
+
+                                if should_update_ip:
+                                    old_ip = current_ip
+                                    self.ip_var.set(best_ip)
+                                    if old_ip != best_ip or not old_ip:
+                                        try:
+                                            send_control_message(best_ip, self._get_current_config(), CONTROL_PORT)
+                                        except Exception:
+                                            pass
+
+                    elif kind == "stats":
+                        s = data
+                        dev_name = s.get("device", "")
+                        if dev_name and dev_name != "Android":
+                            self._connected_phone_name = dev_name
+                            self.conn_device_name_var.set(dev_name)
+                        elif self._connected_phone_name == "Waiting for phone...":
+                            self.conn_device_name_var.set("Android Phone")
+
+                        is_ios = (s.get("platform") == "ios" or s.get("force_pcm") is True or
+                                  "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
+                        if is_ios and self.codec_var.get() != CODEC_PCM16:
+                            self.codec_var.set(CODEC_PCM16)
+                            self._update_codec_ui_state()
+                            self._on_local_setting_changed()
+                        cur_ip = self.ip_var.get().strip()
+                        sender_ip = s.get("_sender_ip") or cur_ip
+                        if cur_ip:
+                            self.conn_device_ip_var.set(f"{cur_ip}  •  CONNECTED")
+                        if sender_ip and self._party_view_state == "HOST" and self.party_mode_var.get():
+                            self._register_party_device(sender_ip, dev_name or "Android Phone", s.get("audio_port", AUDIO_PORT))
+
+                        phone_mic_active = bool(s.get("mic_streaming", False))
+                        if time.monotonic() >= getattr(self, "_mic_control_cooldown_until", 0.0):
+                            effective_mic_active = phone_mic_active or (self._rx_pps > 0)
+                            if effective_mic_active != getattr(self, "_last_phone_mic_state", None):
+                                self._last_phone_mic_state = effective_mic_active
+                                if self._phone_receiver:
+                                    self._phone_receiver.set_muted(not effective_mic_active, manual=False)
+                                if effective_mic_active:
+                                    self.mic_btn.config(
+                                        text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
+                                        bg="#003344", fg="#00FF00"
+                                    )
+                                    self.mic_state_var.set("Phone Mic: STREAMING")
+                                else:
+                                    self.mic_btn.config(
+                                        text="🎤  START MIC STREAM / RECEIVER (PHONE → PC :5006)",
+                                        bg="#112222", fg="#00EEEE"
+                                    )
+                                    self.mic_state_var.set("Phone Mic: READY")
+                                self._update_combined_status()
+
+                        self.latency_var.set(
+                            f"Phone Buffer: {s.get('buffer_ms', '--'):.1f} ms"
+                            if isinstance(s.get("buffer_ms"), (int, float)) else "Phone Buffer: --"
+                        )
+                        lost = s.get("lost_packets", "--")
+                        self.loss_var.set(f"Dropped: {lost}")
+                except Exception as exc:
+                    logger.warning("Error processing UI queue item %s: %s", item[0] if item else "?", exc)
+        except queue.Empty:
+            pass
         except queue.Empty:
             pass
 
@@ -3040,9 +3089,12 @@ PLATFORMS SUPPORTED:
 
     def _on_close(self) -> None:
         if self.tray_var.get() and _TRAY_AVAILABLE:
-            self.root.withdraw()
             if not self._tray_icon:
                 self._setup_tray()
+            if self._tray_icon is not None:
+                self.root.withdraw()
+            else:
+                self._quit_app()
         else:
             self._quit_app()
 

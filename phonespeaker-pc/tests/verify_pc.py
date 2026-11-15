@@ -404,9 +404,9 @@ def test_phone_mic_receiver_no_drops() -> None:
 
         # Send 20 back-to-back 972-byte packets
         tx_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        packet = build_silence_packet(seq=1)  # 972 bytes
         num_packets = 20
         for seq in range(1, num_packets + 1):
+            packet = build_silence_packet(seq=seq)
             tx_sock.sendto(packet, ("127.0.0.1", test_port))
         tx_sock.close()
 

@@ -218,14 +218,6 @@ def _list_linux_pulse_monitors() -> List[dict]:
         return []
     devices = []
     try:
-        res_mod = subprocess.run(["pactl", "list", "short", "modules"], capture_output=True, text=True, timeout=2)
-        if res_mod.returncode == 0 and "PhoneSpeaker_Only" in res_mod.stdout:
-            for line in res_mod.stdout.splitlines():
-                if "PhoneSpeaker_Only" in line:
-                    mod_id = line.split("\t")[0].strip()
-                    if mod_id.isdigit():
-                        subprocess.run(["pactl", "unload-module", mod_id], capture_output=True, timeout=2)
-
         default_sink = ""
         res_def = subprocess.run(
             ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2
@@ -487,13 +479,13 @@ class AudioCapture:
                 raw = self._parec_proc.stdout.read(chunk_bytes)
                 if not raw:
                     break
-                int16_arr = np.frombuffer(raw, dtype=np.int16)
-                if len(int16_arr) > 0:
-                    self.peak_level = float(np.max(np.abs(int16_arr))) / 32768.0
                 self._remainder.extend(raw)
                 while len(self._remainder) >= chunk_bytes:
                     frame = bytes(self._remainder[:chunk_bytes])
                     del self._remainder[:chunk_bytes]
+                    int16_arr = np.frombuffer(frame, dtype=np.int16)
+                    if len(int16_arr) > 0:
+                        self.peak_level = float(np.max(np.abs(int16_arr))) / 32768.0
                     if self._output_queue.qsize() < 50:
                         self._output_queue.put_nowait(frame)
             except Exception as exc:
@@ -577,8 +569,6 @@ class AudioCapture:
                 )
                 try:
                     # PyAudioWPatch exposes loopback endpoints directly as input devices
-                    self._stream = self._pa.open(**open_kwargs)
-                except TypeError:
                     self._stream = self._pa.open(**open_kwargs)
                 except Exception:
                     # Fallback for legacy PyAudio WASAPI forks that require as_loopback=True (Windows PyAudioWPatch only)

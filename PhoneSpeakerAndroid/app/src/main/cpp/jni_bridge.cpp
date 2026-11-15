@@ -178,10 +178,10 @@ Java_com_hasan_phonespeaker_AudioNative_nativeGetStats(JNIEnv* env, jobject /*th
     if (!result) return nullptr;
 
     jfloat statsArr[8] = {0.0f};
-    statsArr[1] = gSavedTargetMs;
-    statsArr[7] = gSavedAutoMode ? 1.0f : 0.0f;
     {
         std::lock_guard<std::mutex> lock(gEngineMutex);
+        statsArr[1] = gSavedTargetMs;
+        statsArr[7] = gSavedAutoMode ? 1.0f : 0.0f;
         if (gAudioEngine) {
             JitterStats stats = gAudioEngine->getStats();
             statsArr[0] = stats.buffer_ms;

@@ -28,7 +28,7 @@ def _netsh_add_cmd(port: int) -> list:
 
 def get_firewall_commands() -> list:
     if sys.platform == "darwin":
-        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off"]
+        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/PhoneSpeaker\\ v2.app/Contents/MacOS/phonespeaker"]
     if sys.platform.startswith("linux"):
         if shutil.which("ufw"):
             return [f"sudo ufw allow {p}/udp" for p in PORTS]
@@ -81,13 +81,15 @@ def apply_firewall_rules() -> tuple:
         return True, "\n".join(results)
 
     try:
+        import base64
         ps_commands = "; ".join([
             f"netsh advfirewall firewall add rule name='PhoneSpeaker UDP {p}' protocol=UDP localport={p} dir=in action=allow enable=yes profile=any"
             for p in PORTS
         ])
+        b64 = base64.b64encode(ps_commands.encode("utf-16le")).decode("ascii")
         elevate_cmd = [
-            "powershell.exe", "-NoProfile", "-Command",
-            f"Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile -Command \"{ps_commands}\"'"
+            "powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command",
+            f"Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -EncodedCommand {b64}'"
         ]
         ret = subprocess.run(elevate_cmd, capture_output=True, text=True, timeout=20)
         if ret.returncode == 0:

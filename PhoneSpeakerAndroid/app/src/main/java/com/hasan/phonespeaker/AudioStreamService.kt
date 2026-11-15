@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -19,6 +20,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
 class AudioStreamService : Service() {
@@ -103,6 +105,20 @@ class AudioStreamService : Service() {
                         notifyStateChanged()
                     }
                 }
+                android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(android.bluetooth.BluetoothProfile.EXTRA_STATE, -1)
+                    if (state == android.bluetooth.BluetoothProfile.STATE_CONNECTED && pausedByHeadset) {
+                        Log.i(TAG, "Bluetooth headset connected — resuming stream")
+                        pausedByHeadset = false
+                        applyEffectiveMuteAndGain()
+                        notifyStateChanged()
+                    } else if (state == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED && stopOnHeadsetDisconnect && isStreaming) {
+                        Log.i(TAG, "Bluetooth headset disconnected — pausing stream")
+                        pausedByHeadset = true
+                        applyEffectiveMuteAndGain()
+                        notifyStateChanged()
+                    }
+                }
             }
         }
     }
@@ -115,6 +131,7 @@ class AudioStreamService : Service() {
         val noisyFilter = IntentFilter().apply {
             addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
             addAction(Intent.ACTION_HEADSET_PLUG)
+            addAction(android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(noisyReceiver, noisyFilter, Context.RECEIVER_NOT_EXPORTED)
@@ -184,14 +201,21 @@ class AudioStreamService : Service() {
 
     private fun updateForegroundState() {
         val notif = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            if (isMicStreaming && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                val hasRecordAudio = ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (isMicStreaming && hasRecordAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                startForeground(NOTIFICATION_ID, notif, serviceType)
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
             }
-            startForeground(NOTIFICATION_ID, notif, serviceType)
-        } else {
-            startForeground(NOTIFICATION_ID, notif)
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground error: ${e.message}")
         }
     }
 
@@ -214,8 +238,12 @@ class AudioStreamService : Service() {
             Log.e(TAG, "Failed to start native audio engine on port 5004")
             isStreaming = false
             releaseAudioFocus()
-            releaseLocks()
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!isMicStreaming) {
+                releaseLocks()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                updateForegroundState()
+            }
             notifyStateChanged()
             return
         }
@@ -249,6 +277,14 @@ class AudioStreamService : Service() {
     }
 
     private fun startMicServer(targetIp: String?, enableFx: Boolean = true) {
+        val hasRecordAudio = ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasRecordAudio) {
+            Log.e(TAG, "RECORD_AUDIO permission not granted, cannot start mic server")
+            return
+        }
+
         ensureControlChannel()
         if (!targetIp.isNullOrBlank()) {
             activeControlChannel?.setActivePcIp(targetIp)
@@ -362,7 +398,11 @@ class AudioStreamService : Service() {
             }
             applyEffectiveMuteAndGain()
             if (json.has("exclusive_audio_mode")) {
+                val oldMode = exclusiveAudioMode
                 exclusiveAudioMode = json.getString("exclusive_audio_mode")
+                if (oldMode != exclusiveAudioMode && isStreaming) {
+                    requestAudioFocus()
+                }
             }
             if (json.has("stop_on_headset_disconnect")) {
                 stopOnHeadsetDisconnect = json.getBoolean("stop_on_headset_disconnect")
@@ -439,7 +479,12 @@ class AudioStreamService : Service() {
     }
 
     private fun requestAudioFocus() {
-        if (exclusiveAudioMode == "ALWAYS_PLAY") return
+        if (exclusiveAudioMode != "EXCLUSIVE") {
+            releaseAudioFocus()
+            pausedByFocus = false
+            applyEffectiveMuteAndGain()
+            return
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val playbackAttributes = AudioAttributes.Builder()
