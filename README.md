@@ -101,7 +101,7 @@ The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-deb
 - Simply double-click `PhoneSpeaker v2.exe` to run.
 - **Windows Firewall:** Click **Add Firewall Rules** in the app's *Virtual Device* tab, or run in Administrator PowerShell:
   ```powershell
-  foreach ($p in 5004,5005,5006) {
+  foreach ($p in 5004,5005) {
     netsh advfirewall firewall add rule name="PhoneSpeaker UDP $p" protocol=UDP localport=$p dir=in action=allow enable=yes profile=any
   }
   ```
@@ -195,11 +195,11 @@ update-desktop-database ~/.local/share/applications 2>/dev/null || true
 #### Linux Firewall (If Streaming is Blocked):
 - **Ubuntu / Mint / Debian (`ufw`):**
   ```bash
-  sudo ufw allow 5004/udp && sudo ufw allow 5005/udp && sudo ufw allow 5006/udp
+  sudo ufw allow 5004/udp && sudo ufw allow 5005/udp
   ```
 - **Arch / Fedora (`firewalld`):**
   ```bash
-  sudo firewall-cmd --add-port={5004,5005,5006}/udp --permanent && sudo firewall-cmd --reload
+  sudo firewall-cmd --add-port={5004,5005}/udp --permanent && sudo firewall-cmd --reload
   ```
 
 #### Build Linux App from Source:
@@ -261,7 +261,7 @@ python3 phonespeaker-pc/src/main.py        # run directly from source
 
 **Features on iOS:**
 - Low-latency 48 kHz stereo speaker player powered by `AVAudioEngine`.
-- Wireless Microphone streaming (iPhone $\rightarrow$ PC) over UDP 5006.
+- Option A Internal Audio Capture & Streaming over UDP 5004.
 - Multi-Device Party Mode with built-in Camera QR scanner, member list, and **Extend This Party (Hotspot / Daisy-Chain Repeater)**.
 
 **Downloads & Sideloading:**
@@ -293,12 +293,12 @@ Runs eleven checks: adapter filtering, PCM packet size, the Opus encoder, silenc
 
 ### Firewall
 
-The PC must accept inbound UDP **5004, 5005 and 5006**. Use the **Add Firewall Rules** button in the app (**Virtual Device** tab), or run the commands yourself.
+The PC must accept inbound UDP **5004 and 5005**. Use the **Add Firewall Rules** button in the app (**Virtual Device** tab), or run the commands yourself.
 
 Windows (administrator PowerShell). Phone hotspots are usually classed as *Public* networks, so the rules use `profile=any`:
 
 ```powershell
-foreach ($p in 5004,5005,5006) {
+foreach ($p in 5004,5005) {
   netsh advfirewall firewall add rule name="PhoneSpeaker UDP $p" protocol=UDP localport=$p dir=in action=allow enable=yes profile=any
 }
 ```
@@ -306,9 +306,9 @@ foreach ($p in 5004,5005,5006) {
 Linux (use whichever firewall you have):
 
 ```bash
-sudo ufw allow 5004/udp && sudo ufw allow 5005/udp && sudo ufw allow 5006/udp
+sudo ufw allow 5004/udp && sudo ufw allow 5005/udp
 # or
-sudo firewall-cmd --add-port=5004/udp --add-port=5005/udp --add-port=5006/udp --permanent && sudo firewall-cmd --reload
+sudo firewall-cmd --add-port=5004/udp --add-port=5005/udp --permanent && sudo firewall-cmd --reload
 ```
 
 ---
@@ -356,32 +356,32 @@ sudo firewall-cmd --add-port=5004/udp --add-port=5005/udp --add-port=5006/udp --
 ## How it works
 
 ```
- PC (Windows / Linux)                                   Phone (Android)
- ┌────────────────────────────┐   UDP 5004 audio        ┌──────────────────────────┐
- │ WASAPI loopback / parec    │ ──────────────────────▶ │ jitter buffer → Oboe     │
- │ resample → PCM16 / Opus    │                         │ (speaker)                │
- │                            │   UDP 5006 audio        │                          │
- │ decode → output device /   │ ◀────────────────────── │ AudioRecord (mic) →      │
- │ virtual mic                │                         │ UDP sender               │
+ PC (Windows / Linux / macOS)                           Phone (Android / iOS)
+ ┌────────────────────────────┐   UDP 5004 audio (PLAY) ┌──────────────────────────┐
+ │ WASAPI loopback / parec    │ ──────────────────────▶ │ jitter buffer → Oboe /   │
+ │ resample → PCM16 / Opus    │                         │ AVAudioEngine (speaker)  │
+ │                            │  UDP 5004 audio (SERVE) │                          │
+ │ decode → output device /   │ ◀────────────────────── │ MediaProjection /        │
+ │ virtual device             │                         │ ReplayKit (system audio) │
  │                            │   UDP 5005 control JSON │                          │
  │ settings, discovery, stats │ ◀─────────────────────▶ │ beacon, stats, settings  │
  └────────────────────────────┘                         └──────────────────────────┘
 ```
 
-Every connection type (Wi-Fi router, phone hotspot, USB tethering, Bluetooth PAN) is just an IP network, so the same three UDP ports serve all of them.
+Every connection type (Wi-Fi router, phone hotspot, USB tethering, Bluetooth PAN) is just an IP network, so the two UDP ports (5004 Audio, 5005 Control) serve all of them.
 
 ---
 
 ## Quick start
 
 1. Put the PC and the phone on the **same network**: same Wi-Fi, the phone's hotspot, or a USB or Bluetooth tether.
-2. Install the Android app and the desktop app (see [Install and build](#install-and-build)).
-3. On the phone, open **PhoneSpeaker** and tap **Start speaker player (port 5004)**.
+2. Install the Android / iOS app and the desktop app (see [Install and build](#install-and-build)).
+3. On the phone, open **PhoneSpeaker** and tap **Start speaker player (port 5004)** in the **[ PLAY ]** tab.
 4. On the PC, open **PhoneSpeaker**. The phone should appear under **Connections** within a second or two. If it doesn't, type the phone's IP into **Phone IP / Port**.
-5. Click **Start speaker stream (PC → Phone)**. Play something on the PC.
+5. Click **Start serving audio (PC → Phone :5004)** in the **[ SERVE ]** tab. Play something on the PC.
 6. Watch the **Audio Level** bar on the PC and the **RX packets / sec** counter on the phone. Both should move.
 
-For the microphone: tap **Start mic stream to PC (port 5006)** on the phone, or use the mic button on the PC. See [Phone as a PC microphone](#phone-as-a-pc-microphone).
+To stream phone system audio to PC: tap **Capture & Serve Internal Audio** on the phone's **[ SERVE ]** tab, and click **Start Player (Receive Phone Audio)** on PC.
 
 ---
 
@@ -391,35 +391,35 @@ For the microphone: tap **Start mic stream to PC (port 5006)** on the phone, or 
 
 | Mode | What it does | Ports |
 |---|---|---|
-| **PC → Phone** | Phone is the speaker | 5004 |
-| **Phone → PC Mic** | Phone is the microphone | 5006 |
-| **Full-Duplex** | Both at once | 5004 and 5006 |
+| **PC → Phone (PLAY)** | Phone is the wireless speaker | 5004 |
+| **Phone → PC (SERVE)** | Stream phone internal audio to PC | 5004 |
+| **Full-Duplex** | Bidirectional playback & serving | 5004 |
 
-Speaker and mic have separate start and stop buttons on both the PC and the phone. Starting the mic from the PC also signals the phone to start its microphone server.
+Player and server modes have independent start and stop controls on both the PC and the phone.
 
 ### 🎉 Party Mode & Multi-Device Broadcasting
 
 | Role | Behaviour |
 |---|---|
-| **Party Host** | Broadcasts audio packets concurrently to all joined phones on the local network |
+| **Party Host** | Broadcasts audio packets concurrently to all joined phones and PCs on the local network |
 | **Party Joiner** | Joins an active party via automatic discovery or instant Camera QR scanning |
 | **📡 Extend Party (Repeater)** | Re-broadcasts the incoming stream to devices on secondary hotspot networks with hop-count TTL loop prevention |
 
-### Phone as a PC microphone
+### Phone as an internal audio source (SERVE)
 
-The phone sends 48 kHz audio to the PC on port 5006. The PC plays it into an output device, and you point your chat app at the matching input.
+On Android 10+ and iOS, the phone captures and streams internal system audio (games, music, YouTube, podcasts) directly to the PC over UDP 5004.
 
 **Windows**
-1. In the **Virtual Device** tab, click **Install Virtual Audio Driver (VB-CABLE)**. This downloads the VB-CABLE driver pack from vb-audio.com and runs its installer with elevation.
-2. In the **Stream** tab, set **PC Playback Dev** to **CABLE Input**.
-3. In Discord, Zoom, OBS or your game, choose **CABLE Output** as the microphone.
+1. In the **Virtual Device** tab, click **Install Virtual Audio Driver (VB-CABLE)** or use your default playback device.
+2. In the **[ PLAY ]** tab, select your preferred output device and click **Start Player (Receive Phone Audio)**.
 
 **Linux**
-1. In the **Virtual Device** tab, click **Install Virtual Audio Driver**. This uses `pactl` to create a virtual speaker (`PhoneSpeaker_Sink`), a mic bridge (`PhoneSpeaker_Mic_Sink`) and a virtual microphone (`PhoneSpeaker_Mic`, shown as *PhoneSpeaker_Wireless_Mic*).
-2. Set **PC Playback Dev** to `[PipeWire/Pulse] PhoneSpeaker_Mic_Sink`.
-3. Choose **PhoneSpeaker_Wireless_Mic** as the microphone in your app.
+1. In the **Virtual Device** tab, click **Install Virtual Audio Driver**. This uses `pactl` to create a virtual speaker (`PhoneSpeaker_Sink`).
+2. Set your output device to `PhoneSpeaker_Sink` or default desktop audio.
 
-The virtual-sink devices are created per login session. If they disappear after a reboot, click the button again.
+**macOS**
+1. Install BlackHole 2ch loopback driver or use system speakers.
+2. Click **Start Player (Receive Phone Audio)** in the **[ PLAY ]** tab.
 
 ### Capturing only part of your audio
 
@@ -455,9 +455,8 @@ Little-endian, UDP.
 
 | Port | Direction | Purpose |
 |---|---|---|
-| **5004** | PC → Phone | Speaker audio |
-| **5005** | Both | Control JSON: `BEACON`, `STATS`, `CONFIG_SYNC` |
-| **5006** | Phone → PC | Microphone audio |
+| **5004** | Bidirectional | Audio stream (PC → Phone PLAY or Phone → PC SERVE) |
+| **5005** | Bidirectional | Control JSON: `BEACON`, `STATS`, `CONFIG_SYNC` |
 
 **Audio packet** = 12-byte header + payload (kept under 1200 bytes to avoid fragmentation):
 
@@ -535,7 +534,7 @@ PCM16 uses 5 ms frames: 240 samples per channel, a 960-byte payload, 972 bytes o
 │       │   ├── MainActivity.kt            # main UI, Party Mode QR host/join/extend, sync
 │       │   ├── AudioStreamService.kt      # foreground service, locks, audio focus
 │       │   ├── ControlChannel.kt          # beacon, stats, settings sync
-│       │   ├── MicStreamer.kt             # phone microphone to PC
+│       │   ├── InternalAudioStreamer.kt   # phone internal audio capture to PC
 │       │   ├── LatencyGraphView.kt        # live delay graph
 │       │   └── AudioNative.kt             # JNI bindings
 │       └── res/                           # black-and-white layouts and theme

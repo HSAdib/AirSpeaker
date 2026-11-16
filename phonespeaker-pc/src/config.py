@@ -38,7 +38,6 @@ _DEFAULTS: Dict[str, Any] = {
     "custom_buffer_ms": 30.0,
     "volume_gain": 1.0,
     "muted": False,
-    "mic_enabled": True,
     "direction": "PC_TO_PHONE",
     "adapter_name": "",
     "minimize_to_tray": True,

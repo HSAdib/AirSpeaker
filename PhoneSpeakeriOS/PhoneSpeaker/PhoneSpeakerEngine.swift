@@ -130,7 +130,6 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     @Published public var activeCodecName: String = "PCM16"
     @Published public var opusBitrateKbps: String = "192"
     @Published public var serverRole: String = "PC_TO_PHONE"
-    @Published public var micHardwareFx: Bool = true
     @Published public var outputEngineMode: String = "OBOE_LOW_LATENCY"
     @Published public var enableAudioEffects: Bool = false
     @Published public var exclusiveAudioMode: String = "MIX_WITH_OTHERS"
@@ -167,7 +166,6 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     private var atomicBufferTargetMs: Int = 20
     private var atomicRelayActive: Bool = false
     private var atomicConnectedServerIp: String = ""
-    private var isMicRunning: Bool = false
     private var isPrebufferingAudio: Bool = true
 
     // MARK: - Audio Engine Components
@@ -824,16 +822,6 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 stopOnHeadsetDisconnect = disc
             }
 
-        case "MIC_CONTROL":
-            if let active = payload["active"] as? Bool {
-                if active && !isMicStreaming {
-                    updateServerIp(senderIp)
-                    startMicStreaming()
-                } else if !active && isMicStreaming {
-                    stopMicStreaming()
-                }
-            }
-
         case "PARTY_KICK":
             let targetIp = payload["target_ip"] as? String ?? ""
             if targetIp.isEmpty || PhoneSpeakerEngine.getLocalIpv4Addresses().contains(targetIp) {
@@ -859,7 +847,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             "type": "CONFIG_SYNC",
             "rev": localRev,
             "sync_id": syncId,
-            "direction": isMicStreaming && isAudioPlaying ? "FULL_DUPLEX" : (isMicStreaming ? "PHONE_TO_PC" : "PC_TO_PHONE"),
+            "direction": isInternalAudioServing && isAudioPlaying ? "FULL_DUPLEX" : (isInternalAudioServing ? "PHONE_TO_PC" : "PC_TO_PHONE"),
             "audio_profile": soundMode,
             "codec": 0,
             "force_pcm": true,
@@ -1190,7 +1178,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
     public func stopAll() {
         stopSpeakerPlayer()
-        stopMicStreaming()
+        stopServingInternalAudio()
         stopPartyKeepAliveTimer()
         beaconTimer?.invalidate()
         beaconTimer = nil

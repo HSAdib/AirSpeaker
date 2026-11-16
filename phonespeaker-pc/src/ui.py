@@ -390,7 +390,7 @@ class PhoneSpeakerApp:
         title_frame = tk.Frame(self.root, bg=BG, bd=1, relief="solid")
         title_frame.pack(fill="x", padx=8, pady=(8, 4))
         tk.Label(
-            title_frame, text="◀ PhoneSpeaker v2.0.1 Studio ▶",
+            title_frame, text="◀ PhoneSpeaker v2.1 Studio ▶",
             bg=BG, fg=FG, font=FONT_MONO_LG
         ).pack(side="left", padx=8, pady=4)
 
@@ -1184,25 +1184,7 @@ class PhoneSpeakerApp:
         else:
             self.virt_status_label.config(text="⚠ No Virtual Audio Driver detected. Click [ Install Virtual Audio Driver ] below.", fg=WARN)
 
-    def _auto_route_virtual_mic(self) -> None:
-        self._refresh_pc_outputs()
-        for i, d in enumerate(self._pc_output_devices):
-            name_l = d.get("name", "").lower()
-            if d.get("is_virtual") or any(k in name_l for k in ("cable input", "phonespeaker_mic_sink", "blackhole", "soundflower", "virtual", "vb-audio")):
-                self.pc_output_combo.current(i)
-                self._on_pc_output_selected()
-                messagebox.showinfo(
-                    "Phone Mic Routed",
-                    f"Phone Mic (UDP 5006) is now routed to:\n\n  → {d['name']}\n\n"
-                    "In Discord, Zoom, Teams, or OBS, select 'CABLE Output (VB-Audio Virtual Cable)', "
-                    "'BlackHole 2ch' (macOS), or 'PhoneSpeaker_Wireless_Mic' (Linux) as your Microphone input!",
-                )
-                return
-        messagebox.showwarning(
-            "Virtual Audio Not Found",
-            "No virtual audio cable (VB-CABLE / BlackHole / PhoneSpeaker_Mic_Sink) was found.\n\n"
-            "Go to the 'Virtual Device' tab and click 'Install Virtual Audio Driver' first!",
-        )
+
 
     def _auto_select_virtual_capture(self) -> None:
         self._refresh_audio_devices()
@@ -1936,7 +1918,7 @@ class PhoneSpeakerApp:
             "sync_id": sync_id,
             "direction": self.direction_var.get(),
             "pc_source": "SYSTEM_AUDIO",
-            "phone_source": "MIC",
+            "phone_source": "INTERNAL_AUDIO",
             "audio_profile": self.audio_profile_var.get(),
             "codec": self.codec_var.get(),
             "opus_bitrate_kbps": int(self.bitrate_var.get()),
@@ -2046,34 +2028,7 @@ class PhoneSpeakerApp:
             self.audio_profile_var.set("CUSTOM")
         self._on_local_setting_changed()
 
-    def _on_role_change(self) -> None:
-        direction = self.direction_var.get()
-        phone_ip = self.ip_var.get().strip()
 
-        if direction == "PHONE_TO_PC":
-            if self._streaming:
-                self._stop_streaming()
-            if self._phone_receiver:
-                self._phone_receiver.set_muted(False, manual=False)
-            self.mic_state_var.set("Phone Mic: LISTENING (:5006)")
-            self.mic_btn.config(
-                text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                bg="#003344", fg="#00FF00"
-            )
-            if phone_ip:
-                send_control_message(phone_ip, {"type": "MIC_CONTROL", "active": True}, CONTROL_PORT)
-        elif direction == "FULL_DUPLEX":
-            if self._phone_receiver:
-                self._phone_receiver.set_muted(False, manual=False)
-            self.mic_state_var.set("Phone Mic: LISTENING (:5006)")
-            self.mic_btn.config(
-                text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                bg="#003344", fg="#00FF00"
-            )
-            if phone_ip:
-                send_control_message(phone_ip, {"type": "MIC_CONTROL", "active": True}, CONTROL_PORT)
-
-        self._on_local_setting_changed()
 
     def _on_buffer_mode_changed(self) -> None:
         if not self._suppress_sync:
@@ -2635,6 +2590,13 @@ class PhoneSpeakerApp:
                     if isinstance(t, (int, float)):
                         tgt_val = float(t)
                     losses = self._phone_stats.get("lost_packets", 0)
+                if buf_val == 0.0 and self._play_active and self._phone_receiver and self._rx_pps > 0:
+                    try:
+                        buf_val = float(len(self._phone_receiver._pcm_queue) * 5.0)
+                        if hasattr(self, "play_buf_level_var"):
+                            self.play_buf_level_var.set(f"{buf_val:.1f} ms")
+                    except Exception:
+                        pass
                 est_total, _ = self._compute_expected_delay_ms()
                 self._draw_delay_graph(buf_val, tgt_val, est_total, losses)
 
@@ -2953,7 +2915,7 @@ class PhoneSpeakerApp:
 
         tk.Label(
             dlg,
-            text="Inbound UDP ports 5004, 5005, and 5006 must be allowed\nso Android, iOS, and PC/Mac/Linux can stream audio and sync settings.",
+            text="Inbound UDP ports 5004 and 5005 must be allowed\nso Android, iOS, and PC/Mac/Linux can stream audio and sync settings.",
             bg=BG, fg=FG, font=FONT_MONO, justify="left",
         ).pack(anchor="w", padx=12, pady=4)
 
@@ -3030,7 +2992,7 @@ class PhoneSpeakerApp:
 
     def _show_help_dialog(self) -> None:
         dlg = tk.Toplevel(self.root)
-        dlg.title("PhoneSpeaker v2.0.1 Studio — User Guide & Help")
+        dlg.title("PhoneSpeaker v2.1 Studio — User Guide & Help")
         dlg.configure(bg=BG)
         dlg.geometry("680x580")
         dlg.resizable(True, True)
@@ -3114,7 +3076,7 @@ TABS:
             img = _make_tray_image(64)
             if img is None:
                 return
-            self._tray_icon = pystray.Icon("PhoneSpeaker", img, "PhoneSpeaker v2.0.1", menu)
+            self._tray_icon = pystray.Icon("PhoneSpeaker", img, "PhoneSpeaker v2.1", menu)
             threading.Thread(target=self._tray_icon.run, daemon=True).start()
         except Exception as e:
             logger.warning("Failed to start tray icon: %s", e)

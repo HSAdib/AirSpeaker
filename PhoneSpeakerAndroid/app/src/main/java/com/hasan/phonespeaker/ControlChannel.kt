@@ -14,8 +14,7 @@ import kotlin.concurrent.thread
 class ControlChannel(
     private val audioPort: Int = 5004,
     private val controlPort: Int = 5005,
-    @Volatile var onConfigSyncReceived: ((JSONObject) -> Unit)? = null,
-    @Volatile var onMicControlReceived: ((Boolean) -> Unit)? = null
+    @Volatile var onConfigSyncReceived: ((JSONObject) -> Unit)? = null
 ) {
     private val TAG = "ControlChannel"
     @Volatile
@@ -256,15 +255,6 @@ class ControlChannel(
                                 }
                             }
                             onConfigSyncReceived?.invoke(json)
-                        } else if (msgType == "MIC_CONTROL") {
-                            val allowOverwrite = (activePcIp == null || activePcIp == senderIp || !AudioStreamService.isStreaming)
-                            if (allowOverwrite) {
-                                activePcIp = senderIp
-                                lastKnownPcIp = senderIp
-                                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
-                            }
-                            val wantActive = json.optBoolean("active", false)
-                            onMicControlReceived?.invoke(wantActive)
                         }
                     } catch (_: Exception) {}
                 }

@@ -149,42 +149,44 @@ class MainActivity : AppCompatActivity() {
     private fun showHelpDialog() {
         val guideText = """
         ============================================================
-        PHONESPEAKER v2.0 — USER GUIDE & HELP
+        PHONESPEAKER v2.1 STUDIO — USER GUIDE & HELP
         ============================================================
 
-        ✓ SPEAKER & MIC STREAMING STATUS: VERIFIED & WORKING
+        ✓ STUDIO ARCHITECTURE: 4 DEDICATED TABS
         ------------------------------------------------------------
-        Both directions have dedicated, independent controls on both
-        your Phone and PC (Windows .exe & Linux binary):
-        * [ ▶ START SPEAKER PLAYER (PORT 5004) ] — Receives PC audio
-        * [ 🎤 START MIC STREAM TO PC (PORT 5006) ] — Sends Phone Mic
-        You can run either one solo or both simultaneously (Full-Duplex)!
+        PhoneSpeaker v2.1 features a unified monospace layout across
+        Android, iOS, Windows, macOS, and Linux:
 
-        1. USING PHONE AS WIRELESS SPEAKER (PC -> PHONE :5004)
+        1. [ PLAY ] TAB (PC -> PHONE AUDIO PLAYER)
         ------------------------------------------------------------
         * Tap [ ▶ START SPEAKER PLAYER (PORT 5004) ] on Phone and
           click [ ▶ START SPEAKER STREAM ] on PC.
-        * PC auto-discovers your phone via UDP beacons (Port 5005).
-        * Buffer Presets: Low (20ms), Medium (40ms), High (80ms), Auto.
+        * Plays low-latency wireless audio from your computer.
+        * Default codec: Lossless PCM16 48 kHz stereo (5 ms frames).
+        * Target buffer slider: 10 ms to 150 ms (Prebuffer safety).
+        * Live latency, packet loss, and jitter telemetry graph.
 
-        2. USING PHONE AS WIRELESS MIC (PHONE -> PC :5006)
+        2. [ SERVE ] TAB (PHONE INTERNAL AUDIO -> PC)
         ------------------------------------------------------------
-        * Tap [ 🎤 START MIC STREAM TO PC (PORT 5006) ] on either the
-          PLAYER tab or SERVER tab (or toggle [ 🎤 MIC RECEIVER ] on PC).
-        * Verify it is working:
-          - Phone shows 'MIC SERVER: STREAMING TO PC' and 'TX PPS: ~200'.
-          - PC shows 'MIC RX: ACTIVE' and 'RX PPS: ~200' + Level Meter!
-        * Using in Discord / Zoom / OBS:
-          - Windows: Set PC Playback Dev to 'CABLE Input' (VB-CABLE),
-            then select 'CABLE Output' as your Mic in Discord/Zoom.
-          - Linux: Click 'Create Virtual Mic (PipeWire/PulseAudio)' in
-            Tab 3 and select 'PhoneSpeaker Wireless Mic' in your app.
+        * Tap [ ⏺ CAPTURE & SERVE INTERNAL AUDIO ] to stream system
+          audio (games, media, apps) from Android 10+ directly to PC.
+        * Uses MediaProjection AudioPlaybackCaptureConfiguration.
+        * Output streams on UDP port 5004 to PC or Party joiners.
 
-        3. SETTINGS TAB (REAL-TIME 2-WAY SYNC)
+        3. [ PARTY ] TAB (MULTI-DEVICE BROADCAST & RELAY)
         ------------------------------------------------------------
-        * Any changes on PC or Phone sync immediately over UDP 5005.
-        * Bitrates: 10 to 320 kbps Opus or uncompressed Lossless PCM16.
-        * Dual-Speaker Sync: Play on PC and Phone simultaneously.
+        * [ HOST PARTY ]: Broadcast internal audio to multiple
+          phones and PCs simultaneously.
+        * [ JOIN PARTY ]: Connect to an active party broadcast.
+        * [ EXTEND VIA HOTSPOT ]: Daisy-chain relay audio to devices
+          on your personal hotspot with clock-drift compensation.
+
+        4. [ SETTINGS ] TAB (REAL-TIME 2-WAY STUDIO SYNC)
+        ------------------------------------------------------------
+        * Synchronizes settings in real-time over UDP port 5005.
+        * Switch between Lossless PCM16 and Opus (10 - 320 kbps).
+        * Studio EQ & Dynamic Limiter: Studio Flat, Vocal Boost,
+          Bass Punch, Gaming Crisp.
         """.trimIndent()
 
         val tv = android.widget.TextView(this).apply {
@@ -201,7 +203,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("PhoneSpeaker v2.0 Guide")
+            .setTitle("PhoneSpeaker v2.1 Studio Guide")
             .setView(scroll)
             .setPositiveButton("Close", null)
             .show()
