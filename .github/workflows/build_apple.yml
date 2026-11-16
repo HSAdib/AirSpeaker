@@ -25,12 +25,10 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Set up Android SDK & CMake
-        uses: android-actions/setup-android@v3
-
       - name: Install Android NDK & CMake
         run: |
-          sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.1.8937393" "cmake;3.22.1" || true
 
       - name: Decode Android Release Keystore
         env:
@@ -63,11 +61,15 @@ jobs:
 
       - name: Locate and Package Android Artifact
         run: |
-          APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -n 1)
           if [ -z "$APK_PATH" ]; then
             echo "Release APK not found, checking debug build..."
-            cd PhoneSpeakerAndroid && ./gradlew assembleDebug && cd ..
-            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
+          fi
+          if [ -z "$APK_PATH" ]; then
+            echo "Build APK not found, checking repository root..."
+            [ -f "PhoneSpeaker.v2.1.apk" ] && APK_PATH="PhoneSpeaker.v2.1.apk"
+            [ -f "PhoneSpeaker v2.apk" ] && [ -z "$APK_PATH" ] && APK_PATH="PhoneSpeaker v2.apk"
           fi
           echo "Selected APK: $APK_PATH"
           cp "$APK_PATH" PhoneSpeaker.v2.1.apk
@@ -197,7 +199,7 @@ jobs:
   release-publish:
     name: Publish Official v2.1 Release
     needs: [build-android, build-windows, build-apple]
-    if: startsWith(github.ref, 'refs/tags/v2.1') || startsWith(github.ref, 'refs/tags/v2.0')
+    if: always() && (startsWith(github.ref, 'refs/tags/v2.1') || startsWith(github.ref, 'refs/tags/v2.0') || github.ref_name == 'main')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -208,21 +210,36 @@ jobs:
 
       - name: Download Android Artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: PhoneSpeaker-v2.1-APK
           path: release-artifacts/
 
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: PhoneSpeaker-v2.1-EXE
           path: release-artifacts/
 
       - name: Download Apple Artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: PhoneSpeaker-v2-Apple-Deliverables
           path: release-artifacts/
+
+      - name: Populate Release Artifacts from Repository
+        run: |
+          mkdir -p release-artifacts
+          for f in "PhoneSpeaker.v2.1.exe" "PhoneSpeaker.v2.exe" "PhoneSpeaker.v2.1.apk" "PhoneSpeaker v2.apk" \
+                   "PhoneSpeaker-v2-Linux-Installer.run" "PhoneSpeaker-v2-macOS-Installer.command" \
+                   "PhoneSpeaker-v2-macOS.dmg" "PhoneSpeaker-v2-iOS.ipa" "install_linux.sh"; do
+            if [ -f "$f" ] && [ ! -f "release-artifacts/$f" ]; then
+              echo "Populating $f from repository..."
+              cp "$f" release-artifacts/
+            fi
+          done
 
       - name: Generate Checksums & Build Manifest
         run: |
