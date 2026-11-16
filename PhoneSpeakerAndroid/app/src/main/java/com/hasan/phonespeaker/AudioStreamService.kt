@@ -9,18 +9,18 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
 class AudioStreamService : Service() {
@@ -29,18 +29,19 @@ class AudioStreamService : Service() {
         const val TAG = "AudioStreamService"
         const val ACTION_START = "com.hasan.phonespeaker.START"
         const val ACTION_STOP = "com.hasan.phonespeaker.STOP"
-        const val ACTION_START_MIC = "com.hasan.phonespeaker.START_MIC"
-        const val ACTION_STOP_MIC = "com.hasan.phonespeaker.STOP_MIC"
+        const val ACTION_START_SERVE = "com.hasan.phonespeaker.START_SERVE"
+        const val ACTION_STOP_SERVE = "com.hasan.phonespeaker.STOP_SERVE"
         const val ACTION_STATE_CHANGED = "com.hasan.phonespeaker.STATE_CHANGED"
         const val ACTION_CONFIG_SYNC_RECEIVED = "com.hasan.phonespeaker.CONFIG_SYNC"
 
         const val EXTRA_STREAMING = "streaming"
-        const val EXTRA_MIC_STREAMING = "mic_streaming"
+        const val EXTRA_SERVING = "serving"
         const val EXTRA_CONFIG_JSON = "config_json"
         const val EXTRA_TARGET_IP = "target_ip"
-        const val EXTRA_MIC_FX = "extra_mic_fx"
         const val EXTRA_AUDIO_ENGINE = "extra_audio_engine"
         const val EXTRA_AUDIO_FX = "extra_audio_fx"
+        const val EXTRA_RESULT_CODE = "extra_result_code"
+        const val EXTRA_RESULT_DATA = "extra_result_data"
 
         const val CHANNEL_ID = "PhoneSpeakerServiceChannel"
         const val NOTIFICATION_ID = 1001
@@ -48,10 +49,10 @@ class AudioStreamService : Service() {
         var isStreaming = false
             private set
 
-        var isMicStreaming = false
+        var isServing = false
             private set
 
-        var micStreamerInstance: MicStreamer? = null
+        var internalAudioStreamerInstance: InternalAudioStreamer? = null
             private set
 
         var activeControlChannel: ControlChannel? = null
@@ -63,7 +64,7 @@ class AudioStreamService : Service() {
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
 
-    private var micStreamer: MicStreamer? = null
+    private var internalStreamer: InternalAudioStreamer? = null
     private var exclusiveAudioMode = "MIX_WITH_OTHERS"
     private var stopOnHeadsetDisconnect = false
     private var audioOutputEngine = "OBOE_LOW_LATENCY"
@@ -98,25 +99,6 @@ class AudioStreamService : Service() {
                         pausedByHeadset = true
                         applyEffectiveMuteAndGain()
                         notifyStateChanged()
-                    } else if (state == 1 && pausedByHeadset) {
-                        Log.i(TAG, "Headset reconnected — resuming stream")
-                        pausedByHeadset = false
-                        applyEffectiveMuteAndGain()
-                        notifyStateChanged()
-                    }
-                }
-                android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
-                    val state = intent.getIntExtra(android.bluetooth.BluetoothProfile.EXTRA_STATE, -1)
-                    if (state == android.bluetooth.BluetoothProfile.STATE_CONNECTED && pausedByHeadset) {
-                        Log.i(TAG, "Bluetooth headset connected — resuming stream")
-                        pausedByHeadset = false
-                        applyEffectiveMuteAndGain()
-                        notifyStateChanged()
-                    } else if (state == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED && stopOnHeadsetDisconnect && isStreaming) {
-                        Log.i(TAG, "Bluetooth headset disconnected — pausing stream")
-                        pausedByHeadset = true
-                        applyEffectiveMuteAndGain()
-                        notifyStateChanged()
                     }
                 }
             }
@@ -126,32 +108,40 @@ class AudioStreamService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "AudioStreamService.onCreate")
-        createNotificationChannel()
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val noisyFilter = IntentFilter().apply {
+        createNotificationChannel()
+
+        val filter = IntentFilter().apply {
             addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
             addAction(Intent.ACTION_HEADSET_PLUG)
-            addAction(android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(noisyReceiver, noisyFilter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(noisyReceiver, noisyFilter)
-        }
+        registerReceiver(noisyReceiver, filter)
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         Log.d(TAG, "AudioStreamService.onDestroy")
-        try { unregisterReceiver(noisyReceiver) } catch (_: Exception) {}
-        stopAll()
+        try {
+            unregisterReceiver(noisyReceiver)
+        } catch (_: Exception) {}
+
+        stopAudioPlayer()
+        stopServingInternalAudio()
+        releaseLocks()
+
+        try {
+            loudnessEnhancer?.release()
+        } catch (_: Exception) {}
+        loudnessEnhancer = null
+        lastAttachedSessionId = 0
+
+        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         Log.d(TAG, "AudioStreamService.onStartCommand action=$action")
         if (action == null) {
-            if (!isStreaming && !isMicStreaming) {
+            if (!isStreaming && !isServing) {
                 stopSelf()
             }
             return START_NOT_STICKY
@@ -162,7 +152,7 @@ class AudioStreamService : Service() {
         when (action) {
             ACTION_STOP -> {
                 stopAudioPlayer()
-                if (!isMicStreaming) stopSelf()
+                if (!isServing) stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_START -> {
@@ -172,17 +162,18 @@ class AudioStreamService : Service() {
                 }
                 if (!isStreaming) startAudioPlayer()
             }
-            ACTION_START_MIC -> {
-                val enableFx = intent.getBooleanExtra(EXTRA_MIC_FX, true)
-                if (isMicStreaming) {
-                    micStreamer?.stop()
-                    micStreamer = null
-                    micStreamerInstance = null
+            ACTION_START_SERVE -> {
+                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+                val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
-                startMicServer(targetIp, enableFx)
+                startServingInternalAudio(resultCode, resultData, targetIp)
             }
-            ACTION_STOP_MIC -> {
-                stopMicServer()
+            ACTION_STOP_SERVE -> {
+                stopServingInternalAudio()
                 if (!isStreaming) stopSelf()
                 return START_NOT_STICKY
             }
@@ -196,7 +187,7 @@ class AudioStreamService : Service() {
             Intent(ACTION_STATE_CHANGED)
                 .setPackage(packageName)
                 .putExtra(EXTRA_STREAMING, isStreaming)
-                .putExtra(EXTRA_MIC_STREAMING, isMicStreaming)
+                .putExtra(EXTRA_SERVING, isServing)
         )
     }
 
@@ -204,12 +195,15 @@ class AudioStreamService : Service() {
         val notif = buildNotification()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                val hasRecordAudio = ContextCompat.checkSelfPermission(
-                    this, android.Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
-                if (isMicStreaming && hasRecordAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                var serviceType = 0
+                if (isStreaming) {
+                    serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                }
+                if (isServing) {
+                    serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                }
+                if (serviceType == 0) {
+                    serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                 }
                 startForeground(NOTIFICATION_ID, notif, serviceType)
             } else {
@@ -241,7 +235,7 @@ class AudioStreamService : Service() {
             Log.e(TAG, "Failed to start native audio engine on port 5004")
             isStreaming = false
             releaseAudioFocus()
-            if (!isMicStreaming) {
+            if (!isServing) {
                 releaseLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -270,7 +264,7 @@ class AudioStreamService : Service() {
 
         AudioNative.nativeStop()
         releaseAudioFocus()
-        if (!isMicStreaming) {
+        if (!isServing) {
             releaseLocks()
             activeControlChannel?.stop()
             activeControlChannel = null
@@ -281,12 +275,13 @@ class AudioStreamService : Service() {
         notifyStateChanged()
     }
 
-    private fun startMicServer(targetIp: String?, enableFx: Boolean = true) {
-        val hasRecordAudio = ContextCompat.checkSelfPermission(
-            this, android.Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!hasRecordAudio) {
-            Log.e(TAG, "RECORD_AUDIO permission not granted, cannot start mic server")
+    private fun startServingInternalAudio(resultCode: Int, resultData: Intent?, targetIp: String?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Log.e(TAG, "Internal system audio capture requires Android 10+")
+            return
+        }
+        if (resultData == null || resultCode != android.app.Activity.RESULT_OK) {
+            Log.e(TAG, "Invalid MediaProjection result code/data")
             return
         }
 
@@ -299,21 +294,38 @@ class AudioStreamService : Service() {
             ?: AudioNative.nativeGetSenderIp()
             ?: "255.255.255.255"
 
-        // CRITICAL for Android 11-14: promote to foreground with MICROPHONE type BEFORE starting AudioRecord
-        isMicStreaming = true
+        isServing = true
+        // Promote to foreground with MEDIA_PROJECTION type BEFORE obtaining MediaProjection (Android 14+ requirement)
         updateForegroundState()
         acquireLocks()
 
-        if (micStreamer == null) {
-            micStreamer = MicStreamer()
-            micStreamerInstance = micStreamer
+        val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val projection: MediaProjection? = mpManager.getMediaProjection(resultCode, resultData)
+        if (projection == null) {
+            Log.e(TAG, "Failed to obtain MediaProjection from MediaProjectionManager")
+            isServing = false
+            if (!isStreaming) {
+                releaseLocks()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } else {
+                updateForegroundState()
+            }
+            notifyStateChanged()
+            return
         }
-        val ok = micStreamer!!.start(ip, 5006, enableFx = enableFx)
+
+        if (internalStreamer == null) {
+            internalStreamer = InternalAudioStreamer()
+            internalAudioStreamerInstance = internalStreamer
+        }
+
+        val ok = internalStreamer!!.start(projection, ip)
         if (!ok) {
-            Log.e(TAG, "MicStreamer failed to start")
-            isMicStreaming = false
-            micStreamer = null
-            micStreamerInstance = null
+            Log.e(TAG, "InternalAudioStreamer failed to start")
+            isServing = false
+            internalStreamer = null
+            internalAudioStreamerInstance = null
             if (!isStreaming) {
                 releaseLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -325,11 +337,11 @@ class AudioStreamService : Service() {
         notifyStateChanged()
     }
 
-    private fun stopMicServer() {
-        isMicStreaming = false
-        micStreamer?.stop()
-        micStreamer = null
-        micStreamerInstance = null
+    private fun stopServingInternalAudio() {
+        isServing = false
+        internalStreamer?.stop()
+        internalStreamer = null
+        internalAudioStreamerInstance = null
 
         if (!isStreaming) {
             releaseLocks()
@@ -342,33 +354,12 @@ class AudioStreamService : Service() {
         notifyStateChanged()
     }
 
-    private fun stopAll() {
-        stopAudioPlayer()
-        stopMicServer()
-        activeControlChannel?.stop()
-        activeControlChannel = null
-    }
-
     private fun ensureControlChannel() {
         if (activeControlChannel == null) {
             activeControlChannel = ControlChannel(
                 audioPort = 5004,
                 controlPort = 5005,
-                onConfigSyncReceived = { configJson -> handleConfigSync(configJson) },
-                onMicControlReceived = { wantActive ->
-                    serviceHandler.post {
-                        if (wantActive && !isMicStreaming) {
-                            val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
-                                this@AudioStreamService, android.Manifest.permission.RECORD_AUDIO
-                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                            if (hasPerm) {
-                                startMicServer(activeControlChannel?.getActivePcIp() ?: ControlChannel.lastKnownPcIp, true)
-                            }
-                        } else if (!wantActive && isMicStreaming) {
-                            stopMicServer()
-                        }
-                    }
-                }
+                onConfigSyncReceived = { configJson -> handleConfigSync(configJson) }
             )
             activeControlChannel?.start()
         }
@@ -382,7 +373,6 @@ class AudioStreamService : Service() {
                     .putExtra(EXTRA_CONFIG_JSON, json.toString())
             )
 
-            // Apply direct engine settings immediately
             if (json.has("custom_buffer_ms")) {
                 AudioNative.nativeSetTargetBufferMs(json.getDouble("custom_buffer_ms").toFloat())
             }
@@ -391,7 +381,6 @@ class AudioStreamService : Service() {
             }
             if (json.has("volume_gain")) {
                 savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                // Stream is already scaled by PC UDPSender relative to phone hardware volume
                 AudioNative.nativeSetVolumeGain(1.0f)
             }
             if (json.has("muted")) {
@@ -502,12 +491,7 @@ class AudioStreamService : Service() {
                 .setOnAudioFocusChangeListener { focusChange ->
                     try {
                         when (focusChange) {
-                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                                if (exclusiveAudioMode == "EXCLUSIVE") {
-                                    pausedByFocus = true
-                                    applyEffectiveMuteAndGain()
-                                }
-                            }
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
                             AudioManager.AUDIOFOCUS_LOSS -> {
                                 if (exclusiveAudioMode == "EXCLUSIVE") {
                                     pausedByFocus = true
@@ -549,7 +533,7 @@ class AudioStreamService : Service() {
                 "PhoneSpeaker Studio Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Bidirectional audio & settings sync service"
+                description = "Ultra-low-latency audio streaming & settings sync"
             }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
@@ -562,14 +546,14 @@ class AudioStreamService : Service() {
         )
 
         val modeText = when {
-            isStreaming && isMicStreaming -> "FULL-DUPLEX (Speaker 5004 + Mic 5006)"
-            isStreaming -> "PLAYER (Receiving on Port 5004)"
-            isMicStreaming -> "MIC SERVER (Streaming on Port 5006)"
+            isStreaming && isServing -> "ACTIVE: DUAL (PLAY 5004 + SERVE 5004)"
+            isStreaming -> "PLAYER: Receiving on Port 5004"
+            isServing -> "AUDIO SENDER: Streaming on Port 5004"
             else -> "IDLE"
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("PhoneSpeaker v2.0 Studio")
+            .setContentTitle("PhoneSpeaker v2.1 Studio")
             .setContentText(modeText)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setContentIntent(pendingIntent)

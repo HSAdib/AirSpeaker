@@ -32,6 +32,8 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import android.media.projection.MediaProjectionManager
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -47,6 +49,32 @@ class MainActivity : AppCompatActivity() {
     private var preStreamDiscoveryChannel: ControlChannel? = null
     private var lastServiceStartTimeMs = 0L
     private val handler = Handler(Looper.getMainLooper())
+
+    private var mediaProjectionManager: MediaProjectionManager? = null
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val targetIp = binding.etServeTargetIp.text.toString().trim().ifBlank {
+                binding.etPcIp.text.toString().trim().ifBlank { "255.255.255.255" }
+            }
+            stopPreStreamDiscovery()
+            val intent = Intent(this, AudioStreamService::class.java).apply {
+                action = AudioStreamService.ACTION_START_SERVE
+                putExtra(AudioStreamService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(AudioStreamService.EXTRA_RESULT_DATA, result.data)
+                putExtra(AudioStreamService.EXTRA_TARGET_IP, targetIp)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } else {
+            Toast.makeText(this, "Internal audio capture permission denied", Toast.LENGTH_SHORT).show()
+        }
+        handler.postDelayed({ refreshServiceButtonState() }, 200L)
+    }
 
     private var partyModeScreen: String = "CHOOSER" // "CHOOSER", "HOST", "JOIN"
     private var isPartyJoinedActive: Boolean = false
@@ -222,19 +250,12 @@ class MainActivity : AppCompatActivity() {
         if (SystemClock.elapsedRealtime() - lastServiceStartTimeMs < 2000L || AudioStreamService.activeControlChannel != null) {
             return
         }
-        if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming && preStreamDiscoveryChannel == null) {
+        if (!AudioStreamService.isStreaming && !AudioStreamService.isServing && preStreamDiscoveryChannel == null) {
             preStreamDiscoveryChannel = ControlChannel(
                 audioPort = 5004,
                 controlPort = 5005,
                 onConfigSyncReceived = { configJson ->
                     runOnUiThread { applyIncomingConfigSync(configJson) }
-                },
-                onMicControlReceived = { wantActive ->
-                    runOnUiThread {
-                        if (wantActive != AudioStreamService.isMicStreaming) {
-                            toggleMicStreaming()
-                        }
-                    }
                 }
             ).also {
                 it.start()
@@ -850,25 +871,38 @@ class MainActivity : AppCompatActivity() {
             onLocalSettingChanged()
         }
 
-        // Role & Advanced settings listeners
-        binding.rgServerRole.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
-        binding.rgOutputEngine.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
-        binding.switchAudioFx.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
-        binding.switchMicFx.setOnCheckedChangeListener { _, isChecked ->
-            if (AudioStreamService.isMicStreaming) {
-                val targetIp = binding.etPcIp.text.toString().trim()
-                val micIntent = Intent(this, AudioStreamService::class.java).apply {
-                    action = AudioStreamService.ACTION_START_MIC
-                    if (targetIp.isNotEmpty()) putExtra(AudioStreamService.EXTRA_TARGET_IP, targetIp)
-                    putExtra(AudioStreamService.EXTRA_MIC_FX, isChecked)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(micIntent)
-                } else {
-                    startService(micIntent)
-                }
+        // Serve tab settings & listeners
+        binding.rgServeSoundMode.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == R.id.rbServeGaming) {
+                AudioNative.nativeSetTargetBufferMs(20.0f)
+            } else if (checkedId == R.id.rbServeQuality) {
+                AudioNative.nativeSetTargetBufferMs(80.0f)
+            } else if (checkedId == R.id.rbServeBalanced) {
+                AudioNative.nativeSetTargetBufferMs(40.0f)
             }
         }
+        binding.rgServeCodec.setOnCheckedChangeListener { _, checkedId ->
+            val isOpus = (checkedId == R.id.rbServeCodecOpus)
+            binding.spinnerServeBitrate.isEnabled = isOpus
+            binding.spinnerServeBitrate.alpha = if (isOpus) 1.0f else 0.45f
+        }
+        val serveBitrates = listOf("64", "96", "128", "192", "256", "320")
+        binding.spinnerServeBitrate.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, serveBitrates)
+        binding.spinnerServeBitrate.setSelection(3) // 192 kbps default
+        binding.spinnerServeBitrate.isEnabled = false
+        binding.spinnerServeBitrate.alpha = 0.45f
+
+        binding.btnToggleServe.setOnClickListener { toggleServing() }
+        binding.btnSetServeTargetIp.setOnClickListener {
+            val ip = binding.etServeTargetIp.text.toString().trim()
+            if (ip.isNotBlank()) {
+                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(ip)
+                Toast.makeText(this, "Target IP set to $ip", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.rgOutputEngine.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
+        binding.switchAudioFx.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
         binding.rgExclusiveMode.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
         binding.switchHeadsetDisconnect.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
 
@@ -969,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
                 handler.postDelayed({
-                    if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                    if (!AudioStreamService.isStreaming && !AudioStreamService.isServing) {
                         startPreStreamDiscoveryIfNeeded()
                     }
                     refreshServiceButtonState()
@@ -1012,7 +1046,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnToggleExtendParty.setTextColor(0xFF00EEEE.toInt())
                 binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(0xFF00EEEE.toInt())
                 handler.postDelayed({
-                    if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                    if (!AudioStreamService.isStreaming && !AudioStreamService.isServing) {
                         startPreStreamDiscoveryIfNeeded()
                     }
                     refreshServiceButtonState()
@@ -1154,7 +1188,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 startService(intent)
                 handler.postDelayed({
-                    if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                    if (!AudioStreamService.isStreaming && !AudioStreamService.isServing) {
                         startPreStreamDiscoveryIfNeeded()
                     }
                     refreshServiceButtonState()
@@ -1175,29 +1209,9 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     startService(intent)
                 }
-
-                if (binding.rbFullDuplex.isChecked && !AudioStreamService.isMicStreaming) {
-                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        val targetIp = binding.etPcIp.text.toString().trim()
-                        val micIntent = Intent(this, AudioStreamService::class.java).apply {
-                            action = AudioStreamService.ACTION_START_MIC
-                            if (targetIp.isNotEmpty()) putExtra(AudioStreamService.EXTRA_TARGET_IP, targetIp)
-                            putExtra(AudioStreamService.EXTRA_MIC_FX, binding.switchMicFx.isChecked)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(micIntent)
-                        } else {
-                            startService(micIntent)
-                        }
-                    }
-                }
             }
             handler.postDelayed({ refreshServiceButtonState() }, 200L)
         }
-
-        // Mic Server Start / Stop Buttons (Main Player Tab & Server Tab)
-        binding.btnToggleMic.setOnClickListener { toggleMicStreaming() }
-        binding.btnToggleMicMain.setOnClickListener { toggleMicStreaming() }
 
         // Connect manual PC IP
         val applyManualPcIp = {
@@ -1211,9 +1225,10 @@ class MainActivity : AppCompatActivity() {
             val ch = AudioStreamService.activeControlChannel ?: preStreamDiscoveryChannel
             if (manualIp.isNotEmpty() && ch?.isOwnLocalIp(manualIp) != true) {
                 binding.etPcIp.setText(manualIp)
+                binding.etServeTargetIp.setText(manualIp)
                 userEditedPcIp = manualIp
                 ch?.setActivePcIp(manualIp)
-                AudioStreamService.micStreamerInstance?.updateTargetIp(manualIp)
+                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(manualIp)
                 binding.etPcIp.clearFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
                 imm?.hideSoftInputFromWindow(binding.etPcIp.windowToken, 0)
@@ -1256,13 +1271,9 @@ class MainActivity : AppCompatActivity() {
             put("type", "CONFIG_SYNC")
             put("rev", localRev)
             put("sync_id", syncId)
-            put("direction", when (binding.rgServerRole.checkedRadioButtonId) {
-                R.id.rbFullDuplex -> "FULL_DUPLEX"
-                R.id.rbMicOnly -> "PHONE_TO_PC"
-                else -> "PC_TO_PHONE"
-            })
+            put("direction", if (AudioStreamService.isServing) "PHONE_TO_PC" else "PC_TO_PHONE")
             put("pc_source", "SYSTEM_AUDIO")
-            put("phone_source", "MIC")
+            put("phone_source", "INTERNAL_AUDIO")
             put("audio_profile", when (binding.rgAudioProfile.checkedRadioButtonId) {
                 R.id.rbProfileQuality -> "QUALITY"
                 R.id.rbProfileGaming -> "GAMING"
@@ -1408,10 +1419,9 @@ class MainActivity : AppCompatActivity() {
             updateExpectedDelayUI()
 
             if (json.has("direction")) {
-                when (json.getString("direction")) {
-                    "FULL_DUPLEX" -> binding.rbFullDuplex.isChecked = true
-                    "PHONE_TO_PC" -> binding.rbMicOnly.isChecked = true
-                    else -> binding.rbSpeakerOnly.isChecked = true
+                val dir = json.getString("direction")
+                if (dir == "PHONE_TO_PC" && !AudioStreamService.isServing) {
+                    selectTab(1)
                 }
             }
             if (json.has("audio_output_engine")) {
@@ -1446,45 +1456,26 @@ class MainActivity : AppCompatActivity() {
     // Telemetry & UI Refresh
     // ------------------------------------------------------------------
 
-    private fun toggleMicStreaming() {
-        if (AudioStreamService.isMicStreaming) {
+    private fun toggleServing() {
+        if (AudioStreamService.isServing) {
             val intent = Intent(this, AudioStreamService::class.java).apply {
-                action = AudioStreamService.ACTION_STOP_MIC
+                action = AudioStreamService.ACTION_STOP_SERVE
             }
             startService(intent)
             handler.postDelayed({
-                if (!AudioStreamService.isStreaming && !AudioStreamService.isMicStreaming) {
+                if (!AudioStreamService.isStreaming && !AudioStreamService.isServing) {
                     startPreStreamDiscoveryIfNeeded()
                 }
                 refreshServiceButtonState()
             }, 500L)
         } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 201)
-                return
-            }
-            lastServiceStartTimeMs = SystemClock.elapsedRealtime()
-            val discoveredIp = binding.etPcIp.text.toString().trim().ifEmpty {
-                preStreamDiscoveryChannel?.getActivePcIp()
-                    ?: AudioStreamService.activeControlChannel?.getActivePcIp()
-                    ?: AudioNative.nativeGetSenderIp()
-                    ?: ""
-            }
-            if (discoveredIp.isNotEmpty() && binding.etPcIp.text.isNullOrBlank()) {
-                binding.etPcIp.setText(discoveredIp)
-            }
-            // Release port 5005 from pre-stream discovery before service binds it
-            stopPreStreamDiscovery()
-
-            val intent = Intent(this, AudioStreamService::class.java).apply {
-                action = AudioStreamService.ACTION_START_MIC
-                if (discoveredIp.isNotEmpty()) putExtra(AudioStreamService.EXTRA_TARGET_IP, discoveredIp)
-                putExtra(AudioStreamService.EXTRA_MIC_FX, binding.switchMicFx.isChecked)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (mediaProjectionManager == null) {
+                    mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                }
+                screenCaptureLauncher.launch(mediaProjectionManager!!.createScreenCaptureIntent())
             } else {
-                startService(intent)
+                Toast.makeText(this, "Internal system audio capture requires Android 10+", Toast.LENGTH_LONG).show()
             }
         }
         handler.postDelayed({ refreshServiceButtonState() }, 200L)
@@ -1529,23 +1520,27 @@ class MainActivity : AppCompatActivity() {
             binding.btnTogglePartyJoin.strokeColor = ColorStateList.valueOf(0xFF00FF00.toInt())
         }
 
-        if (AudioStreamService.isMicStreaming) {
-            binding.btnToggleMic.text = "[ ■ STOP MIC STREAM (PORT 5006) ]"
-            binding.btnToggleMicMain.text = "[ ■ STOP MIC STREAM (PORT 5006) ]"
-            binding.btnToggleMicMain.setTextColor(0xFFFF4444.toInt())
-            binding.tvMicStatus.text = "MIC SERVER: STREAMING TO PC (PORT 5006)"
-            binding.tvMicStatus.setTextColor(0xFF00FF00.toInt())
+        if (AudioStreamService.isServing) {
+            binding.btnToggleServe.text = "[ ■ STOP SERVING AUDIO ]"
+            binding.btnToggleServe.setTextColor(0xFFFF4444.toInt())
+            binding.tvServeStatus.text = "STREAMING INTERNAL AUDIO (PORT 5004)"
+            binding.tvServeStatus.setTextColor(0xFF00FF00.toInt())
+            val pps = AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0
+            binding.tvServePps.text = "TX PPS: $pps pps"
+            val peak = AudioStreamService.internalAudioStreamerInstance?.peakLevel?.get() ?: 0.0f
+            binding.pbServeLevel.progress = (peak * 100).toInt().coerceIn(0, 100)
         } else {
-            binding.btnToggleMic.text = "[ 🎤 START MIC SERVER (PORT 5006) ]"
-            binding.btnToggleMicMain.text = "[ 🎤 START MIC STREAM TO PC (PORT 5006) ]"
-            binding.btnToggleMicMain.setTextColor(0xFF00EEEE.toInt())
-            binding.tvMicStatus.text = "MIC SERVER: STOPPED"
-            binding.tvMicStatus.setTextColor(0xFF888888.toInt())
+            binding.btnToggleServe.text = "[ 📡 START SERVING AUDIO (PORT 5004) ]"
+            binding.btnToggleServe.setTextColor(0xFF00FF88.toInt())
+            binding.tvServeStatus.text = "AUDIO SENDER: READY (PORT 5004)"
+            binding.tvServeStatus.setTextColor(0xFF888888.toInt())
+            binding.tvServePps.text = "TX PPS: 0 pps"
+            binding.pbServeLevel.progress = 0
         }
 
         val statusParts = mutableListOf<String>()
-        if (AudioStreamService.isStreaming) statusParts.add("SPEAKER: ON (5004)")
-        if (AudioStreamService.isMicStreaming) statusParts.add("MIC: ON (5006)")
+        if (AudioStreamService.isStreaming) statusParts.add("PLAY: ON (5004)")
+        if (AudioStreamService.isServing) statusParts.add("SERVE: ON (5004)")
         if (statusParts.isEmpty()) {
             binding.tvStatus.text = "STATUS: STOPPED"
             binding.tvStatus.setTextColor(0xFF888888.toInt())
@@ -1694,9 +1689,9 @@ class MainActivity : AppCompatActivity() {
                 binding.tvPartyJoinStatus.setTextColor(0xFF888888.toInt())
             }
 
-            // Mic TX PPS
-            val micPps = AudioStreamService.micStreamerInstance?.txPps?.get() ?: 0
-            binding.tvMicPps.text = "TX PPS: $micPps pps"
+            // Serve TX PPS
+            val servePps = AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0
+            binding.tvServePps.text = "TX PPS: $servePps pps"
 
             // Keep mute button text synced with native engine mute state
             binding.btnMuteToggle.text = if (AudioNative.nativeIsMuted()) "MUTED" else "MUTE"
@@ -1754,13 +1749,6 @@ class MainActivity : AppCompatActivity() {
         }
         if (sb.isEmpty()) sb.append("No active Wi-Fi / Hotspot / Tether IPv4 found")
         binding.tvIpList.text = sb.toString().trimEnd()
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 201 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            toggleMicStreaming()
-        }
     }
 
     private fun checkPermissions() {

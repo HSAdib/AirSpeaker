@@ -81,7 +81,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
-                android:text="PLAYER"
+                android:text="PLAY"
                 android:textColor="#FFFFFF"
                 app:strokeColor="#FFFFFF"
                 app:strokeWidth="2dp"
@@ -95,7 +95,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
-                android:text="SERVER"
+                android:text="SERVE"
                 android:textColor="#888888"
                 app:strokeColor="#444444"
                 app:strokeWidth="1dp"
@@ -227,20 +227,6 @@
                 android:text="[ ▶ START SPEAKER PLAYER (PORT 5004) ]"
                 android:textColor="#00FF00"
                 android:textSize="14sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace" />
-
-            <Button
-                android:id="@+id/btnToggleMicMain"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="6dp"
-                android:backgroundTint="#001822"
-                app:strokeColor="#00EEEE"
-                app:strokeWidth="2dp"
-                android:text="[ 🎤 START MIC STREAM TO PC (PORT 5006) ]"
-                android:textColor="#00EEEE"
-                android:textSize="13sp"
                 android:textStyle="bold"
                 android:fontFamily="monospace" />
 
@@ -584,7 +570,7 @@
         </LinearLayout>
 
         <!-- ============================================================= -->
-        <!-- TAB 2: SERVER CONTAINER (PHONE MIC -> PC) -->
+        <!-- TAB 2: SERVE CONTAINER (INTERNAL AUDIO -> PC / PARTY) -->
         <!-- ============================================================= -->
         <LinearLayout
             android:id="@+id/layoutServerTab"
@@ -596,101 +582,245 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="PHONE AUDIO SENDER MODE:"
+                android:text="INTERNAL SYSTEM AUDIO SENDER (PORT 5004):"
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:fontFamily="monospace" />
 
+            <!-- Target Receiver IP Card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp"
+                android:background="#12161A"
+                android:padding="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="TARGET: "
+                    android:textColor="#38B6FF"
+                    android:fontFamily="monospace"
+                    android:textStyle="bold"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/etServeTargetIp"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:background="#1A2228"
+                    android:textColor="#FFFFFF"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:hint="255.255.255.255 (Broadcast)"
+                    android:textColorHint="#557788"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace"
+                    android:singleLine="true" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSetServeTargetIp"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="6dp"
+                    android:text="SET IP"
+                    android:textColor="#38B6FF"
+                    app:strokeColor="#38B6FF"
+                    app:strokeWidth="1dp"
+                    android:fontFamily="monospace"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- Sound Mode Selector -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="SOUND MODE PROFILE:"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
             <RadioGroup
-                android:id="@+id/rgServerRole"
+                android:id="@+id/rgServeSoundMode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+
+                <RadioButton
+                    android:id="@+id/rbServeBalanced"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:checked="true"
+                    android:text="Balanced"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace" />
+
+                <RadioButton
+                    android:id="@+id/rbServeGaming"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Gaming"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace" />
+
+                <RadioButton
+                    android:id="@+id/rbServeQuality"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Quality"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace" />
+
+                <RadioButton
+                    android:id="@+id/rbServeCustom"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Custom"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace" />
+            </RadioGroup>
+
+            <!-- Codec Selector -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="AUDIO CODEC:"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
+            <RadioGroup
+                android:id="@+id/rgServeCodec"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp">
 
                 <RadioButton
-                    android:id="@+id/rbSpeakerOnly"
+                    android:id="@+id/rbServeCodecPcm16"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:checked="true"
-                    android:text="Speaker Only (Stream PC audio to Phone)"
+                    android:text="Lossless PCM16 (0 ms delay / 0% quality loss) [Default]"
                     android:textColor="#FFFFFF"
+                    android:textSize="11sp"
                     android:fontFamily="monospace" />
 
                 <RadioButton
-                    android:id="@+id/rbMicOnly"
+                    android:id="@+id/rbServeCodecOpus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Microphone Only (Stream Phone mic to PC)"
+                    android:text="Opus Compressed (High Efficiency)"
                     android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
-
-                <RadioButton
-                    android:id="@+id/rbFullDuplex"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Both Together (Hear PC Sound + Use Phone Mic)"
-                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
                     android:fontFamily="monospace" />
             </RadioGroup>
 
-            <!-- Noise suppression switch -->
-            <com.google.android.material.switchmaterial.SwitchMaterial
-                android:id="@+id/switchMicFx"
+            <!-- Bitrate Picker -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:checked="true"
-                android:text="Hardware Noise Suppression &amp; Echo Canceler"
-                android:textColor="#FFFFFF"
-                android:fontFamily="monospace"
-                app:useMaterialThemeColors="false"
-                app:thumbTint="#FFFFFF"
-                app:trackTint="#666666" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="6dp">
 
-            <!-- Mic Start/Stop Button -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BITRATE: "
+                    android:textColor="#888888"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace" />
+
+                <Spinner
+                    android:id="@+id/spinnerServeBitrate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="8dp"
+                    android:background="#1A2228" />
+            </LinearLayout>
+
+            <!-- Audio Level Meter -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="AUDIO LEVEL METER:"
+                android:textColor="#888888"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <ProgressBar
+                android:id="@+id/pbServeLevel"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:layout_marginTop="4dp"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="#00FF00"
+                android:progressBackgroundTint="#222222" />
+
+            <!-- Main Serve Button -->
             <Button
-                android:id="@+id/btnToggleMic"
+                android:id="@+id/btnToggleServe"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:layout_marginTop="12dp"
-                android:backgroundTint="#000000"
-                app:strokeColor="#FFFFFF"
+                android:backgroundTint="#002211"
+                app:strokeColor="#00FF88"
                 app:strokeWidth="2dp"
-                android:text="[ START MIC SERVER (PORT 5006) ]"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
+                android:text="[ 📡 START SERVING AUDIO (PORT 5004) ]"
+                android:textColor="#00FF88"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:fontFamily="monospace" />
 
-            <!-- Mic Status Readout -->
+            <!-- Status Readout -->
             <TextView
-                android:id="@+id/tvMicStatus"
+                android:id="@+id/tvServeStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="MIC SERVER: STOPPED"
+                android:text="AUDIO SENDER: READY (PORT 5004)"
                 android:textColor="#888888"
                 android:fontFamily="monospace" />
 
             <TextView
-                android:id="@+id/tvMicPps"
+                android:id="@+id/tvServePps"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="TX PPS: 0"
+                android:text="TX PPS: 0 pps"
                 android:textColor="#888888"
                 android:fontFamily="monospace" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:background="#111111"
+                android:layout_marginTop="14dp"
+                android:background="#11161A"
                 android:padding="8dp"
-                android:text="Phone Mic streams 48 kHz stereo low-latency audio to PC Port 5006.\n\nOn PC, set playback device to 'CABLE Input' or 'Virtual Audio' to use this phone as a live microphone in Discord, Teams, Zoom, or games!"
-                android:textColor="#888888"
-                android:textSize="12sp"
+                android:text="Captures internal device playback (YouTube, Spotify, Games, System) via Android AudioPlaybackCapture (MediaProjection) and streams pristine 48 kHz stereo PCM16 directly to PC / Party Listeners on UDP 5004."
+                android:textColor="#8899AA"
+                android:textSize="11sp"
                 android:fontFamily="monospace" />
         </LinearLayout>
 

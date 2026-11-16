@@ -1,8 +1,8 @@
-# PhoneSpeaker v2.0 Studio
+# PhoneSpeaker v2.1 Studio
 
-Use your **phone as a wireless speaker for your PC**, and your **phone as a wireless microphone**, over a plain local network. Low-latency UDP audio, a native Android player built on Oboe, a native iOS app built on AVAudioEngine & SwiftUI, and desktop studio apps for **Windows 11/10**, **Linux** (PipeWire / PulseAudio), and **macOS** (CoreAudio / BlackHole).
+Use your **phone as a wireless speaker for your PC** or stream **internal mobile device audio to your PC/Mac/Linux**, over a plain local network. Low-latency UDP audio, a native Android player built on Oboe and internal system audio capture built on `MediaProjection`, a native iOS app built on AVAudioEngine, ReplayKit & SwiftUI, and desktop studio apps for **Windows 11/10**, **Linux** (PipeWire / PulseAudio), and **macOS** (CoreAudio / BlackHole).
 
-It started as a fix for a laptop with a dead speaker and a dead headphone jack, and grew into a small studio: two-way settings sync, multi-device party mode, a virtual microphone, and live telemetry across all platforms.
+It started as a fix for a laptop with a dead speaker and a dead headphone jack, and grew into a complete cross-platform studio: zero-loss 48 kHz stereo PCM16 low-latency audio, Option A internal mobile audio capture, two-way settings sync, multi-device party mode, and live telemetry across all 5 operating systems.
 
 > **Not a Bluetooth speaker.** Mobile phones can't act as a normal Bluetooth audio sink. "Bluetooth" here means **Bluetooth tethering (PAN)**: the PC joins the phone over Bluetooth and the audio travels as ordinary IP packets. Wi-Fi, hotspot and USB tethering work the same way.
 
@@ -36,8 +36,8 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 
 | Platform | Package / Installer | Description | Direct 1-Click Download | Package Registry |
 |---|---|---|---|---|
-| **Windows 11 / 10** | `PhoneSpeaker.v2.exe` *(or `PhoneSpeaker v2.exe`)* | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.exe) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **Android (8.0–15+)** | `PhoneSpeaker.v2.apk` *(or `PhoneSpeaker v2.apk`)* | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.apk) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Windows 11 / 10** | `PhoneSpeaker.v2.1.exe` *(or `PhoneSpeaker v2.exe`)* | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Android (8.0–15+)** | `PhoneSpeaker.v2.1.apk` *(or `PhoneSpeaker v2.apk`)* | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 | **Linux (All Distros)** | `PhoneSpeaker-v2-Linux-Installer.run` | Self-extracting bundle for PipeWire & PulseAudio | [**Download `.run`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-Linux-Installer.run) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 | **macOS (Apple Silicon & Intel)** | `PhoneSpeaker-v2-macOS.dmg` | Drag-and-drop macOS Disk Image (.app bundle) | [**Download DMG**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS.dmg) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 | **macOS (One-Click Script)** | `PhoneSpeaker-v2-macOS-Installer.command` | Interactive terminal installer & dependency manager | [**Download `.command`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS-Installer.command) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
@@ -58,7 +58,7 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 - **Supported Architectures:** Compatible with all **ARM64** (`arm64-v8a`), **ARMv7** (`armeabi-v7a`), **x86_64**, and **x86** devices (smartphones, tablets, Android TV, and emulators).
 
 **Download APK:**
-- 📦 **Direct Download:** [**`PhoneSpeaker.v2.apk`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.apk) *(local build filename: `PhoneSpeaker v2.apk`)*
+- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.apk`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk) *(local build filename: `PhoneSpeaker v2.apk`)*
 - 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/PhoneSpeaker/releases)
 
 **How to Install on Phone:**
@@ -75,7 +75,7 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
   adb install -r "PhoneSpeaker v2.apk"
   ```
 
-> **Permissions:** PhoneSpeaker requests **Microphone** (only when streaming phone mic to PC), **Notifications** (to keep foreground streaming active), and a **Battery Optimization Exemption** (strongly recommended so Android doesn't throttle audio playback when the screen is locked).
+> **Permissions:** PhoneSpeaker requests **MediaProjection** (when streaming internal mobile audio in SERVE mode), **Notifications** (to keep foreground streaming active), and a **Battery Optimization Exemption** (strongly recommended so Android doesn't throttle audio playback when the screen is locked).
 
 **Build Android APK from Source:**
 Requires Android Studio / SDK 34, NDK, CMake 3.22.1, and JDK 17 (CMake automatically clones libopus v1.5.2):
@@ -93,11 +93,11 @@ The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-deb
 - **Windows 11** & **Windows 10** (64-bit).
 
 **Download Windows Binary:**
-- 📦 **Direct Download:** [**`PhoneSpeaker.v2.exe`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.exe) *(local build filename: `PhoneSpeaker v2.exe`)*
+- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.exe`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe) *(local build filename: `PhoneSpeaker.v2.exe`)*
 - 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/PhoneSpeaker/releases)
 
 **How to Run:**
-- **No installation required!** `PhoneSpeaker v2.exe` is a standalone, single-file executable with bundled 64-bit `opus.dll` and zero external dependencies.
+- **No installation required!** `PhoneSpeaker.v2.1.exe` is a standalone, single-file executable with bundled 64-bit `opus.dll` and zero external dependencies.
 - Simply double-click `PhoneSpeaker v2.exe` to run.
 - **Windows Firewall:** Click **Add Firewall Rules** in the app's *Virtual Device* tab, or run in Administrator PowerShell:
   ```powershell

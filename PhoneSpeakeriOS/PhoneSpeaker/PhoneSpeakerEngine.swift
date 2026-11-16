@@ -10,6 +10,7 @@
 import Foundation
 import UIKit
 import AVFoundation
+import ReplayKit
 import Network
 import Combine
 
@@ -82,7 +83,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
     // MARK: - Published UI States
     @Published public var isAudioPlaying: Bool = false
-    @Published public var isMicStreaming: Bool = false
+    @Published public var isInternalAudioServing: Bool = false
     @Published public var connectedServerIp: String = "" {
         didSet {
             stateLock.lock()
@@ -94,7 +95,8 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     @Published public var latencyMs: Double = 0.0
     @Published public var packetLossPercent: Double = 0.0
     @Published public var rxPps: Int = 0
-    @Published public var micTxPps: Int = 0
+    @Published public var serveTxPps: Int = 0
+    @Published public var servePeakLevel: Float = 0.0
     @Published public var underrunCount: Int = 0
 
     @Published public var volume: Float = 1.0 {
@@ -177,7 +179,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     // BSD POSIX UDP Sockets
     private var audioRxSocket: Int32 = -1
     private var controlSocket: Int32 = -1
-    private var micTxSocket: Int32 = -1
+    private var serveTxSocket: Int32 = -1
     private var relayTxSocket: Int32 = -1
 
     // Background Threads
@@ -191,8 +193,8 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     private var packetsLost: UInt64 = 0
     private var lastSequence: UInt32 = 0
     private var lastRxPpsCount: UInt64 = 0
-    private var micPacketsSent: UInt64 = 0
-    private var lastMicPacketsCount: UInt64 = 0
+    private var servePacketsSent: UInt64 = 0
+    private var lastServePacketsCount: UInt64 = 0
 
     // Timers
     private var beaconTimer: Timer?
@@ -465,26 +467,45 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 pcmBuf.frameLength = frameCount
                 let left = pcmBuf.floatChannelData![0]
                 let right = pcmBuf.floatChannelData![1]
-                // Stream gain (0%..200%) is already applied by PC UDPSender relative to phone hardware volume
-                let gain: Float = curMuted ? 0.0 : 1.0
-
-                // Alignment-safe byte reading directly from buffer + soft-knee limiter
-                if channels == 1 {
-                    for i in 0..<Int(frameCount) {
-                        let off = 12 + i * 2
-                        let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                        let s16 = Int16(bitPattern: u16)
-                        let sample = PhoneSpeakerEngine.softKneeLimit((Float(s16) / 32767.0) * gain)
-                        left[i] = sample
-                        right[i] = sample
+                // Bit-perfect direct path when unmuted and volume is 100% (gain = 1.0)
+                let isUnity = abs(curVolume - 1.0) < 0.001 && !curMuted
+                if isUnity {
+                    if channels == 1 {
+                        for i in 0..<Int(frameCount) {
+                            let off = 12 + i * 2
+                            let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
+                            let s = Float(Int16(bitPattern: u16)) / 32767.0
+                            left[i] = s
+                            right[i] = s
+                        }
+                    } else {
+                        for i in 0..<Int(frameCount) {
+                            let off = 12 + i * 4
+                            let uL = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
+                            let uR = UInt16(buffer[off + 2]) | (UInt16(buffer[off + 3]) << 8)
+                            left[i] = Float(Int16(bitPattern: uL)) / 32767.0
+                            right[i] = Float(Int16(bitPattern: uR)) / 32767.0
+                        }
                     }
                 } else {
-                    for i in 0..<Int(frameCount) {
-                        let off = 12 + i * 4
-                        let uL = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                        let uR = UInt16(buffer[off + 2]) | (UInt16(buffer[off + 3]) << 8)
-                        left[i] = PhoneSpeakerEngine.softKneeLimit((Float(Int16(bitPattern: uL)) / 32767.0) * gain)
-                        right[i] = PhoneSpeakerEngine.softKneeLimit((Float(Int16(bitPattern: uR)) / 32767.0) * gain)
+                    let gain: Float = curMuted ? 0.0 : curVolume
+                    if channels == 1 {
+                        for i in 0..<Int(frameCount) {
+                            let off = 12 + i * 2
+                            let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
+                            let s16 = Int16(bitPattern: u16)
+                            let sample = PhoneSpeakerEngine.softKneeLimit((Float(s16) / 32767.0) * gain)
+                            left[i] = sample
+                            right[i] = sample
+                        }
+                    } else {
+                        for i in 0..<Int(frameCount) {
+                            let off = 12 + i * 4
+                            let uL = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
+                            let uR = UInt16(buffer[off + 2]) | (UInt16(buffer[off + 3]) << 8)
+                            left[i] = PhoneSpeakerEngine.softKneeLimit((Float(Int16(bitPattern: uL)) / 32767.0) * gain)
+                            right[i] = PhoneSpeakerEngine.softKneeLimit((Float(Int16(bitPattern: uR)) / 32767.0) * gain)
+                        }
                     }
                 }
 
@@ -525,140 +546,80 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Exact 12-Byte Little-Endian Mic Streamer (UDP 5006)
-    public func toggleMicStreaming() {
-        if isMicStreaming {
-            stopMicStreaming()
+    // MARK: - Option A: Internal System Audio Capture & Streamer (UDP 5004)
+    public func toggleServingInternalAudio() {
+        if isInternalAudioServing {
+            stopServingInternalAudio()
         } else {
-            startMicStreaming()
+            startServingInternalAudio()
         }
     }
 
-    public func startMicStreaming() {
-        guard !isMicStreaming else { return }
-        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
-            guard granted else {
-                DispatchQueue.main.async {
-                    self?.statusMessage = "Microphone permission denied in iOS Settings"
-                }
-                return
-            }
+    public func startServingInternalAudio(targetIp: String = "") {
+        guard !isInternalAudioServing else { return }
+        let ip = targetIp.isEmpty ? (atomicConnectedServerIp.isEmpty ? "255.255.255.255" : atomicConnectedServerIp) : targetIp
+
+        serveTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
+        var broadcast: Int32 = 1
+        setsockopt(serveTxSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
+        var sndBuf: Int32 = 65536
+        setsockopt(serveTxSocket, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+        let recorder = RPScreenRecorder.shared()
+        guard recorder.isAvailable else {
             DispatchQueue.main.async {
-                self?._beginMicStreamInternal()
-            }
-        }
-    }
-
-    private func _beginMicStreamInternal() {
-        guard !isMicStreaming else { return }
-
-        setupAudioSession()
-        if !audioEngine.isRunning {
-            try? audioEngine.start()
-        }
-
-        let inputNode = audioEngine.inputNode
-        inputNode.removeTap(onBus: 0)
-        let inputFormat = inputNode.inputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 else {
-            DispatchQueue.main.async {
-                self.statusMessage = "Microphone input format unavailable"
+                self.statusMessage = "Screen recorder unavailable for internal audio"
             }
             return
         }
 
-        micTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
-        var broadcast: Int32 = 1
-        setsockopt(micTxSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
-
-        let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: false)!
-        let converter = (inputFormat.sampleRate != 48000 || inputFormat.channelCount != 2)
-            ? AVAudioConverter(from: inputFormat, to: targetFormat)
-            : nil
-
-        var seq: UInt32 = 0
+        var seq: UInt32 = 1
         var sampleAccumulator: [Int16] = []
-        let tapLock = NSLock()
+        let serveLock = NSLock()
 
-        stateLock.lock()
-        isMicRunning = true
-        stateLock.unlock()
+        recorder.startCapture(handler: { [weak self] (sampleBuffer, bufferType, error) in
+            guard let self = self, error == nil, bufferType == .audioApp, self.serveTxSocket >= 0 else { return }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            guard let self = self, self.micTxSocket >= 0 else { return }
+            guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+            var lengthAtOffset: Int = 0
+            var totalLength: Int = 0
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            guard CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: &lengthAtOffset, totalLengthOut: &totalLength, dataPointerOut: &dataPointer) == noErr,
+                  let rawPtr = dataPointer else { return }
 
-            self.stateLock.lock()
-            let micActive = self.isMicRunning
-            let curServerIp = self.atomicConnectedServerIp
-            self.stateLock.unlock()
-            guard micActive else { return }
+            let sampleCount = totalLength / 2
+            let shortPtr = rawPtr.withMemoryRebound(to: Int16.self, capacity: sampleCount) { $0 }
 
-            var workBuffer: AVAudioPCMBuffer = buffer
-            if let conv = converter {
-                let ratio = 48000.0 / inputFormat.sampleRate
-                let cap = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64)
-                if let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: cap) {
-                    var provided = false
-                    var err: NSError?
-                    conv.convert(to: converted, error: &err) { _, outStatus in
-                        if provided {
-                            outStatus.pointee = .noDataNow
-                            return nil
-                        }
-                        provided = true
-                        outStatus.pointee = .haveData
-                        return buffer
-                    }
-                    if err == nil && converted.frameLength > 0 {
-                        workBuffer = converted
-                    }
-                }
+            var maxSample: Int16 = 0
+            serveLock.lock()
+            for i in 0..<sampleCount {
+                let s = shortPtr[i]
+                let a = abs(s)
+                if a > maxSample { maxSample = a }
+                sampleAccumulator.append(s)
             }
 
-            guard let channelData = workBuffer.floatChannelData else { return }
-            let inFrames = Int(workBuffer.frameLength)
-            let inChannels = Int(workBuffer.format.channelCount)
-
-            tapLock.lock()
-            // Convert to 48kHz Stereo Int16
-            for i in 0..<inFrames {
-                let sampleL = max(-1.0, min(1.0, channelData[0][i]))
-                let sampleR = inChannels > 1 ? max(-1.0, min(1.0, channelData[1][i])) : sampleL
-                sampleAccumulator.append(Int16(sampleL * 32767.0))
-                sampleAccumulator.append(Int16(sampleR * 32767.0))
-            }
-
-            // Slice into exact 240-sample stereo frames (5 ms = 480 Int16s = 960 bytes payload)
-            // Total packet size = 12-byte header + 960 bytes = 972 bytes
             while sampleAccumulator.count >= 480 {
                 let slice = Array(sampleAccumulator.prefix(480))
                 sampleAccumulator.removeFirst(480)
 
                 var packet = [UInt8](repeating: 0, count: 972)
-
-                // 12-byte Little-Endian Header:
-                // bytes[0..3]: seq (UInt32 LE)
                 packet[0] = UInt8(seq & 0xFF)
                 packet[1] = UInt8((seq >> 8) & 0xFF)
                 packet[2] = UInt8((seq >> 16) & 0xFF)
                 packet[3] = UInt8((seq >> 24) & 0xFF)
 
-                // bytes[4..7]: timestamp_ms (UInt32 LE)
                 let ts = UInt32(ProcessInfo.processInfo.systemUptime * 1000) & 0xFFFFFFFF
                 packet[4] = UInt8(ts & 0xFF)
                 packet[5] = UInt8((ts >> 8) & 0xFF)
                 packet[6] = UInt8((ts >> 16) & 0xFF)
                 packet[7] = UInt8((ts >> 24) & 0xFF)
 
-                // byte 8: codec = 0 (PCM16)
-                packet[8] = 0
-                // byte 9: channels = 2 (Stereo)
-                packet[9] = 2
-                // bytes[10..11]: sampleRateDiv100 = 480 (UInt16 LE)
+                packet[8] = 0 // PCM16
+                packet[9] = 2 // Stereo
                 packet[10] = UInt8(480 & 0xFF)
                 packet[11] = UInt8((480 >> 8) & 0xFF)
 
-                // bytes[12..971]: explicit Little-Endian Int16 payload packing
                 for j in 0..<480 {
                     let u = UInt16(bitPattern: slice[j])
                     packet[12 + j * 2] = UInt8(u & 0xFF)
@@ -666,47 +627,51 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 }
 
                 seq &+= 1
-                self.stateLock.lock()
-                self.micPacketsSent += 1
-                self.stateLock.unlock()
+                self.servePacketsSent += 1
 
-                if !curServerIp.isEmpty && curServerIp != "255.255.255.255" {
-                    self.sendMicPacket(packet, toIp: curServerIp)
+                self.sendServePacket(packet, toIp: ip)
+            }
+            serveLock.unlock()
+
+            let peak = Float(maxSample) / 32767.0
+            DispatchQueue.main.async {
+                self.servePeakLevel = peak
+            }
+        }) { [weak self] error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self?.statusMessage = "Capture error: \(error.localizedDescription)"
+                    self?.isInternalAudioServing = false
+                } else {
+                    self?.isInternalAudioServing = true
+                    self?.statusMessage = "Serving Internal Audio (Port 5004)"
                 }
             }
-            tapLock.unlock()
-        }
-
-        DispatchQueue.main.async {
-            self.isMicStreaming = true
-            self.statusMessage = "Mic streaming active (UDP 5006)"
         }
     }
 
-    private func sendMicPacket(_ packet: [UInt8], toIp: String) {
-        guard micTxSocket >= 0 else { return }
+    private func sendServePacket(_ packet: [UInt8], toIp: String) {
+        guard serveTxSocket >= 0 else { return }
         var destAddr = sockaddr_in()
         destAddr.sin_family = sa_family_t(AF_INET)
-        destAddr.sin_port = in_port_t(5006).bigEndian
+        destAddr.sin_port = in_port_t(5004).bigEndian
         inet_pton(AF_INET, toIp, &destAddr.sin_addr)
 
         withUnsafePointer(to: &destAddr) { addrPtr in
             _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                sendto(self.micTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
     }
 
-    public func stopMicStreaming() {
-        stateLock.lock()
-        isMicRunning = false
-        stateLock.unlock()
-
-        audioEngine.inputNode.removeTap(onBus: 0)
-        closeSocket(&micTxSocket)
-        DispatchQueue.main.async {
-            self.isMicStreaming = false
-            self.statusMessage = "Mic stream stopped"
+    public func stopServingInternalAudio() {
+        guard isInternalAudioServing else { return }
+        RPScreenRecorder.shared().stopCapture { [weak self] error in
+            DispatchQueue.main.async {
+                self?.isInternalAudioServing = false
+                self?.statusMessage = "Internal Audio Sender Stopped"
+                self?.closeSocket(&self!.serveTxSocket)
+            }
         }
     }
 
@@ -1086,7 +1051,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             "party_join": false,
             "is_party_host": self.isPartyHost && !self.isPartyExtending,
             "is_extended_host": self.isPartyExtending,
-            "mic_streaming": self.isMicStreaming,
+            "serving": self.isInternalAudioServing,
             "platform": "ios",
             "force_pcm": true
         ]
@@ -1126,7 +1091,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             self.stateLock.lock()
             let curRx = self.packetsReceived
             let curLost = self.packetsLost
-            let curMicTx = self.micPacketsSent
+            let curServeTx = self.servePacketsSent
             self.stateLock.unlock()
 
             let total = curRx + curLost
@@ -1142,8 +1107,8 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             self.rxPps = Int(curRx >= self.lastRxPpsCount ? (curRx - self.lastRxPpsCount) : 0) * 3
             self.lastRxPpsCount = curRx
 
-            self.micTxPps = Int(curMicTx >= self.lastMicPacketsCount ? (curMicTx - self.lastMicPacketsCount) : 0) * 3
-            self.lastMicPacketsCount = curMicTx
+            self.serveTxPps = Int(curServeTx >= self.lastServePacketsCount ? (curServeTx - self.lastServePacketsCount) : 0) * 3
+            self.lastServePacketsCount = curServeTx
 
             // Sync atomic underruns to published property
             self.underrunCount = self.atomicUnderruns.value
@@ -1160,8 +1125,8 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                     "rx_pps": self.rxPps,
                     "active_codec": 0,
                     "device": self.deviceName,
-                    "mic_streaming": self.isMicStreaming,
-                    "mic_pps": self.micTxPps,
+                    "serving": self.isInternalAudioServing,
+                    "serve_pps": self.serveTxPps,
                     "platform": "ios",
                     "force_pcm": true
                 ]

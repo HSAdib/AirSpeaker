@@ -35,9 +35,9 @@ except ImportError:
 
 from opus_codec import OpusDecoder
 from protocol import (
+    AUDIO_PORT,
     CODEC_OPUS,
     CODEC_PCM16,
-    PHONE_AUDIO_PORT,
     SAMPLE_RATE,
     CHANNELS,
     parse_header,
@@ -273,16 +273,16 @@ def _open_pyaudio_output_with_fallback(
     return None, sample_rate, channels, False
 
 
-class PhoneAudioReceiver:
+class AudioReceiver:
     """
-    Listens on UDP port 5006 for incoming audio from the Phone (Mic),
+    Listens on UDP port 5004 for incoming audio streams (from Phone or Party Host),
     decodes PCM16 or Opus without dropping burst packets, and plays it with low latency
-    to the selected PC audio output / virtual mic device.
+    to the selected PC audio output device.
     """
 
     def __init__(
         self,
-        port: int = PHONE_AUDIO_PORT,
+        port: int = AUDIO_PORT,
         output_device_index: Optional[object] = None,
         on_stats: Optional[Callable[[int], None]] = None,
         on_packet: Optional[Callable[[bytes, Tuple[str, int]], None]] = None,
@@ -640,4 +640,8 @@ class PhoneAudioReceiver:
                         self._queue_event.wait(timeout=0.02)
                         self._queue_event.clear()
             except Exception as exc:
-                logger.debug("PhoneAudioReceiver play error: %s", exc)
+                logger.debug("AudioReceiver play error: %s", exc)
+
+
+# Backwards compatibility alias for test suites and scripts
+PhoneAudioReceiver = AudioReceiver

@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  PhoneSpeaker
 //
-//  PhoneSpeaker v2.0 Studio Monospace UI for iOS.
+//  PhoneSpeaker v2.1 Studio Monospace UI for iOS.
 //  100% unified with Android (activity_main.xml & MainActivity.kt) and PC Studio.
 //
 
@@ -22,7 +22,7 @@ public struct ContentView: View {
                 // Top Studio Header
                 VStack(spacing: 4) {
                     HStack(alignment: .center) {
-                        Text("PHONESPEAKER v2.0")
+                        Text("PHONESPEAKER v2.1")
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
 
@@ -48,19 +48,19 @@ public struct ContentView: View {
 
                     HStack {
                         let statusText: String = {
-                            if engine.isAudioPlaying && engine.isMicStreaming {
-                                return "ACTIVE: SPEAKER: ON (5004) | MIC: ON (5006)"
+                            if engine.isAudioPlaying && engine.isInternalAudioServing {
+                                return "ACTIVE: PLAYER: ON (5004) | SERVE: ON (5004)"
                             } else if engine.isAudioPlaying {
                                 return "ACTIVE: SPEAKER PLAYER (PORT 5004)"
-                            } else if engine.isMicStreaming {
-                                return "ACTIVE: MIC SERVER (PORT 5006)"
+                            } else if engine.isInternalAudioServing {
+                                return "ACTIVE: AUDIO SERVER (PORT 5004)"
                             } else {
                                 return "STATUS: STOPPED"
                             }
                         }()
                         Text(statusText)
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(engine.isAudioPlaying || engine.isMicStreaming ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+                            .foregroundColor(engine.isAudioPlaying || engine.isInternalAudioServing ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
                         Spacer()
                     }
                 }
@@ -68,10 +68,10 @@ public struct ContentView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 6)
 
-                // 4-Button Top Outlined Tab Bar
+                // 4-Button Top Outlined Tab Bar: PLAY | SERVE | PARTY | SETTINGS
                 HStack(spacing: 6) {
-                    StudioTabButton(title: "PLAYER", isSelected: selectedTab == 0) { selectedTab = 0 }
-                    StudioTabButton(title: "SERVER", isSelected: selectedTab == 1) { selectedTab = 1 }
+                    StudioTabButton(title: "PLAY", isSelected: selectedTab == 0) { selectedTab = 0 }
+                    StudioTabButton(title: "SERVE", isSelected: selectedTab == 1) { selectedTab = 1 }
                     StudioTabButton(title: "PARTY", isSelected: selectedTab == 2) { selectedTab = 2 }
                     StudioTabButton(title: "SETTINGS", isSelected: selectedTab == 3) { selectedTab = 3 }
                 }
@@ -84,7 +84,7 @@ public struct ContentView: View {
                     case 0:
                         PlayerStudioTab(engine: engine)
                     case 1:
-                        ServerStudioTab(engine: engine)
+                        ServeStudioTab(engine: engine)
                     case 2:
                         PartyStudioTab(engine: engine)
                     default:
@@ -175,7 +175,7 @@ struct PlayerStudioTab: View {
                 .background(Color(red: 0.10, green: 0.15, blue: 0.19))
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
-                // Two Main Action Buttons
+                // Main Action Button
                 Button(action: {
                     if engine.isAudioPlaying {
                         engine.stopSpeakerPlayer()
@@ -190,17 +190,6 @@ struct PlayerStudioTab: View {
                         .frame(maxWidth: .infinity, minHeight: 46)
                         .background(engine.isAudioPlaying ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.13, blue: 0.0))
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2))
-                }
-
-                Button(action: {
-                    engine.toggleMicStreaming()
-                }) {
-                    Text(engine.isMicStreaming ? "[ ■ STOP MIC STREAM (PORT 5006) ]" : "[ 🎤 START MIC STREAM TO PC (PORT 5006) ]")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundColor(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 0.93, blue: 0.93))
-                        .frame(maxWidth: .infinity, minHeight: 42)
-                        .background(engine.isMicStreaming ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.09, blue: 0.13))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 2))
                 }
 
                 // Sound Mode
@@ -385,69 +374,162 @@ struct PlayerStudioTab: View {
     }
 }
 
-// MARK: - Tab 2: SERVER STUDIO TAB
-struct ServerStudioTab: View {
+// MARK: - Tab 2: SERVE STUDIO TAB (Internal System Audio Streamer)
+struct ServeStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
+    @State private var targetIpInput: String = ""
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("PHONE AUDIO SENDER MODE:")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-
+                // Header & Target IP card
                 VStack(alignment: .leading, spacing: 6) {
-                    RadioLine(title: "Speaker Only (Stream PC audio to Phone)", isSelected: engine.serverRole == "PC_TO_PHONE") {
-                        engine.serverRole = "PC_TO_PHONE"
-                        engine.sendConfigSync()
-                    }
-                    RadioLine(title: "Microphone Only (Stream Phone mic to PC)", isSelected: engine.serverRole == "PHONE_TO_PC") {
-                        engine.serverRole = "PHONE_TO_PC"
-                        engine.sendConfigSync()
-                    }
-                    RadioLine(title: "Both Together (Hear PC Sound + Use Phone Mic)", isSelected: engine.serverRole == "FULL_DUPLEX") {
-                        engine.serverRole = "FULL_DUPLEX"
-                        engine.sendConfigSync()
-                    }
-                }
+                    Text("📡 INTERNAL SYSTEM AUDIO SENDER (PORT 5004)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
 
-                Toggle(isOn: $engine.micHardwareFx) {
-                    Text("Hardware Noise Suppression & Echo Canceler")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white)
-                }
-                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
-                .padding(.top, 4)
-
-                Button(action: {
-                    engine.toggleMicStreaming()
-                }) {
-                    Text(engine.isMicStreaming ? "[ ■ STOP MIC SERVER (PORT 5006) ]" : "[ 🎤 START MIC SERVER (PORT 5006) ]")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Color.black)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isMicStreaming ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white, lineWidth: 2))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(engine.isMicStreaming ? "MIC SERVER: STREAMING TO PC (PORT 5006)" : "MIC SERVER: STOPPED")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(engine.isMicStreaming ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
-
-                    Text("TX PPS: \(engine.micTxPps)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(white: 0.55))
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("iPhone Mic streams 48 kHz stereo low-latency audio to PC Port 5006.\n\nOn Windows, set playback device to 'CABLE Input' or 'Virtual Audio' to use this phone as a live microphone in Discord, Teams, Zoom, or games!\n\nOn macOS: Route via BlackHole 2ch.\nOn Linux: Use PhoneSpeaker_Mic PipeWire virtual sink.")
+                    Text("Streams iOS internal audio (apps, games, YouTube) in real-time to PC, Mac, Linux, or another phone.")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Color(white: 0.6))
+
+                    HStack(spacing: 6) {
+                        Text("TARGET IP:")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+
+                        TextField(engine.connectedServerIp.isEmpty ? "255.255.255.255 (Broadcast)" : engine.connectedServerIp, text: $targetIpInput)
+                            .font(.system(size: 11, design: .monospaced))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color(red: 0.06, green: 0.09, blue: 0.13))
+                            .foregroundColor(.white)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        Button(action: {
+                            let trimmed = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !trimmed.isEmpty {
+                                engine.connectedServerIp = trimmed
+                            }
+                        }) {
+                            Text("SET")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.22, green: 0.71, blue: 1.0), lineWidth: 1))
+                        }
+                    }
+                    .padding(.top, 4)
                 }
                 .padding(10)
-                .background(Color(red: 0.07, green: 0.07, blue: 0.07))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.15), lineWidth: 1))
+                .background(Color(red: 0.10, green: 0.15, blue: 0.19))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+
+                // Big Action Button
+                Button(action: {
+                    let target = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    engine.toggleServingInternalAudio()
+                }) {
+                    Text(engine.isInternalAudioServing ? "[ ■ STOP SERVING AUDIO ]" : "[ 📡 START SERVING AUDIO (PORT 5004) ]")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .background(engine.isInternalAudioServing ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.13, blue: 0.0))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2))
+                }
+
+                // Sound Mode Chips
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("STREAM PROFILE:")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    HStack(spacing: 4) {
+                        RadioChip(title: "Balanced", isSelected: engine.soundMode == "BALANCED") {
+                            engine.soundMode = "BALANCED"
+                            engine.sendConfigSync()
+                        }
+                        RadioChip(title: "Gaming", isSelected: engine.soundMode == "GAMING") {
+                            engine.soundMode = "GAMING"
+                            engine.sendConfigSync()
+                        }
+                        RadioChip(title: "Quality", isSelected: engine.soundMode == "QUALITY") {
+                            engine.soundMode = "QUALITY"
+                            engine.sendConfigSync()
+                        }
+                        RadioChip(title: "Custom", isSelected: engine.soundMode == "CUSTOM") {
+                            engine.soundMode = "CUSTOM"
+                            engine.sendConfigSync()
+                        }
+                    }
+                }
+
+                // Codec & Bitrate Selection
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("STREAM CODEC:")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    HStack(spacing: 8) {
+                        RadioChip(title: "Lossless PCM16 [Default]", isSelected: engine.activeCodecName == "PCM16") {
+                            engine.activeCodecName = "PCM16"
+                        }
+                        RadioChip(title: "Opus Codec", isSelected: engine.activeCodecName == "OPUS") {
+                            engine.activeCodecName = "OPUS"
+                        }
+                    }
+                }
+
+                // Live Audio Level & Telemetry
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("LIVE AUDIO STREAM METERS:")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    HStack {
+                        Text("PEAK LEVEL:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.6))
+                        Spacer()
+                        Text(String(format: "%.1f dB", 20.0 * log10(max(0.0001, Double(engine.servePeakLevel)))))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                    }
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color(white: 0.15))
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(engine.servePeakLevel > 0.9 ? Color.red : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .frame(width: max(0, min(geo.size.width, geo.size.width * CGFloat(engine.servePeakLevel))))
+                        }
+                    }
+                    .frame(height: 10)
+
+                    HStack {
+                        Text("TX PACKETS / SEC:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.6))
+                        Spacer()
+                        Text("\(engine.serveTxPps) pps")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+
+                    HStack {
+                        Text("DESTINATION:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(white: 0.6))
+                        Spacer()
+                        Text(engine.connectedServerIp.isEmpty ? "255.255.255.255:5004" : "\(engine.connectedServerIp):5004")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                    }
+                }
+                .padding(10)
+                .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
             }
             .padding(14)
         }
@@ -1065,7 +1147,7 @@ struct StudioHelpModal: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("PHONESPEAKER v2.0 STUDIO GUIDE")
+                    Text("PHONESPEAKER v2.1 STUDIO GUIDE")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
                     Spacer()
@@ -1080,35 +1162,32 @@ struct StudioHelpModal: View {
                 ScrollView {
                     Text("""
 ============================================================
-PHONESPEAKER v2.0 STUDIO — CROSS-PLATFORM GUIDE
+PHONESPEAKER v2.1 STUDIO — CROSS-PLATFORM GUIDE
 ============================================================
 
 PLATFORMS:
 • iOS 16.0–18+ (iPhone & iPad with AVAudioEngine)
 • Android 8.0–15+ (Oboe C++ AAudio ultra-low latency)
-• Windows 11 / 10 (WASAPI Loopback, VB-CABLE Virtual Mic)
+• Windows 11 / 10 (WASAPI Loopback, BlackHole / PipeWire)
 • macOS Sonoma / Ventura / Monterey (CoreAudio / BlackHole)
 • Linux: Ubuntu, Mint, Arch, Debian (PipeWire / PulseAudio)
 
 1. WIRELESS SPEAKER PLAYER (PORT 5004):
 ------------------------------------------------------------
-* Connect both PC and iPhone to the same Wi-Fi or Hotspot.
+* Connect both sender and receiver to the same Wi-Fi or Hotspot.
 * Tap [ ▶ START SPEAKER PLAYER (PORT 5004) ] on iPhone.
-* On PC, click [ ▶ START SPEAKER STREAM ] in Tab 1.
-* Audio streams lossless 48 kHz stereo PCM16 with <35 ms delay!
+* Stream real-time lossless 48 kHz stereo PCM16 with <35 ms delay!
 
-2. WIRELESS PC MICROPHONE (PORT 5006):
+2. INTERNAL SYSTEM AUDIO SERVE (PORT 5004):
 ------------------------------------------------------------
-* Tap [ 🎤 START MIC STREAM TO PC (PORT 5006) ] on iPhone.
-* Streams iPhone microphone to PC Port 5006.
-* On Windows, route via VB-CABLE to use in Discord/Zoom.
-* On macOS, route via BlackHole 2ch.
-* On Linux, route via PhoneSpeaker_Mic virtual sink.
+* Tap [ 📡 START SERVING AUDIO (PORT 5004) ] in SERVE tab.
+* Captures device audio (music, videos, games) via ReplayKit.
+* Streams to any PC, Mac, Linux, or Phone running PhoneSpeaker.
 
 3. MULTI-DEVICE PARTY MODE:
 ------------------------------------------------------------
 * 👑 HOST: Tap [ 👑 HOST A PARTY ] to generate a QR code.
-  Multiple iPhones and Androids can join the party simultaneously.
+  Multiple phones and PCs can join the party simultaneously.
 * 🎧 JOIN: Tap [ 🎧 JOIN A PARTY ] to scan QR code or select
   discovered hosts on the network.
 * 📡 EXTEND: Turn on Personal Hotspot and tap 'Extend This Party'

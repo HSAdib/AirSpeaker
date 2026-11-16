@@ -114,7 +114,7 @@ def main() -> None:
         size_mb = exe.stat().st_size / (1024 * 1024)
         print(f"\nSUCCESS: {exe} ({size_mb:.1f} MB)", flush=True)
 
-        for target_name in ["PhoneSpeaker v2.exe", "PhoneSpeaker.v2.exe", "PhoneSpeaker.v2.0.1.exe"]:
+        for target_name in ["PhoneSpeaker v2.exe", "PhoneSpeaker.v2.exe", "PhoneSpeaker.v2.0.1.exe", "PhoneSpeaker.v2.1.exe"]:
             target_path = ROOT.parent / target_name
             try:
                 shutil.copy2(exe, target_path)

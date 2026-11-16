@@ -66,8 +66,7 @@ def setup_macos_virtual_audio() -> Tuple[bool, str]:
 def setup_linux_virtual_audio() -> Tuple[bool, str]:
     """
     Create PipeWire / PulseAudio virtual devices on Linux via pactl:
-      1. PhoneSpeaker_Sink (Virtual Speaker for isolated PC -> Phone streaming)
-      2. PhoneSpeaker_Mic_Sink + PhoneSpeaker_Mic (Virtual Microphone for Phone -> PC mic in Discord/Zoom)
+      • PhoneSpeaker_Sink (Virtual Speaker for isolated PC -> Phone streaming)
     """
     if not shutil.which("pactl"):
         return False, "pactl not found. Please install 'pulseaudio-utils' or 'pipewire-pulse'."
@@ -84,30 +83,14 @@ def setup_linux_virtual_audio() -> Tuple[bool, str]:
                 "sink_properties=device.description=PhoneSpeaker_Virtual_Speaker"
             ], check=True, timeout=3)
 
-        if "sink_name=PhoneSpeaker_Mic_Sink" not in existing:
-            subprocess.run([
-                "pactl", "load-module", "module-null-sink",
-                "sink_name=PhoneSpeaker_Mic_Sink",
-                "sink_properties=device.description=PhoneSpeaker_Mic_Bridge"
-            ], check=True, timeout=3)
-
-        if "source_name=PhoneSpeaker_Mic" not in existing:
-            subprocess.run([
-                "pactl", "load-module", "module-remap-source",
-                "master=PhoneSpeaker_Mic_Sink.monitor",
-                "source_name=PhoneSpeaker_Mic",
-                "source_properties=device.description=PhoneSpeaker_Wireless_Mic"
-            ], check=True, timeout=3)
-
         msg = (
-            "Linux PipeWire/PulseAudio virtual devices are active!\n\n"
+            "Linux PipeWire/PulseAudio virtual device is active!\n\n"
             "• Virtual Speaker: 'PhoneSpeaker_Sink'\n"
-            "• Wireless Mic for Discord/Zoom/OBS: 'PhoneSpeaker_Mic'\n"
-            "• Phone Mic Output automatically routed to '[PipeWire/Pulse] PhoneSpeaker_Mic_Sink'."
+            "• Select 'PhoneSpeaker_Sink.monitor' as capture source to stream PC audio to Phone."
         )
         return True, msg
     except Exception as exc:
-        return False, f"Failed to create PipeWire/PulseAudio virtual devices: {exc}"
+        return False, f"Failed to create PipeWire/PulseAudio virtual device: {exc}"
 
 
 def remove_linux_virtual_audio() -> Tuple[bool, str]:

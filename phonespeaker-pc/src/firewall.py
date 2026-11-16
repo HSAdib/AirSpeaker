@@ -9,7 +9,7 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-PORTS = [5004, 5005, 5006]
+PORTS = [5004, 5005]
 RULE_NAME_TMPL = "PhoneSpeaker UDP {port}"
 
 
@@ -40,7 +40,7 @@ def get_firewall_commands() -> list:
 
 def apply_firewall_rules() -> tuple:
     if sys.platform == "darwin":
-        return True, "macOS Application Firewall automatically permits UDP 5004, 5005, and 5006 when PhoneSpeaker is launched."
+        return True, "macOS Application Firewall automatically permits UDP 5004 and 5005 when PhoneSpeaker is launched."
 
     if sys.platform.startswith("linux"):
         cmds = []
@@ -56,7 +56,7 @@ def apply_firewall_rules() -> tuple:
             try:
                 ret = subprocess.run(["pkexec", "sh", "-c", shell_str], capture_output=True, text=True, timeout=30)
                 if ret.returncode == 0:
-                    return True, "Linux firewall rules applied for UDP ports 5004, 5005, and 5006."
+                    return True, "Linux firewall rules applied for UDP ports 5004 and 5005."
             except Exception as exc:
                 logger.error("Linux pkexec firewall error: %s", exc)
         return False, "Run in terminal:\n" + "\n".join(get_firewall_commands())
@@ -93,7 +93,7 @@ def apply_firewall_rules() -> tuple:
         ]
         ret = subprocess.run(elevate_cmd, capture_output=True, text=True, timeout=20)
         if ret.returncode == 0:
-            return True, "Firewall rules requested via administrator prompt.\nPorts 5004, 5005 & 5006 allowed on all profiles."
+            return True, "Firewall rules requested via administrator prompt.\nPorts 5004 & 5005 allowed on all profiles."
     except Exception as exc:
         logger.error("Failed to run elevated firewall command: %s", exc)
 

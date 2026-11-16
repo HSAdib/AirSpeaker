@@ -307,6 +307,7 @@ def test_protocol_v2_and_sync() -> None:
     name = "Protocol v2.0 bidirectional header & CONFIG_SYNC validation"
     try:
         from protocol import (
+            AUDIO_PORT,
             PHONE_AUDIO_PORT,
             DEFAULT_CONFIG,
             build_header,
@@ -315,7 +316,8 @@ def test_protocol_v2_and_sync() -> None:
         )
         from opus_codec import OpusDecoder
 
-        assert PHONE_AUDIO_PORT == 5006, f"Expected port 5006, got {PHONE_AUDIO_PORT}"
+        assert AUDIO_PORT == 5004, f"Expected port 5004, got {AUDIO_PORT}"
+        assert PHONE_AUDIO_PORT == 5004, f"Expected audio port 5004, got {PHONE_AUDIO_PORT}"
         assert DEFAULT_CONFIG["type"] == "CONFIG_SYNC"
         assert "direction" in DEFAULT_CONFIG
         assert DEFAULT_CONFIG["audio_profile"] == "BALANCED", f"Expected BALANCED profile, got {DEFAULT_CONFIG.get('audio_profile')}"

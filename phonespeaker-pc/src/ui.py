@@ -35,7 +35,7 @@ from protocol import (
     DEFAULT_CONFIG,
 )
 from opus_codec import OpusEncoder
-from audio_capture import AudioCapture, list_loopback_devices, list_input_devices
+from audio_capture import AudioCapture, list_loopback_devices
 from audio_output import (
     PhoneAudioReceiver,
     list_output_devices,
@@ -280,14 +280,14 @@ class PhoneSpeakerApp:
         self._party_extend_qr_photo = None
         self._party_relay_sock: Optional[socket.socket] = None
         self._discovered_party_hosts: Dict[str, Dict[str, Any]] = {}
-        self._party_join_receiver: Optional[PhoneAudioReceiver] = None
+        self._party_join_receiver: Optional[AudioReceiver] = None
         self._party_join_rx_pps = 0
-        self._mic_active_requested: bool = False
+        self._play_active: bool = False
 
         # Audio threads & engines
         self._audio_capture: Optional[AudioCapture] = None
         self._udp_sender: Optional[UDPSender] = None
-        self._phone_receiver: Optional[PhoneAudioReceiver] = None
+        self._phone_receiver: Optional[AudioReceiver] = None
         self._control_listener: Optional[ControlListener] = None
         self._opus_encoder: Optional[OpusEncoder] = None
         self._audio_queue: Optional[AudioQueue] = None
@@ -298,8 +298,6 @@ class PhoneSpeakerApp:
         self._adapter_data: List[Dict] = []
         self._audio_devices: List[Dict] = []
         self._pc_output_devices: List[Dict] = []
-        self._last_phone_mic_state: Optional[bool] = None
-        self._mic_control_cooldown_until: float = 0.0
 
         # Setup
         self._setup_window()
@@ -308,18 +306,6 @@ class PhoneSpeakerApp:
         self._refresh_adapters()
         self._refresh_audio_devices()
         self._refresh_pc_outputs()
-
-        # Start Phone -> PC receiver on port 5006 automatically
-        pc_out_idx = None
-        out_sel = self.pc_output_combo.current()
-        if 0 <= out_sel < len(self._pc_output_devices):
-            pc_out_idx = self._pc_output_devices[out_sel]["index"]
-        self._phone_receiver = PhoneAudioReceiver(
-            port=PHONE_AUDIO_PORT,
-            output_device_index=pc_out_idx,
-            on_stats=self._on_rx_pps_update,
-        )
-        self._phone_receiver.start()
 
         # Start control listener immediately
         self._control_listener = ControlListener(
@@ -333,7 +319,7 @@ class PhoneSpeakerApp:
         self._schedule_ui_update()
 
     def _setup_window(self) -> None:
-        self.root.title("PhoneSpeaker v2.0.1 Studio")
+        self.root.title("PhoneSpeaker v2.1 Studio")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
         self.root.minsize(560, 650)
@@ -420,34 +406,162 @@ class PhoneSpeakerApp:
         )
         self.sync_rev_label.pack(side="right", padx=4)
 
-        # Tab Notebook
+        # Tab Notebook (Unified 5 Tabs: PLAY | SERVE | PARTY | SETTINGS | VIRTUAL DEVICE)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=8, pady=4)
 
-        self.tab_stream = tk.Frame(self.notebook, bg=BG)
+        self.tab_play = tk.Frame(self.notebook, bg=BG)
+        self.tab_serve = tk.Frame(self.notebook, bg=BG)
         self.tab_party = tk.Frame(self.notebook, bg=BG)
-        self.tab_audio = tk.Frame(self.notebook, bg=BG)
+        self.tab_settings = tk.Frame(self.notebook, bg=BG)
         self.tab_virtual = tk.Frame(self.notebook, bg=BG)
 
-        self.notebook.add(self.tab_stream, text="  Stream / Roles  ")
-        self.notebook.add(self.tab_party, text="  🎉 Party Mode  ")
-        self.notebook.add(self.tab_audio, text="  Audio & Buffer  ")
-        self.notebook.add(self.tab_virtual, text="  Virtual Device (Win+Ctrl+V)  ")
+        self.notebook.add(self.tab_play, text="  PLAY  ")
+        self.notebook.add(self.tab_serve, text="  SERVE  ")
+        self.notebook.add(self.tab_party, text="  PARTY  ")
+        self.notebook.add(self.tab_settings, text="  SETTINGS  ")
+        self.notebook.add(self.tab_virtual, text="  VIRTUAL DEVICE  ")
 
-        self._build_tab_stream()
+        self._build_tab_play()
+        self._build_tab_serve()
         self._build_tab_party()
-        self._build_tab_audio()
+        self._build_tab_settings()
         self._build_tab_virtual()
 
+        # SERVE is selected by default on PC startup
+        self.notebook.select(self.tab_serve)
+
     # ------------------------------------------------------------------
-    # TAB 1: Stream / Roles
+    # TAB 1: PLAY (1-to-1 Audio Receiver on Port 5004)
     # ------------------------------------------------------------------
 
-    def _build_tab_stream(self) -> None:
-        f = self.tab_stream
+    def _build_tab_play(self) -> None:
+        f = self.tab_play
         pad = {"padx": 8, "pady": 3}
 
-        # 1. Connections Card (Connected Phone Model, IP, Volume Bar & Mute Icon)
+        # 1. Receiver Device & Status Frame
+        rx_card = tk.LabelFrame(
+            f, text=" Audio Receiver (UDP Port 5004) ", bg="#12161A", fg="#38B6FF",
+            font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4
+        )
+        rx_card.pack(fill="x", padx=8, pady=(4, 3))
+        rx_card.columnconfigure(1, weight=1)
+
+        tk.Label(rx_card, text="Output Device:", bg="#12161A", fg=FG_MUTED, font=FONT_MONO_SM, width=15, anchor="e").grid(row=0, column=0, sticky="e", padx=4, pady=2)
+        self.pc_output_combo = ttk.Combobox(rx_card, state="readonly", font=FONT_MONO_SM)
+        self.pc_output_combo.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+        self.pc_output_combo.bind("<<ComboboxSelected>>", self._on_pc_output_selected)
+        ttk.Button(rx_card, text="↻", width=3, command=self._refresh_all_devices).grid(row=0, column=2, padx=(2, 4), pady=2)
+
+        # 2. Main Action Button: Play Receiver (5004)
+        self.play_rx_btn = StudioButton(
+            f, text="▶  START AUDIO RECEIVER (PORT 5004)",
+            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
+            activebackground="#004400", activeforeground=ACCENT,
+            relief="raised", bd=2, padx=8, pady=5, cursor="hand2",
+            command=self._toggle_audio_receiver,
+        )
+        self.play_rx_btn.pack(fill="x", padx=8, pady=(2, 4))
+
+        # 3. Buffer Presets & Target Frame
+        bf = tk.LabelFrame(f, text=" Playout Buffer Presets ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        bf.pack(fill="x", **pad)
+
+        buf_box = tk.Frame(bf, bg=BG)
+        buf_box.pack(fill="x", padx=4, pady=2)
+        buf_modes = [
+            ("20 ms (Low)", "LOW"),
+            ("40 ms (Medium)", "MEDIUM"),
+            ("80 ms (High)", "HIGH"),
+            ("Auto", "AUTO"),
+            ("Custom", "CUSTOM"),
+        ]
+        for text, val in buf_modes:
+            tk.Radiobutton(
+                buf_box, text=text, variable=self.buffer_mode_var, value=val,
+                bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM,
+                activebackground=BG, activeforeground=ACCENT,
+                command=self._on_buffer_mode_changed
+            ).pack(side="left", padx=(2, 6))
+
+        custom_row = tk.Frame(bf, bg=BG)
+        custom_row.pack(fill="x", padx=4, pady=(2, 2))
+        tk.Label(custom_row, text="Target Buffer:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+        self.buffer_slider = tk.Scale(
+            custom_row, from_=10.0, to=200.0, resolution=2.5, orient="horizontal",
+            variable=self.custom_buffer_var, showvalue=False,
+            bg=BG, fg=FG, troughcolor="#222222", highlightthickness=0, bd=0, length=180,
+            command=self._on_buffer_slider_changed
+        )
+        self.buffer_slider.pack(side="left", padx=4)
+        self.buffer_val_label = tk.Label(custom_row, text=f"{self.custom_buffer_var.get():.1f} ms", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
+        self.buffer_val_label.pack(side="left")
+
+        # 4. Stream Volume (0..200%)
+        vf = tk.LabelFrame(f, text=" Stream Volume (0 - 200%) ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        vf.pack(fill="x", **pad)
+        v_row = tk.Frame(vf, bg=BG)
+        v_row.pack(fill="x", padx=4, pady=2)
+        tk.Label(v_row, text="Volume:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+        self.gain_slider = tk.Scale(
+            v_row, from_=0.0, to=2.0, resolution=0.02, orient="horizontal",
+            variable=self.volume_gain_var, showvalue=False,
+            bg=BG, fg=FG, troughcolor="#222222", highlightthickness=0, bd=0, length=200,
+            command=self._on_gain_slider_changed
+        )
+        self.gain_slider.pack(side="left", padx=4)
+        self.gain_val_label = tk.Label(v_row, text=f"{int(self.volume_gain_var.get() * 100)}%", bg=BG, fg=ACCENT, font=FONT_MONO_SM, width=5)
+        self.gain_val_label.pack(side="left")
+        self.mute_btn = StudioButton(
+            v_row, text="MUTE", bg="#222222", fg=FG, font=FONT_MONO_SM, padx=8, pady=1,
+            command=self._toggle_mute
+        )
+        self.mute_btn.pack(side="right", padx=4)
+
+        # 5. Live Delay Graph Canvas
+        dg_frame = tk.LabelFrame(f, text=" Live Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        dg_frame.pack(fill="x", **pad)
+
+        tk.Label(dg_frame, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
+        self._delay_canvas = tk.Canvas(dg_frame, width=480, height=65, bg="#080808", highlightthickness=1, highlightbackground="#333333")
+        self._delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 3))
+
+        # 6. Live Telemetry (7-Row Table)
+        tf = tk.LabelFrame(f, text=" Live Telemetry (5 Hz) ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        tf.pack(fill="both", expand=True, **pad)
+
+        self.play_buf_level_var = tk.StringVar(value="-- ms")
+        self.play_target_var = tk.StringVar(value=f"{self.custom_buffer_var.get():.1f} ms")
+        self.play_codec_var = tk.StringVar(value="PCM16 (48kHz Stereo)")
+        self.play_rx_pps_var = tk.StringVar(value="0 pps")
+        self.play_underruns_var = tk.StringVar(value="0")
+        self.play_lost_var = tk.StringVar(value="0 (0.0%)")
+        self.play_late_var = tk.StringVar(value="0")
+
+        rows = [
+            ("BUFFER LEVEL:", self.play_buf_level_var),
+            ("ACTIVE TARGET:", self.play_target_var),
+            ("CODEC:", self.play_codec_var),
+            ("RX PACKETS / SEC:", self.play_rx_pps_var),
+            ("UNDERRUNS:", self.play_underruns_var),
+            ("LOST PACKETS:", self.play_lost_var),
+            ("LATE PACKETS:", self.play_late_var),
+        ]
+        for row_idx, (lbl, var) in enumerate(rows):
+            r_frame = tk.Frame(tf, bg="#0A0A0A" if row_idx % 2 == 0 else "#0F0F0F")
+            r_frame.pack(fill="x", padx=2, pady=1)
+            tk.Label(r_frame, text=lbl, bg=r_frame["bg"], fg=FG_MUTED, font=FONT_MONO_SM, width=20, anchor="w").pack(side="left", padx=4)
+            tk.Label(r_frame, textvariable=var, bg=r_frame["bg"], fg=ACCENT if row_idx < 4 else FG, font=FONT_MONO_SM, anchor="e").pack(side="right", padx=6)
+
+    # ------------------------------------------------------------------
+    # TAB 2: SERVE (1-to-1 Audio Sender on Port 5004 - Default Startup)
+    # ------------------------------------------------------------------
+
+    def _build_tab_serve(self) -> None:
+        f = self.tab_serve
+        pad = {"padx": 8, "pady": 3}
+
+        # 1. Connections Card (Phone Model, IP, Volume Bar & Mute Icon)
         conn_card = tk.LabelFrame(
             f, text=" Connections ", bg="#12161A", fg="#38B6FF",
             font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4
@@ -457,24 +571,15 @@ class PhoneSpeakerApp:
         conn_top = tk.Frame(conn_card, bg="#12161A")
         conn_top.pack(fill="x", padx=6, pady=(2, 2))
 
-        tk.Label(
-            conn_top, text="📱", bg="#12161A", fg="#38B6FF", font=(_MONO_FAMILY, 16)
-        ).pack(side="left", padx=(0, 8))
-
+        tk.Label(conn_top, text="📱", bg="#12161A", fg="#38B6FF", font=(_MONO_FAMILY, 16)).pack(side="left", padx=(0, 8))
         conn_info = tk.Frame(conn_top, bg="#12161A")
         conn_info.pack(side="left", fill="x", expand=True)
 
         self.conn_device_name_var = tk.StringVar(value="Waiting for phone connection...")
-        tk.Label(
-            conn_info, textvariable=self.conn_device_name_var,
-            bg="#12161A", fg="#FFFFFF", font=FONT_MONO_LG, anchor="w"
-        ).pack(fill="x")
+        tk.Label(conn_info, textvariable=self.conn_device_name_var, bg="#12161A", fg="#FFFFFF", font=FONT_MONO_LG, anchor="w").pack(fill="x")
 
         self.conn_device_ip_var = tk.StringVar(value="Open PhoneSpeaker on your phone (Auto-Discovery active)")
-        tk.Label(
-            conn_info, textvariable=self.conn_device_ip_var,
-            bg="#12161A", fg="#99AABB", font=FONT_MONO_SM, anchor="w"
-        ).pack(fill="x")
+        tk.Label(conn_info, textvariable=self.conn_device_ip_var, bg="#12161A", fg="#99AABB", font=FONT_MONO_SM, anchor="w").pack(fill="x")
 
         vol_bar_row = tk.Frame(conn_card, bg="#12161A")
         vol_bar_row.pack(fill="x", padx=6, pady=(2, 4))
@@ -509,8 +614,8 @@ class PhoneSpeakerApp:
             selectcolor="#1E262E", activebackground="#12161A", activeforeground=FG, font=FONT_MONO_SM
         ).pack(side="left")
 
-        # 2. Network & Stream Role Frame (Aligned Grid)
-        nf = tk.LabelFrame(f, text=" Network & Stream Role ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        # 2. Network / Target IP & Port
+        nf = tk.LabelFrame(f, text=" Network Target (UDP 5004) ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
         nf.pack(fill="x", **pad)
         nf.columnconfigure(1, weight=1)
 
@@ -534,43 +639,29 @@ class PhoneSpeakerApp:
         self.port_entry.bind("<Return>", self._on_manual_ip_applied)
         ttk.Button(ip_row, text="Apply IP", command=self._on_manual_ip_applied).pack(side="left", padx=(6, 0))
 
-        tk.Label(nf, text="Stream Mode:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, width=15, anchor="e").grid(row=2, column=0, sticky="e", padx=4, pady=2)
-        role_row = tk.Frame(nf, bg=BG)
-        role_row.grid(row=2, column=1, sticky="w", padx=2, pady=2)
-        for text, val in [
-            ("PC Sound → Phone", "PC_TO_PHONE"),
-            ("Phone Mic → PC", "PHONE_TO_PC"),
-            ("Both (Speaker + Mic)", "FULL_DUPLEX"),
-        ]:
-            tk.Radiobutton(
-                role_row, text=text, variable=self.direction_var, value=val,
-                bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM,
-                activebackground=BG, activeforeground=ACCENT,
-                command=self._on_role_change
-            ).pack(side="left", padx=(0, 8))
+        # 3. Big Action Button: Start Serving Audio (5004)
+        btn_container = tk.Frame(f, bg=BG)
+        btn_container.pack(fill="x", padx=8, pady=4)
+        self.start_btn = StudioButton(
+            btn_container, text="▶  START SERVING AUDIO (PC → PHONE :5004)",
+            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
+            activebackground="#004400", activeforeground=ACCENT,
+            relief="raised", bd=2, padx=8, pady=6, cursor="hand2",
+            command=self._toggle_streaming,
+        )
+        self.start_btn.pack(fill="x")
 
-        # 3. Phone Mic Output Device on PC (Port 5006)
-        of = tk.LabelFrame(f, text=" Phone Mic Output on PC (Port 5006 → Discord / Zoom / Speakers) ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
-        of.pack(fill="x", **pad)
-        of.columnconfigure(1, weight=1)
-
-        tk.Label(of, text="Mic Output Dev:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, width=15, anchor="e").grid(row=0, column=0, sticky="e", padx=4, pady=2)
-        self.pc_output_combo = ttk.Combobox(of, state="readonly", font=FONT_MONO_SM)
-        self.pc_output_combo.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
-        self.pc_output_combo.bind("<<ComboboxSelected>>", self._on_pc_output_selected)
-        ttk.Button(of, text="Auto-Route Virtual Mic", command=self._auto_route_virtual_mic).grid(row=0, column=2, padx=(4, 2), pady=2)
-
-        # 4. Audio Codec & Bitrate (Sound Mode + Single Aligned Row + Expected Delay)
-        qf_tab1 = tk.LabelFrame(f, text=" Audio Codec & Bitrate ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        # 4. Sound Mode / Profile
+        qf_tab1 = tk.LabelFrame(f, text=" Stream Profile & Codec ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
         qf_tab1.pack(fill="x", **pad)
 
         prof_row = tk.Frame(qf_tab1, bg=BG)
         prof_row.pack(fill="x", padx=4, pady=(2, 2))
         tk.Label(prof_row, text="Sound Mode:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
         for text, val in [
-            ("🎵 Best Quality (Music)", "QUALITY"),
-            ("⚡ Low Delay (Gaming)", "GAMING"),
-            ("⚖️ Balanced (Auto)", "BALANCED"),
+            ("🎵 Quality", "QUALITY"),
+            ("⚡ Gaming", "GAMING"),
+            ("⚖️ Balanced", "BALANCED"),
             ("🎛️ Custom", "CUSTOM"),
         ]:
             tk.Radiobutton(
@@ -583,10 +674,10 @@ class PhoneSpeakerApp:
         cb_row = tk.Frame(qf_tab1, bg=BG)
         cb_row.pack(fill="x", padx=4, pady=2)
         tk.Label(cb_row, text="Codec:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
-        tk.Radiobutton(cb_row, text="Opus", variable=self.codec_var, value=CODEC_OPUS,
+        tk.Radiobutton(cb_row, text="Lossless PCM16 [Default]", variable=self.codec_var, value=CODEC_PCM16,
                        bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM,
                        command=self._on_codec_changed).pack(side="left", padx=(4, 6))
-        tk.Radiobutton(cb_row, text="PCM16 (Lossless)", variable=self.codec_var, value=CODEC_PCM16,
+        tk.Radiobutton(cb_row, text="Opus", variable=self.codec_var, value=CODEC_OPUS,
                        bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM,
                        command=self._on_codec_changed).pack(side="left", padx=(0, 12))
 
@@ -598,39 +689,17 @@ class PhoneSpeakerApp:
 
         tk.Label(qf_tab1, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
 
-        # 5. Independent Action Buttons: Speaker Stream (5004) & Mic Receiver (5006)
-        btn_container = tk.Frame(f, bg=BG)
-        btn_container.pack(fill="x", padx=8, pady=4)
-
-        self.start_btn = StudioButton(
-            btn_container, text="▶  START SPEAKER STREAM (PC → PHONE :5004)",
-            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
-            activebackground="#004400", activeforeground=ACCENT,
-            relief="raised", bd=2, padx=8, pady=4, cursor="hand2",
-            command=self._toggle_streaming,
-        )
-        self.start_btn.pack(fill="x", pady=(0, 4))
-
-        self.mic_btn = StudioButton(
-            btn_container, text="🎤  START MIC STREAM / RECEIVER (PHONE → PC :5006)",
-            bg="#112222", fg="#00EEEE", font=FONT_MONO_BOLD,
-            activebackground="#003B55", activeforeground="#00EEEE",
-            relief="raised", bd=2, padx=8, pady=4, cursor="hand2",
-            command=self._toggle_mic_receiver,
-        )
-        self.mic_btn.pack(fill="x")
-
-        # 6. Live Status, Level Bar, Aligned 2-Col Telemetry & Live Delay Graph
-        status_frame = tk.LabelFrame(f, text=" Live Telemetry & Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
+        # 5. Live Audio Level Meter & Server Telemetry
+        status_frame = tk.LabelFrame(f, text=" Live Audio Meters & Telemetry ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
         status_frame.pack(fill="both", expand=True, **pad)
 
-        self.status_var = tk.StringVar(value="SPEAKER: IDLE | MIC RX: READY (:5006)")
+        self.status_var = tk.StringVar(value="SERVE: READY (PORT 5004)")
         self.status_label = tk.Label(status_frame, textvariable=self.status_var, bg=BG, fg=ACCENT, font=FONT_MONO_BOLD, anchor="w")
         self.status_label.pack(fill="x", padx=4, pady=(1, 2))
 
         level_frame = tk.Frame(status_frame, bg=BG)
         level_frame.pack(fill="x", padx=4, pady=2)
-        tk.Label(level_frame, text="Audio Level:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+        tk.Label(level_frame, text="Audio Peak:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
         self._level_canvas = tk.Canvas(level_frame, height=12, bg="#111111", highlightthickness=1, highlightbackground="#444444")
         self._level_canvas.pack(side="left", fill="x", expand=True, padx=(6, 0))
         self._level_bar = self._level_canvas.create_rectangle(0, 0, 0, 12, fill=ACCENT, outline="")
@@ -640,22 +709,15 @@ class PhoneSpeakerApp:
         sg.columnconfigure(0, weight=1, uniform="stat")
         sg.columnconfigure(1, weight=1, uniform="stat")
 
-        self.pps_var = tk.StringVar(value="Speaker Packets: 0/s")
-        self.rx_pps_var = tk.StringVar(value="Mic Packets: 0/s")
+        self.pps_var = tk.StringVar(value="TX Packets: 0/s")
         self.latency_var = tk.StringVar(value="Phone Buffer: --")
-        self.loss_var = tk.StringVar(value="Dropped: --")
-        self.phone_ip_var = tk.StringVar(value="Phone: --")
-        self.mic_state_var = tk.StringVar(value="Phone Mic: READY")
+        self.loss_var = tk.StringVar(value="Dropped: 0")
+        self.phone_ip_var = tk.StringVar(value="Destination: --")
 
-        for i, var in enumerate([self.pps_var, self.rx_pps_var, self.latency_var, self.loss_var, self.phone_ip_var, self.mic_state_var]):
-            tk.Label(sg, textvariable=var, bg="#0A0A0A", fg=FG, font=FONT_MONO_SM, anchor="w", padx=6, pady=1).grid(
+        for i, var in enumerate([self.pps_var, self.phone_ip_var, self.latency_var, self.loss_var]):
+            tk.Label(sg, textvariable=var, bg="#0A0A0A", fg=FG, font=FONT_MONO_SM, anchor="w", padx=6, pady=2).grid(
                 row=i // 2, column=i % 2, sticky="ew"
             )
-
-        tk.Label(status_frame, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(2, 1))
-
-        self._delay_canvas = tk.Canvas(status_frame, width=480, height=68, bg="#080808", highlightthickness=1, highlightbackground="#333333")
-        self._delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 3))
 
     # ------------------------------------------------------------------
     # TAB 2: Dedicated Party Mode
@@ -965,91 +1027,50 @@ class PhoneSpeakerApp:
         self.party_extend_peers_label.pack(fill="x", pady=2)
 
     # ------------------------------------------------------------------
-    # TAB 3: Audio & Buffer Settings (Two-Way Synced)
+    # TAB 4: SETTINGS (Two-Way Synced Configs & Network Adapters)
     # ------------------------------------------------------------------
 
-    def _build_tab_audio(self) -> None:
-        f = self.tab_audio
+    def _build_tab_settings(self) -> None:
+        f = self.tab_settings
         pad = {"padx": 8, "pady": 4}
 
         # Codec & Quality Frame
-        qf = tk.LabelFrame(f, text=" Audio Quality & Codec ", bg=BG, fg=FG, font=FONT_MONO, bd=1, relief="solid")
+        qf = tk.LabelFrame(f, text=" Two-Way Synced Audio Settings ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
         qf.pack(fill="x", **pad)
 
-        tk.Label(qf, text="Codec:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).grid(row=0, column=0, sticky="e", padx=4, pady=3)
+        tk.Label(qf, text="Default Codec:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).grid(row=0, column=0, sticky="e", padx=4, pady=3)
         codec_box = tk.Frame(qf, bg=BG)
         codec_box.grid(row=0, column=1, sticky="w", padx=4, pady=3)
+        tk.Radiobutton(codec_box, text="Lossless PCM16 [Default]", variable=self.codec_var, value=CODEC_PCM16,
+                       bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM, command=self._on_codec_changed).pack(side="left")
         tk.Radiobutton(codec_box, text="Compressed (Opus)", variable=self.codec_var, value=CODEC_OPUS,
-                       bg=BG, fg=FG, selectcolor="#333333", font=FONT_MONO, command=self._on_codec_changed).pack(side="left")
-        tk.Radiobutton(codec_box, text="Lossless PCM16", variable=self.codec_var, value=CODEC_PCM16,
-                       bg=BG, fg=FG, selectcolor="#333333", font=FONT_MONO, command=self._on_codec_changed).pack(side="left", padx=8)
+                       bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM, command=self._on_codec_changed).pack(side="left", padx=8)
 
         tk.Label(qf, text="Opus Bitrate:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).grid(row=1, column=0, sticky="e", padx=4, pady=3)
-        self.bitrate_combo_tab2 = ttk.Combobox(qf, textvariable=self.bitrate_var, values=OPUS_BITRATES, width=8, state="readonly", font=FONT_MONO)
+        self.bitrate_combo_tab2 = ttk.Combobox(qf, textvariable=self.bitrate_var, values=OPUS_BITRATES, width=8, state="readonly", font=FONT_MONO_SM)
         self.bitrate_combo_tab2.grid(row=1, column=1, sticky="w", padx=4, pady=3)
         self.bitrate_combo_tab2.bind("<<ComboboxSelected>>", lambda e: self._on_bitrate_changed())
 
         tk.Label(qf, text="Frame Size:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).grid(row=2, column=0, sticky="e", padx=4, pady=3)
-        self.frame_combo_tab2 = ttk.Combobox(qf, textvariable=self.frame_ms_var, values=FRAME_SIZES_MS, width=8, state="readonly", font=FONT_MONO)
+        self.frame_combo_tab2 = ttk.Combobox(qf, textvariable=self.frame_ms_var, values=FRAME_SIZES_MS, width=8, state="readonly", font=FONT_MONO_SM)
         self.frame_combo_tab2.grid(row=2, column=1, sticky="w", padx=4, pady=3)
         self.frame_combo_tab2.bind("<<ComboboxSelected>>", lambda e: self._on_frame_ms_changed())
 
         # Expected delay label
         tk.Label(qf, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=2)
 
-        # Buffer Presets & Target Frame
-        bf = tk.LabelFrame(f, text=" Playout Buffer Modes (Phone Playout) ", bg=BG, fg=FG, font=FONT_MONO, bd=1, relief="solid")
-        bf.pack(fill="x", **pad)
+        # Available Network Adapters Listbox
+        af = tk.LabelFrame(f, text=" Available Network Adapter IPs ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
+        af.pack(fill="both", expand=True, **pad)
 
-        buf_modes = [
-            ("Low (20 ms) — Video & Gaming", "LOW"),
-            ("Medium (40 ms) — Balanced", "MEDIUM"),
-            ("High (80 ms) — Maximum Music Stability", "HIGH"),
-            ("Auto Adaptive (+5 ms / -2.5 ms)", "AUTO"),
-            ("Custom Target Buffer", "CUSTOM"),
-        ]
-        for text, val in buf_modes:
-            tk.Radiobutton(
-                bf, text=text, variable=self.buffer_mode_var, value=val,
-                bg=BG, fg=FG, selectcolor="#333333", font=FONT_MONO,
-                command=self._on_buffer_mode_changed
-            ).pack(anchor="w", padx=8, pady=1)
+        self.adapter_listbox = tk.Listbox(af, bg="#0A0A0A", fg="#00EEEE", font=FONT_MONO_SM, height=6, bd=1, relief="solid")
+        self.adapter_listbox.pack(fill="both", expand=True, padx=4, pady=2)
 
-        custom_row = tk.Frame(bf, bg=BG)
-        custom_row.pack(fill="x", padx=8, pady=4)
-        tk.Label(custom_row, text="Target Buffer:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
-        self.buffer_slider = tk.Scale(
-            custom_row, from_=10.0, to=200.0, resolution=2.5, orient="horizontal",
-            variable=self.custom_buffer_var, showvalue=False,
-            bg=BG, fg=FG, troughcolor="#222222", highlightthickness=0, bd=0, length=150,
-            command=self._on_buffer_slider_changed
-        )
-        self.buffer_slider.pack(side="left", padx=4)
-        self.buffer_val_label = tk.Label(custom_row, text=f"{self.custom_buffer_var.get():.1f} ms", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
-        self.buffer_val_label.pack(side="left")
-
-        # Volume / Gain Boost
-        vf = tk.LabelFrame(f, text=" Volume & Boost Control ", bg=BG, fg=FG, font=FONT_MONO, bd=1, relief="solid")
-        vf.pack(fill="x", **pad)
-
-        v_row = tk.Frame(vf, bg=BG)
-        v_row.pack(fill="x", padx=8, pady=4)
-        tk.Label(v_row, text="Gain Boost:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
-        self.gain_slider = tk.Scale(
-            v_row, from_=0.0, to=2.0, resolution=0.05, orient="horizontal",
-            variable=self.volume_gain_var, showvalue=False,
-            bg=BG, fg=FG, troughcolor="#222222", highlightthickness=0, bd=0, length=140,
-            command=self._on_gain_slider_changed
-        )
-        self.gain_slider.pack(side="left", padx=4)
-        self.gain_val_label = tk.Label(v_row, text=f"{int(self.volume_gain_var.get() * 100)}%", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
-        self.gain_val_label.pack(side="left")
-
-        self.mute_btn = StudioButton(
-            v_row, text="MUTE", bg="#333333", fg=FG, font=FONT_MONO_SM,
-            command=self._toggle_mute
-        )
-        self.mute_btn.pack(side="right", padx=8)
+        # Sync Actions Row
+        sync_row = tk.Frame(f, bg=BG)
+        sync_row.pack(fill="x", padx=8, pady=4)
+        ttk.Button(sync_row, text="↻ Refresh Network Adapters", command=self._refresh_adapters).pack(side="left", padx=(0, 6))
+        ttk.Button(sync_row, text="📤 Sync Config to Remote", command=self._on_local_setting_changed).pack(side="left")
 
     # ------------------------------------------------------------------
     # TAB 3: Windows Virtual Device & Tools
@@ -1115,8 +1136,7 @@ class PhoneSpeakerApp:
 
         quick_row = tk.Frame(rf, bg=BG)
         quick_row.grid(row=1, column=0, columnspan=3, sticky="ew", padx=4, pady=4)
-        ttk.Button(quick_row, text="🎤 Route Phone Mic → Virtual Cable (For Discord / Zoom / OBS)", command=self._auto_route_virtual_mic).pack(side="left", padx=(0, 6))
-        ttk.Button(quick_row, text="🎧 Capture Virtual Speaker Only", command=self._auto_select_virtual_capture).pack(side="left")
+        ttk.Button(quick_row, text="🎧 Capture Virtual Speaker / Sink Only", command=self._auto_select_virtual_capture).pack(side="left")
 
         # Detected Virtual Endpoints Listbox
         df = tk.LabelFrame(f, text=" Detected Virtual Audio Endpoints ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
@@ -1128,7 +1148,7 @@ class PhoneSpeakerApp:
         sf = tk.LabelFrame(f, text=" System & Firewall ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
         sf.pack(fill="x", **pad)
 
-        ttk.Button(sf, text="🔥 Add Firewall Rules (UDP 5004, 5005, 5006)", command=self._show_firewall_dialog).pack(side="left", padx=6, pady=4)
+        ttk.Button(sf, text="🔥 Add Firewall Rules (UDP 5004, 5005)", command=self._show_firewall_dialog).pack(side="left", padx=6, pady=4)
         self.tray_var = tk.BooleanVar(value=self.cfg.get("minimize_to_tray", True))
         tk.Checkbutton(
             sf, text="Minimize to system tray on close", variable=self.tray_var,
@@ -1232,6 +1252,11 @@ class PhoneSpeakerApp:
         entries = [f"{a['name']} [{a['ip']}]" + (" (down)" if not a["is_up"] else "") for a in adapters]
         self._adapter_data = adapters
         self.adapter_combo["values"] = entries if entries else ["(none found)"]
+        if hasattr(self, "adapter_listbox"):
+            self.adapter_listbox.delete(0, tk.END)
+            for a in adapters:
+                st = "ACTIVE (UP)" if a["is_up"] else "DOWN"
+                self.adapter_listbox.insert(tk.END, f"  {a['name']:<24} {a['ip']:<16} [{st}]")
         if entries:
             saved = self.cfg.get("adapter_name", "")
             for i, a in enumerate(adapters):
@@ -1243,10 +1268,9 @@ class PhoneSpeakerApp:
     def _refresh_audio_devices(self) -> None:
         prev_idx = self.audio_dev_combo.current()
         loopbacks = list_loopback_devices()
-        inputs = list_input_devices()
-        self._audio_devices = loopbacks + inputs
+        self._audio_devices = loopbacks
         default_lbl = "Auto (Default System Loopback)" if not sys.platform.startswith("win") else "Auto (Windows Default Loopback)"
-        entries = [default_lbl] + [f"[Loopback] {d['name']}" for d in loopbacks] + [f"[Mic] {d['name']}" for d in inputs]
+        entries = [default_lbl] + [f"[Loopback] {d['name']}" for d in loopbacks]
         self.audio_dev_combo["values"] = entries
         if 0 <= prev_idx < len(entries):
             self.audio_dev_combo.current(prev_idx)
@@ -2372,19 +2396,6 @@ class PhoneSpeakerApp:
                     self._status_set("CAPTURE ERROR", ERROR_COLOR)
                     return
 
-        # 2. Always start Phone -> PC Receiver (UDP port 5006) so phone mic can connect at any time
-        if self._phone_receiver is None:
-            pc_out_idx = None
-            out_sel = self.pc_output_combo.current()
-            if 0 <= out_sel < len(self._pc_output_devices):
-                pc_out_idx = self._pc_output_devices[out_sel]["index"]
-            self._phone_receiver = PhoneAudioReceiver(
-                port=PHONE_AUDIO_PORT,
-                output_device_index=pc_out_idx,
-                on_stats=self._on_rx_pps_update,
-            )
-            self._phone_receiver.start()
-
         self._streaming = True
         if as_party:
             self._party_streaming = True
@@ -2396,7 +2407,7 @@ class PhoneSpeakerApp:
         else:
             self._normal_streaming = True
             self.start_btn.config(
-                text="■  STOP SPEAKER STREAM", bg="#330000", fg=ERROR_COLOR,
+                text="■  STOP SERVING AUDIO", bg="#330000", fg=ERROR_COLOR,
                 activebackground="#550000", activeforeground=ERROR_COLOR
             )
 
@@ -2424,8 +2435,8 @@ class PhoneSpeakerApp:
         else:
             self._normal_streaming = False
             self.start_btn.config(
-                text="▶  START SPEAKER STREAM (PC → PHONE :5004)", bg="#003300", fg=ACCENT,
-                activebackground="#005500", activeforeground=ACCENT
+                text="▶  START SERVING AUDIO (PC → PHONE :5004)", bg="#002B00", fg=ACCENT,
+                activebackground="#004400", activeforeground=ACCENT
             )
             if self._party_streaming and self._udp_sender:
                 self._udp_sender.set_party_mode(True)
@@ -2438,7 +2449,6 @@ class PhoneSpeakerApp:
             if self._udp_sender:
                 self._udp_sender.stop()
                 self._udp_sender = None
-            # Keep self._phone_receiver running so phone mic can connect at any time!
             if self._opus_encoder:
                 try:
                     self._opus_encoder.destroy()
@@ -2448,7 +2458,7 @@ class PhoneSpeakerApp:
 
             self._streaming = False
             self._peak_level = 0.0
-            self.pps_var.set("Speaker Packets: 0/s")
+            self.pps_var.set("TX Packets: 0/s")
             self._level_canvas.coords(self._level_bar, 0, 0, 0, 12)
 
         self._update_combined_status()
@@ -2460,58 +2470,68 @@ class PhoneSpeakerApp:
         self._stop_stream(from_party=True)
         self._stop_party_join()
 
-    def _toggle_mic_receiver(self) -> None:
-        """Start/Stop Phone -> PC Mic stream (Port 5006) and signal Phone via MIC_CONTROL."""
-        if self._phone_receiver is None:
-            pc_out_idx = None
+    def _toggle_audio_receiver(self) -> None:
+        """Start/Stop incoming audio receiver on Port 5004."""
+        if self._play_active:
+            self._stop_audio_receiver()
+        else:
+            self._start_audio_receiver()
+
+    def _start_audio_receiver(self) -> None:
+        if self._play_active:
+            return
+        pc_out_idx = None
+        if hasattr(self, "pc_output_combo"):
             out_sel = self.pc_output_combo.current()
             if 0 <= out_sel < len(self._pc_output_devices):
                 pc_out_idx = self._pc_output_devices[out_sel]["index"]
-            self._phone_receiver = PhoneAudioReceiver(
-                port=PHONE_AUDIO_PORT,
-                output_device_index=pc_out_idx,
-                on_stats=self._on_rx_pps_update,
-            )
-            self._phone_receiver.start()
 
-        is_currently_active = bool(self._mic_active_requested or (self._rx_pps > 0 and not getattr(self._phone_receiver, "_manual_mute", False)))
-        new_active = not is_currently_active
-        self._mic_active_requested = new_active
-        self._phone_receiver.set_muted(not new_active, manual=not new_active)
-        self._mic_control_cooldown_until = time.monotonic() + 5.0
-        self._last_phone_mic_state = new_active
-
-        targets = self._get_all_target_ips()
-        if not new_active:
-            self.rx_pps_var.set("Mic Packets: 0/s")
-            self.mic_state_var.set("Phone Mic: OFF")
-            self.mic_btn.config(
-                text="🎤  START MIC STREAM / RECEIVER (PHONE → PC :5006)",
-                bg="#112222", fg="#00EEEE"
+        self._phone_receiver = AudioReceiver(
+            port=AUDIO_PORT,
+            output_device_index=pc_out_idx,
+            on_stats=self._on_rx_pps_update,
+        )
+        self._phone_receiver.start()
+        self._play_active = True
+        if hasattr(self, "play_rx_btn"):
+            self.play_rx_btn.config(
+                text="■  STOP AUDIO RECEIVER (PORT 5004)",
+                bg="#330000", fg=ERROR_COLOR,
+                activebackground="#550000", activeforeground=ERROR_COLOR
             )
-            for tip in targets:
-                send_control_message(tip, {"type": "MIC_CONTROL", "active": False}, CONTROL_PORT)
-        else:
-            self.mic_state_var.set("Phone Mic: LISTENING (:5006)")
-            self.mic_btn.config(
-                text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                bg="#003344", fg="#00FF00"
-            )
-            for tip in targets:
-                send_control_message(tip, {"type": "MIC_CONTROL", "active": True}, CONTROL_PORT)
+        if hasattr(self, "play_rx_pps_var"):
+            self.play_rx_pps_var.set("Listening...")
         self._update_combined_status()
 
+    def _stop_audio_receiver(self) -> None:
+        if self._phone_receiver:
+            self._phone_receiver.stop()
+            self._phone_receiver = None
+        self._play_active = False
+        if hasattr(self, "play_rx_btn"):
+            self.play_rx_btn.config(
+                text="▶  START AUDIO RECEIVER (PORT 5004)",
+                bg="#002B00", fg=ACCENT,
+                activebackground="#004400", activeforeground=ACCENT
+            )
+        if hasattr(self, "play_rx_pps_var"):
+            self.play_rx_pps_var.set("0 pps")
+        self._update_combined_status()
+
+    def _toggle_mic_receiver(self) -> None:
+        """Deprecated backwards-compatibility alias for _toggle_audio_receiver."""
+        self._toggle_audio_receiver()
+
     def _update_combined_status(self) -> None:
-        spk = f"SPEAKER: STREAMING → {self.ip_var.get().strip()}" if self._streaming else "SPEAKER: IDLE"
-        mic_muted = getattr(self._phone_receiver, "_muted", False) if self._phone_receiver else True
-        mic_on = bool(self._phone_receiver and self._phone_receiver.is_running and not mic_muted)
-        if mic_on and self._rx_pps > 0:
-            mic = f"MIC RX: LIVE ({self._rx_pps} pps)"
-        elif mic_on:
-            mic = "MIC RX: LISTENING (:5006)"
+        spk = f"SERVE: STREAMING → {self.ip_var.get().strip()}" if self._streaming else "SERVE: IDLE"
+        rx_on = bool(self._play_active and self._phone_receiver and self._phone_receiver.is_running)
+        if rx_on and self._rx_pps > 0:
+            rx = f"PLAY RX: LIVE ({self._rx_pps} pps)"
+        elif rx_on:
+            rx = "PLAY RX: LISTENING (:5004)"
         else:
-            mic = "MIC RX: STOPPED"
-        self._status_set(f"{spk} | {mic}", ACCENT if (self._streaming or (mic_on and self._rx_pps > 0)) else FG)
+            rx = "PLAY RX: STOPPED"
+        self._status_set(f"{spk} | {rx}", ACCENT if (self._streaming or (rx_on and self._rx_pps > 0)) else FG)
 
     # ------------------------------------------------------------------
     # Background Event Callbacks & UI Queue
@@ -2705,22 +2725,13 @@ class PhoneSpeakerApp:
                         self._last_phone_seen_time = time.monotonic()
 
                     if kind == "pps":
-                        self.pps_var.set(f"Speaker Packets: {data}/s")
+                        self.pps_var.set(f"TX Packets: {data}/s")
                     elif kind == "rx_pps":
                         self._rx_pps = data
-                        self.rx_pps_var.set(f"Mic Packets: {data}/s")
-                        if data > 0 and time.monotonic() >= getattr(self, "_mic_control_cooldown_until", 0.0):
-                            self._mic_active_requested = True
-                            self._last_phone_mic_state = True
-                            if self._phone_receiver:
-                                self._phone_receiver.set_muted(False, manual=False)
-                            self.mic_btn.config(
-                                text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                                bg="#003344", fg="#00FF00"
-                            )
-                            self.mic_state_var.set("Phone Mic: STREAMING")
-                        else:
-                            self.mic_state_var.set("Phone Mic: STREAMING" if data > 0 else "Phone Mic: LISTENING")
+                        if hasattr(self, "play_rx_pps_var"):
+                            self.play_rx_pps_var.set(f"{data} pps")
+                        if hasattr(self, "rx_pps_var"):
+                            self.rx_pps_var.set(f"RX Packets: {data}/s")
                         self._update_combined_status()
                     elif kind == "driver_done":
                         ok, msg = data
@@ -2871,26 +2882,25 @@ class PhoneSpeakerApp:
                         if sender_ip and self._party_view_state == "HOST" and self.party_mode_var.get():
                             self._register_party_device(sender_ip, dev_name or "Android Phone", s.get("audio_port", AUDIO_PORT))
 
-                        phone_mic_active = bool(s.get("mic_streaming", False))
-                        if time.monotonic() >= getattr(self, "_mic_control_cooldown_until", 0.0):
-                            effective_mic_active = phone_mic_active or (self._rx_pps > 0)
-                            if effective_mic_active != getattr(self, "_last_phone_mic_state", None):
-                                self._last_phone_mic_state = effective_mic_active
-                                if self._phone_receiver:
-                                    self._phone_receiver.set_muted(not effective_mic_active, manual=False)
-                                if effective_mic_active:
-                                    self.mic_btn.config(
-                                        text="■  STOP MIC RECEIVER (PHONE → PC :5006 ACTIVE)",
-                                        bg="#003344", fg="#00FF00"
-                                    )
-                                    self.mic_state_var.set("Phone Mic: STREAMING")
-                                else:
-                                    self.mic_btn.config(
-                                        text="🎤  START MIC STREAM / RECEIVER (PHONE → PC :5006)",
-                                        bg="#112222", fg="#00EEEE"
-                                    )
-                                    self.mic_state_var.set("Phone Mic: READY")
-                                self._update_combined_status()
+                        if hasattr(self, "play_buf_level_var"):
+                            buf_ms = s.get("buffer_ms", "--")
+                            self.play_buf_level_var.set(f"{buf_ms:.1f} ms" if isinstance(buf_ms, (int, float)) else "-- ms")
+                        if hasattr(self, "play_target_var"):
+                            tgt_ms = s.get("target_ms", self.custom_buffer_var.get())
+                            self.play_target_var.set(f"{tgt_ms:.1f} ms" if isinstance(tgt_ms, (int, float)) else f"{self.custom_buffer_var.get():.1f} ms")
+                        if hasattr(self, "play_codec_var"):
+                            self.play_codec_var.set(f"{s.get('codec', 'PCM16')} (48kHz Stereo)")
+                        if hasattr(self, "play_rx_pps_var"):
+                            self.play_rx_pps_var.set(f"{self._rx_pps} pps")
+                        if hasattr(self, "play_underruns_var"):
+                            self.play_underruns_var.set(str(s.get("underruns", 0)))
+                        if hasattr(self, "play_lost_var"):
+                            lost = s.get("lost_packets", 0)
+                            loss_pct = s.get("packet_loss_pct", 0.0)
+                            self.play_lost_var.set(f"{lost} ({loss_pct:.1f}%)")
+                        if hasattr(self, "play_late_var"):
+                            self.play_late_var.set(str(s.get("late_packets", 0)))
+                        self._update_combined_status()
 
                         self.latency_var.set(
                             f"Phone Buffer: {s.get('buffer_ms', '--'):.1f} ms"
@@ -3028,7 +3038,7 @@ class PhoneSpeakerApp:
         header = tk.Frame(dlg, bg=BG)
         header.pack(fill="x", padx=12, pady=(10, 6))
         tk.Label(
-            header, text="◀ PhoneSpeaker v2.0.1 Studio Guide ▶",
+            header, text="◀ PhoneSpeaker v2.1 Studio Guide ▶",
             bg=BG, fg=ACCENT, font=FONT_MONO_LG
         ).pack(side="left")
         ttk.Button(header, text="✕ Close", command=dlg.destroy).pack(side="right")
@@ -3048,50 +3058,35 @@ class PhoneSpeakerApp:
         scrollbar.config(command=guide_text.yview)
 
         help_content = """============================================================
-PHONESPEAKER v2.0 STUDIO — USER GUIDE (CROSS-PLATFORM STUDIO)
+PHONESPEAKER v2.1 STUDIO — USER GUIDE (CROSS-PLATFORM STUDIO)
 ============================================================
 
 PLATFORMS SUPPORTED:
-• Windows 11 / 10 (WASAPI Loopback, VB-CABLE Virtual Mic)
+• Windows 11 / 10 (WASAPI Loopback, VB-CABLE Virtual Sink)
 • Linux: Ubuntu, Mint, Arch, Debian (PipeWire / PulseAudio native)
 • macOS: Sonoma, Ventura, Monterey (CoreAudio / BlackHole loopback)
-• Android: 8.0 through 15+ (Oboe C++ AAudio ultra-low latency)
-• iOS: 16.0 through 18+ (AVAudioEngine 48 kHz stereo player & mic)
+• Android: 8.0 through 15+ (Oboe C++ AAudio ultra-low latency & internal capture)
+• iOS: 16.0 through 18+ (AVAudioEngine 48 kHz stereo player & ReplayKit capture)
 
-✓ DUAL INDEPENDENT ACTIONS:
+TABS:
 ------------------------------------------------------------
-* Dedicated buttons on PC/Mac/Linux, Android, and iOS:
-  1. [ ▶ START SPEAKER STREAM / PLAYER (PORT 5004) ]
-  2. [ 🎤 START / STOP MIC STREAM / RECEIVER (PORT 5006) ]
-* Clicking the Mic button on desktop toggles the UDP 5006 receiver AND
-  remotely signals the mobile device to start/stop its Mic Server!
-* How to verify Mic Streaming is working:
-  - Check 'MIC RX PPS: ~200' and 'Phone Mic: STREAMING' in Live Status.
-  - Speak into your phone and watch the level meter move on desktop!
+1. [ PLAY ]:
+   Listen to real-time audio streamed from your phone or another PC/Mac
+   over UDP port 5004 with 20/40/80ms buffer presets and live delay graph.
 
-1. PC -> PHONE WIRELESS SPEAKER (PORT 5004)
-------------------------------------------------------------
-* Connect desktop and phone to the same Wi-Fi, Phone Hotspot, or USB.
-* Click [ ▶ START SPEAKER STREAM ] on PC and [ ▶ START SPEAKER PLAYER ] on Phone.
-* Windows: Captures default WASAPI loopback automatically.
-* Linux: Captures PipeWire / PulseAudio monitor loopback automatically.
-* macOS: Captures CoreAudio / BlackHole 2ch loopback automatically.
+2. [ SERVE ] (Default on PC startup):
+   Stream loopback PC audio directly to your phone or another computer
+   over UDP port 5004 in Lossless PCM16 (or Opus) with low latency.
 
-2. PHONE -> PC WIRELESS MICROPHONE (PORT 5006)
-------------------------------------------------------------
-* Tap [ 🎤 START MIC STREAM TO PC (PORT 5006) ] on Android or iOS.
-* Routing Phone Mic to Discord / Zoom / Teams / OBS:
-  - WINDOWS: Install VB-CABLE in Tab 3, set PC Playback Dev to 'CABLE Input',
-    and set Discord/Zoom input to 'CABLE Output'.
-  - LINUX: In Tab 3, click [ Install Virtual Audio Driver ] to create
-    a native PipeWire/PulseAudio virtual mic ('PhoneSpeaker_Mic').
-  - MACOS: Route via BlackHole 2ch or Multi-Output Device.
+3. [ PARTY ]:
+   Multi-device broadcast host and joiner mode with QR code sync
+   and Daisy-Chain hotspot extension.
 
-3. PARTY MODE (MULTI-DEVICE BROADCAST & EXTEND)
-------------------------------------------------------------
-* Host screen broadcasts low-latency audio to all connected devices simultaneously.
-* Any connected phone or laptop can tap 'Extend This Party' to create a
-  secondary Hotspot repeater for infinite range and synchronized sound!
+4. [ SETTINGS ]:
+   Two-way synced audio settings, profiles, and available adapter IPs.
+
+5. [ VIRTUAL DEVICE ]:
+   Virtual sink loopback installers and sound mixer shortcuts.
 ============================================================
 """
         guide_text.insert("1.0", help_content)

@@ -182,7 +182,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
     if (mIsPrebuffering) {
         float startThreshold = mLocalTargetBufferMs;
         int minPackets = std::max(2, static_cast<int>(startThreshold / std::max(1.0f, mPacketDurationMs)));
-        if (totalQueuedMs < startThreshold && static_cast<int>(packetQueueSize) < minPackets) {
+        if (totalQueuedMs < startThreshold || static_cast<int>(packetQueueSize) < minPackets) {
             return;
         }
         mIsPrebuffering = false;
@@ -218,7 +218,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         {
             std::lock_guard<std::mutex> lock(mPacketMutex);
             if (mPacketMap.empty()) {
-                if (mConsecutiveLosses >= 8) {
+                if (mConsecutiveLosses >= 8 || mPcmRingBuffer.getOccupiedFrames() == 0) {
                     mIsPrebuffering = true;
                 }
                 break;

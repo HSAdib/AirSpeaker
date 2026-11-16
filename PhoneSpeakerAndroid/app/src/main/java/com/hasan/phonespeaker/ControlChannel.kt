@@ -231,7 +231,7 @@ class ControlChannel(
                         if (msgType == "PC_ANNOUNCE") {
                             activePcIp = senderIp
                             lastKnownPcIp = senderIp
-                            AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
+                            AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
                             val pcName = json.optString("pc_name", "")
                             if (pcName.isNotBlank()) {
                                 activePcName = pcName
@@ -248,7 +248,7 @@ class ControlChannel(
                             if (allowOverwrite) {
                                 activePcIp = senderIp
                                 lastKnownPcIp = senderIp
-                                AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
+                                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
                                 val pcName = json.optString("pc_name", "")
                                 if (pcName.isNotBlank()) {
                                     activePcName = pcName
@@ -261,7 +261,7 @@ class ControlChannel(
                             if (allowOverwrite) {
                                 activePcIp = senderIp
                                 lastKnownPcIp = senderIp
-                                AudioStreamService.micStreamerInstance?.updateTargetIp(senderIp)
+                                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
                             }
                             val wantActive = json.optBoolean("active", false)
                             onMicControlReceived?.invoke(wantActive)
@@ -294,7 +294,7 @@ class ControlChannel(
                         put("party_join", false)
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
-                        put("mic_streaming", AudioStreamService.isMicStreaming)
+                        put("serving", AudioStreamService.isServing)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     try {
@@ -371,8 +371,8 @@ class ControlChannel(
                         put("rx_pps", stats.rxPps)
                         put("active_codec", stats.codec)
                         put("device", getPhoneModelName())
-                        put("mic_streaming", AudioStreamService.isMicStreaming)
-                        put("mic_pps", AudioStreamService.micStreamerInstance?.txPps?.get() ?: 0)
+                        put("serving", AudioStreamService.isServing)
+                        put("serve_pps", AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0)
                         if (pingTs > 0L) {
                             put("echo_pc_ts", pingTs)
                             put("hold_ms", holdMs)
@@ -385,7 +385,7 @@ class ControlChannel(
                             val dest = InetAddress.getByName(targetIp)
                             sock.send(DatagramPacket(data, data.size, dest, controlPort))
                         } catch (_: Exception) {}
-                    } else if (AudioStreamService.isMicStreaming || AudioStreamService.isStreaming) {
+                    } else if (AudioStreamService.isServing || AudioStreamService.isStreaming) {
                         // Also send to subnet broadcast if PC IP is not yet known
                         for (ip in getLocalIpv4Addresses()) {
                             val parts = ip.split(".")
@@ -496,7 +496,7 @@ class ControlChannel(
                         put("party_join", false)
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
-                        put("mic_streaming", AudioStreamService.isMicStreaming)
+                        put("serving", AudioStreamService.isServing)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     try {

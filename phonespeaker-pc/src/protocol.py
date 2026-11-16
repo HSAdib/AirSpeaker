@@ -17,9 +17,9 @@ CODEC_PCM16 = 0
 CODEC_OPUS = 1
 
 # Control & audio ports
-AUDIO_PORT = 5004          # PC -> Phone audio stream
-CONTROL_PORT = 5005        # Bidirectional control & 2-way settings sync
-PHONE_AUDIO_PORT = 5006    # Phone -> PC audio stream (Mic / Apps)
+AUDIO_PORT = 5004          # Unified 48 kHz stereo audio stream (UDP 5004)
+CONTROL_PORT = 5005        # Bidirectional control & 2-way settings sync (UDP 5005)
+PHONE_AUDIO_PORT = 5004    # Backwards compatibility alias (Port 5006 permanently removed)
 
 # Buffer presets
 BUFFER_PRESETS = {
@@ -28,15 +28,15 @@ BUFFER_PRESETS = {
     "HIGH": 80.0,
 }
 
-# Default v2.0 Configuration
+# Default v2.1 Configuration
 DEFAULT_CONFIG: Dict[str, Any] = {
     "type": "CONFIG_SYNC",
     "rev": 1,
     "direction": "PC_TO_PHONE",         # PC_TO_PHONE, PHONE_TO_PC, FULL_DUPLEX
-    "pc_source": "SYSTEM_AUDIO",        # SYSTEM_AUDIO, MICROPHONE
-    "phone_source": "MIC",              # MIC, APPS
+    "pc_source": "SYSTEM_AUDIO",        # SYSTEM_AUDIO
+    "phone_source": "INTERNAL_AUDIO",   # INTERNAL_AUDIO
     "audio_profile": "BALANCED",        # QUALITY, GAMING, BALANCED, CUSTOM
-    "codec": CODEC_OPUS,
+    "codec": CODEC_PCM16,               # Default Lossless PCM16 for 0 ms delay / 0% quality loss
     "opus_bitrate_kbps": 192,
     "frame_ms": 5,
     "buffer_mode": "AUTO",              # LOW, MEDIUM, HIGH, AUTO, CUSTOM
