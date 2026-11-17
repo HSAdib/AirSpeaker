@@ -114,7 +114,7 @@ def main() -> None:
         size_mb = exe.stat().st_size / (1024 * 1024)
         print(f"\nSUCCESS: {exe} ({size_mb:.1f} MB)", flush=True)
 
-        for target_name in ["PhoneSpeaker v2.exe", "PhoneSpeaker.v2.exe", "PhoneSpeaker.v2.0.1.exe", "PhoneSpeaker.v2.1.exe"]:
+        for target_name in ["PhoneSpeaker v2.exe", "PhoneSpeaker.v2.exe", "PhoneSpeaker.v2.1.exe"]:
             target_path = ROOT.parent / target_name
             try:
                 shutil.copy2(exe, target_path)
@@ -162,7 +162,7 @@ set -e
 
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "=========================================================="
-    echo "  PhoneSpeaker v2.0 Studio — Uninstalling..."
+    echo "  PhoneSpeaker v2.1 Studio — Uninstalling..."
     echo "=========================================================="
     pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
     pkill -f "PhoneSpeaker-v2" 2>/dev/null || true
@@ -171,12 +171,12 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
            "$HOME/.local/share/icons/phonespeaker.png" "$HOME/.config/PhoneSpeaker"
     sudo rm -f /usr/local/bin/phonespeaker 2>/dev/null || true
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    echo "PhoneSpeaker v2.0 Studio has been successfully uninstalled."
+    echo "PhoneSpeaker v2.1 Studio has been successfully uninstalled."
     exit 0
 fi
 
 echo "=========================================================="
-echo " PhoneSpeaker v2.0 Studio — Linux One-Click Installer"
+echo " PhoneSpeaker v2.1 Studio — Linux One-Click Installer"
 echo "=========================================================="
 
 # 1. Ensure system dependencies (Arch / Debian / Ubuntu / Fedora)
@@ -225,8 +225,8 @@ sudo ln -sf "$INSTALL_DIR/PhoneSpeaker-v2" /usr/local/bin/phonespeaker 2>/dev/nu
 cat > "$APP_DIR/phonespeaker.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=PhoneSpeaker v2.0 Studio
-Comment=Low-latency Wireless PC Speaker & Mic Studio
+Name=PhoneSpeaker v2.1 Studio
+Comment=Low-latency Wireless Audio & Internal Sound Studio
 Exec=$INSTALL_DIR/PhoneSpeaker-v2
 Icon=$ICON_DIR/phonespeaker.png
 Terminal=false
@@ -237,9 +237,9 @@ chmod +x "$APP_DIR/phonespeaker.desktop"
 update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 
 echo "=========================================================="
-echo " SUCCESS! PhoneSpeaker v2.0 Studio installed!"
+echo " SUCCESS! PhoneSpeaker v2.1 Studio installed!"
 echo " Command: phonespeaker"
-echo " Launching PhoneSpeaker v2.0 Studio now..."
+echo " Launching PhoneSpeaker v2.1 Studio now..."
 echo "=========================================================="
 
 # Pre-launch health check: verify critical Python modules are importable
@@ -309,7 +309,7 @@ cd "$(dirname "$0")"
 
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "=========================================================="
-    echo "  PhoneSpeaker v2.0 Studio — Uninstalling for macOS..."
+    echo "  PhoneSpeaker v2.1 Studio — Uninstalling for macOS..."
     echo "=========================================================="
     pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
     rm -rf "$HOME/Applications/PhoneSpeaker v2.app" \
@@ -317,12 +317,12 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
            "$HOME/Library/Application Support/PhoneSpeaker" \
            "$HOME/.local/bin/phonespeaker"
     sudo rm -f /usr/local/bin/phonespeaker 2>/dev/null || true
-    echo "PhoneSpeaker v2.0 Studio has been successfully uninstalled."
+    echo "PhoneSpeaker v2.1 Studio has been successfully uninstalled."
     exit 0
 fi
 
 echo "=========================================================="
-echo " PhoneSpeaker v2.0 Studio — macOS One-Click Installer"
+echo " PhoneSpeaker v2.1 Studio — macOS One-Click Installer"
 echo "=========================================================="
 
 # 1. Check for Homebrew
@@ -378,13 +378,11 @@ cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>2.1</string>
     <key>NSHighResolutionCapable</key>
     <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>PhoneSpeaker requires microphone access for PC microphone streaming.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>PhoneSpeaker uses your local network (UDP 5004, 5005, 5006) for low-latency audio streaming and device discovery.</string>
+    <string>PhoneSpeaker uses your local network (UDP 5004, 5005) for low-latency audio streaming and device discovery.</string>
 </dict>
 </plist>
 EOF
@@ -419,7 +417,7 @@ ln -sf "$APP_DIR/Contents/MacOS/phonespeaker" "$BIN_DIR/phonespeaker"
 sudo ln -sf "$APP_DIR/Contents/MacOS/phonespeaker" /usr/local/bin/phonespeaker 2>/dev/null || true
 
 echo "=========================================================="
-echo " SUCCESS! PhoneSpeaker v2.0 Studio installed for macOS!"
+echo " SUCCESS! PhoneSpeaker v2.1 Studio installed for macOS!"
 echo " Location: $APP_DIR"
 echo " CLI Command: phonespeaker"
 echo " Launching PhoneSpeaker v2 now..."

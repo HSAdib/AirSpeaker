@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-build_linux.py — Build standalone Linux executable and .run installer for PhoneSpeaker v2.0.
+build_linux.py — Build standalone Linux executable and .run installer for PhoneSpeaker v2.1.
 
 Output:
   - dist/PhoneSpeaker-v2 (Standalone Linux executable, like .exe on Windows)
@@ -123,7 +123,7 @@ def main() -> None:
     installer_header = b"""#!/usr/bin/env bash
 set -e
 echo "===================================================="
-echo " Installing PhoneSpeaker v2.0 Studio for Linux..."
+echo " Installing PhoneSpeaker v2.1 Studio for Linux..."
 echo "===================================================="
 INSTALL_DIR="$HOME/.local/opt/phonespeaker"
 BIN_DIR="$HOME/.local/bin"
@@ -139,8 +139,8 @@ ln -sf "$INSTALL_DIR/PhoneSpeaker-v2" "$BIN_DIR/phonespeaker"
 cat > "$APP_DIR/phonespeaker.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=PhoneSpeaker v2.0 Studio
-Comment=Low-latency PC to Android Speaker & Wireless Mic
+Name=PhoneSpeaker v2.1 Studio
+Comment=Low-latency Wireless Audio & Internal Sound Studio
 Exec=$INSTALL_DIR/PhoneSpeaker-v2
 Icon=$INSTALL_DIR/app_icon.png
 Terminal=false
@@ -151,7 +151,7 @@ chmod +x "$APP_DIR/phonespeaker.desktop"
 update-desktop-database "$APP_DIR" 2>/dev/null || true
 
 echo "SUCCESS! Installed to $INSTALL_DIR/PhoneSpeaker-v2"
-echo "Run 'phonespeaker' from terminal or launch 'PhoneSpeaker v2.0 Studio' from your App Menu!"
+echo "Run 'phonespeaker' from terminal or launch 'PhoneSpeaker v2.1 Studio' from your App Menu!"
 exit 0
 __ARCHIVE_BELOW__
 """

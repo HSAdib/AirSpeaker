@@ -317,8 +317,8 @@ sudo firewall-cmd --add-port=5004/udp --add-port=5005/udp --permanent && sudo fi
 
 **Streaming**
 - **PC → Phone speaker:** captures everything your PC plays and plays it on the phone.
-- **Phone → PC microphone:** streams the phone mic to the PC. Route it into Discord, Zoom, Teams or OBS through a virtual device.
-- **Full-duplex:** speaker and microphone at the same time.
+- **Phone → PC internal audio (SERVE):** captures internal system audio from Android 10+ (MediaProjection) and iOS (ReplayKit) and streams it to the PC over UDP 5004.
+- **Full-duplex:** simultaneous PLAY and SERVE audio streaming.
 - **🎉 Party Mode (Multi-Device & Hotspot Sharing):** Broadcast synchronized low-latency audio from 1 Host to multiple phones simultaneously over Wi-Fi, Phone Hotspot, PC Hotspot, or USB Tethering. Join instantly via Camera QR scanner or automatic beacon discovery.
 - **📡 Extend Party (Hotspot Repeater):** Joiners can daisy-chain and re-broadcast the party stream to nearby devices on secondary hotspot networks with hop-count TTL loop prevention.
 
@@ -346,7 +346,7 @@ sudo firewall-cmd --add-port=5004/udp --add-port=5005/udp --permanent && sudo fi
 - **System volume sync:** optionally follows the Windows sound bar or Linux default sink volume.
 
 **Desktop app**
-- Black-and-white Tk interface with four tabs: `Stream / Roles`, `🎉 Party Mode`, `Audio & Buffer`, `Virtual Device (Win+Ctrl+V)`.
+- Monospace studio interface with 5 unified tabs: `PLAY`, `SERVE`, `PARTY`, `SETTINGS`, and `VIRTUAL DEVICE`.
 - Virtual-adapter filtering (VirtualBox `192.168.56.x`, VMware, Hyper-V, WSL and similar) so you always see your real LAN IP.
 - One-click firewall rules, system-tray mode, built-in help dialog.
 - High process priority and 1 ms timer resolution on Windows.

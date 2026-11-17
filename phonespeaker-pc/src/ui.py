@@ -1093,12 +1093,12 @@ class PhoneSpeakerApp:
         vf.pack(fill="x", **pad)
 
         desc_text = (
-            "Use BlackHole 2ch to route your Phone Mic into Discord, Zoom, FaceTime, or OBS,\n"
+            "Use BlackHole 2ch to route isolated PC or Phone internal audio into Discord, Zoom, FaceTime, or OBS,\n"
             "or capture system audio via Multi-Output Device into PhoneSpeaker:"
             if is_mac else (
-                "Create virtual speaker & microphone sinks via pactl so you can stream isolated\nPC audio to your phone or route your Phone Mic into Discord, Zoom, or OBS:"
+                "Create virtual sinks via pactl / PipeWire to stream isolated PC audio to your phone\nor route Phone internal audio into Discord, Zoom, or OBS:"
                 if is_linux else
-                "Use VB-CABLE / Virtual Audio Driver to route your Phone Mic into Discord, Zoom, Teams, or OBS,\nor to stream isolated PC audio without playing through PC speakers:"
+                "Use VB-CABLE / Virtual Audio Driver to route isolated PC or Phone internal audio into Discord, Zoom, Teams, or OBS,\nor to stream isolated PC audio without playing through PC speakers:"
             )
         )
         tk.Label(vf, text=desc_text, bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, justify="left", anchor="w").pack(fill="x", padx=6, pady=(2, 4))
@@ -1124,7 +1124,7 @@ class PhoneSpeakerApp:
             ttk.Button(btn_row2, text=sound_panel_title, command=open_classic_sound_control_panel).pack(side="left")
 
         # One-Click Quick Routing Card
-        rf = tk.LabelFrame(f, text=" One-Click Virtual Routing (Mic & Capture Source) ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
+        rf = tk.LabelFrame(f, text=" One-Click Virtual Capture Routing ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
         rf.pack(fill="x", **pad)
         rf.columnconfigure(1, weight=1)
 

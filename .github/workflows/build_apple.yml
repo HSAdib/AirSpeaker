@@ -293,6 +293,10 @@ jobs:
       # ----------------------------------------------------
       # 5. PUBLISH TO GITHUB PACKAGES SECTION (ghcr.io/hsadib/phonespeaker)
       # ----------------------------------------------------
+      - name: Set up ORAS CLI
+        if: github.event_name != 'pull_request'
+        uses: oras-project/setup-oras@v1
+
       - name: Publish Installers to GitHub Packages (GHCR OCI Registry)
         if: github.event_name != 'pull_request'
         env:
@@ -302,14 +306,15 @@ jobs:
           OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           PKG_REF="ghcr.io/${OWNER_LC}/phonespeaker"
 
+          cd release-artifacts
           ORAS_FILES=()
-          for f in release-artifacts/*; do
+          for f in *; do
             [ -f "$f" ] && ORAS_FILES+=("$f")
           done
 
           if [ ${#ORAS_FILES[@]} -gt 0 ]; then
             echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF..."
-            oras push "${PKG_REF}:latest" \
+            oras push --disable-path-validation "${PKG_REF}:latest" \
               --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
               --annotation "org.opencontainers.image.description=PhoneSpeaker v2.1 Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
               --annotation "org.opencontainers.image.version=2.1.0" \
