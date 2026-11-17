@@ -41,6 +41,14 @@ set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
 
+@rem Auto-detect JDK if JAVA_HOME is not set in environment (prefer LTS JDK 17/21)
+for /d %%D in ("%ProgramFiles%\Java\jdk*") do if exist "%%D\bin\java.exe" set "JAVA_HOME=%%D" & goto findJavaFromJavaHome
+for /d %%D in ("%ProgramFiles%\Eclipse Adoptium\jdk*") do if exist "%%D\bin\java.exe" set "JAVA_HOME=%%D" & goto findJavaFromJavaHome
+for /d %%D in ("%ProgramFiles%\Microsoft\jdk*") do if exist "%%D\bin\java.exe" set "JAVA_HOME=%%D" & goto findJavaFromJavaHome
+if exist "%ProgramFiles%\Android\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=%ProgramFiles%\Android\Android Studio\jbr" & goto findJavaFromJavaHome
+if exist "%ProgramFiles%\Android\Android Studio\jre\bin\java.exe" set "JAVA_HOME=%ProgramFiles%\Android\Android Studio\jre" & goto findJavaFromJavaHome
+if exist "%LOCALAPPDATA%\Programs\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=%LOCALAPPDATA%\Programs\Android Studio\jbr" & goto findJavaFromJavaHome
+
 set JAVA_EXE=java.exe
 %JAVA_EXE% -version >NUL 2>&1
 if %ERRORLEVEL% equ 0 goto execute

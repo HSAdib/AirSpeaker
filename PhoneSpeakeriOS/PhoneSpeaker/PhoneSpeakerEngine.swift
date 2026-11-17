@@ -593,7 +593,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
             // Snapshot thread-safe state
             stateLock.lock()
-            if localSeqLast > 0 && seq > localSeqLast + 1 {
+            if seq < 15 && localSeqLast > 30 {
+                localSeqLast = seq
+            } else if localSeqLast > 0 && seq > localSeqLast + 1 {
                 packetsLost += UInt64(seq - localSeqLast - 1)
             }
             localSeqLast = seq
@@ -690,6 +692,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 }
                 if isPrebufferingAudio && audioBufferQueueCount.value >= minPrebuffer {
                     isPrebufferingAudio = false
+                    if !audioEngine.isRunning {
+                        try? audioEngine.start()
+                    }
                     if !playerNode.isPlaying {
                         playerNode.play()
                     }
@@ -763,15 +768,14 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             var maxSample: Int16 = 0
             serveLock.lock()
             for i in 0..<sampleCount {
-                let s = shortPtr[i]
-                let a = abs(s)
-                if a > maxSample { maxSample = a }
-                sampleAccumulator.append(s)
+                sampleAccumulator.append(shortPtr[i])
             }
 
             while sampleAccumulator.count >= 480 {
-                let slice = Array(sampleAccumulator.prefix(480))
+                var slice = Array(sampleAccumulator.prefix(480))
                 sampleAccumulator.removeFirst(480)
+
+                self.txEQDSP.processInt16Samples(&slice, channels: 2)
 
                 var packet = [UInt8](repeating: 0, count: 972)
                 packet[0] = UInt8(seq & 0xFF)
@@ -791,7 +795,10 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 packet[11] = UInt8((480 >> 8) & 0xFF)
 
                 for j in 0..<480 {
-                    let u = UInt16(bitPattern: slice[j])
+                    let s = slice[j]
+                    let a = abs(s)
+                    if a > maxSample { maxSample = a }
+                    let u = UInt16(bitPattern: s)
                     packet[12 + j * 2] = UInt8(u & 0xFF)
                     packet[12 + j * 2 + 1] = UInt8((u >> 8) & 0xFF)
                 }
@@ -1107,6 +1114,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         isPartyHost = true
         isPartyJoined = false
         isPartyExtending = false
+        updateEffectiveEQ()
         partyMembers.removeAll()
         peersLock.lock()
         partyPeerIps.removeAll()
@@ -1125,6 +1133,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         isPartyJoined = true
         currentPartyHostIp = actualIp
         updateServerIp(actualIp)
+        updateEffectiveEQ()
 
         startSpeakerPlayer(port: actualPort, manualHost: actualIp)
         sendPartyJoinAnnouncement(hostIp: actualIp)
@@ -1166,6 +1175,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         isPartyJoined = false
         isPartyExtending = false
         currentPartyHostIp = ""
+        updateEffectiveEQ()
         partyMembers.removeAll()
         peersLock.lock()
         partyPeerIps.removeAll()

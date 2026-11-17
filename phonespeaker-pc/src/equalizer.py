@@ -162,11 +162,19 @@ class EqualizerManager:
         return copy.deepcopy(self._state)
 
     def get_context(self, ctx: str) -> Dict[str, Any]:
-        return copy.deepcopy(self._state["contexts"].get(ctx, self._state["contexts"]["play"]))
+        data = copy.deepcopy(self._state["contexts"].get(ctx, self._state["contexts"]["play"]))
+        preset_val = data.get("preset") or data.get("preset_name") or "Flat"
+        data["preset"] = preset_val
+        data["preset_name"] = preset_val
+        return data
 
     def update_context(self, ctx: str, **kwargs) -> None:
         if ctx not in self._state["contexts"]:
             return
+        if "preset_name" in kwargs and "preset" not in kwargs:
+            kwargs["preset"] = kwargs["preset_name"]
+        elif "preset" in kwargs and "preset_name" not in kwargs:
+            kwargs["preset_name"] = kwargs["preset"]
         self._state["contexts"][ctx].update(kwargs)
         if self._on_change:
             self._on_change()

@@ -315,28 +315,14 @@ class UDPSender:
         self._running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         with self._lock:
             target_ip = self._target_ip
-            bind_ip = self._bind_ip
-            party_mode = self._party_mode
 
-        chosen_bind_ip = None
-        if not party_mode:
-            target_octets = target_ip.split(".") if target_ip else []
-            bind_octets = bind_ip.split(".") if bind_ip else []
-            if len(target_octets) == 4 and len(bind_octets) == 4:
-                if target_octets[:3] == bind_octets[:3]:
-                    chosen_bind_ip = bind_ip
-
-        if chosen_bind_ip:
-            try:
-                self._sock.bind((chosen_bind_ip, 0))
-                logger.info("UDPSender bound to local adapter IP %s", chosen_bind_ip)
-            except Exception as exc:
-                logger.warning("Could not bind to %s (using default route): %s", chosen_bind_ip, exc)
-        else:
-            logger.info("UDPSender left unbound (0.0.0.0) for OS routing to %s", target_ip)
+        # Leave unbound (0.0.0.0) so the OS kernel routes UDP 5004 packets
+        # over the exact same interface and route as UDP 5005 control packets.
+        logger.info("UDPSender left unbound (0.0.0.0) for OS routing to %s", target_ip)
 
         self._thread = threading.Thread(
             target=self._run, name="UDPSender", daemon=True
@@ -351,21 +337,11 @@ class UDPSender:
             self._target_port = target_port
             if target_ip and target_ip not in ("0.0.0.0", "255.255.255.255"):
                 self._party_targets[target_ip] = int(target_port)
-            bind_ip = self._bind_ip
-            target_octets = target_ip.split(".") if target_ip else []
-            bind_octets = bind_ip.split(".") if bind_ip else []
-            if len(target_octets) == 4 and len(bind_octets) == 4 and target_octets[:3] != bind_octets[:3]:
+            if self._sock:
                 try:
-                    if self._sock:
-                        try:
-                            self._sock.close()
-                        except Exception:
-                            pass
-                    self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
-                    logger.info("UDPSender recreated unbound socket for subnet switch to %s", target_ip)
-                except Exception as exc:
-                    logger.warning("Error recreating socket in update_target: %s", exc)
+                    self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                except Exception:
+                    pass
         logger.info("UDPSender target updated to %s:%d (was %s)", target_ip, target_port, old_ip)
 
     def set_codec_and_bitrate(self, codec: int, bitrate_bps: int, frame_ms: int) -> None:

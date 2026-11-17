@@ -140,30 +140,40 @@ void NativeAudioEngine::stop() {
 
 bool NativeAudioEngine::openOboeStream() {
     std::lock_guard<std::mutex> lock(mStreamMutex);
-    oboe::AudioStreamBuilder builder;
-    builder.setFormat(oboe::AudioFormat::I16)
-        ->setChannelCount(oboe::ChannelCount::Stereo)
-        ->setSampleRate(48000)
-        ->setUsage(oboe::Usage::Media)
-        ->setContentType(oboe::ContentType::Music)
-        ->setDataCallback(this)
-        ->setErrorCallback(this);
+    auto tryOpen = [&](oboe::SharingMode sharing, oboe::PerformanceMode perf) -> bool {
+        oboe::AudioStreamBuilder builder;
+        builder.setDirection(oboe::Direction::Output)
+            ->setFormat(oboe::AudioFormat::I16)
+            ->setChannelCount(oboe::ChannelCount::Stereo)
+            ->setSampleRate(48000)
+            ->setFormatConversionAllowed(true)
+            ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium)
+            ->setUsage(oboe::Usage::Media)
+            ->setContentType(oboe::ContentType::Music)
+            ->setPerformanceMode(perf)
+            ->setSharingMode(sharing)
+            ->setDataCallback(this)
+            ->setErrorCallback(this);
+
+        oboe::Result result = builder.openStream(mAudioStream);
+        if (result != oboe::Result::OK) {
+            LOGW("Oboe openStream (sharing=%d, perf=%d) failed: %s",
+                 static_cast<int>(sharing), static_cast<int>(perf), oboe::convertToText(result));
+            mAudioStream.reset();
+            return false;
+        }
+        return true;
+    };
 
     if (mLowLatencyMode.load(std::memory_order_relaxed)) {
-        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency)
-            ->setSharingMode(oboe::SharingMode::Exclusive);
-    } else {
-        builder.setPerformanceMode(oboe::PerformanceMode::None)
-            ->setSharingMode(oboe::SharingMode::Shared);
+        if (tryOpen(oboe::SharingMode::Exclusive, oboe::PerformanceMode::LowLatency)) {
+            return true;
+        }
+        if (tryOpen(oboe::SharingMode::Shared, oboe::PerformanceMode::LowLatency)) {
+            return true;
+        }
     }
-
-    oboe::Result result = builder.openStream(mAudioStream);
-    if (result != oboe::Result::OK) {
-        LOGE("Failed to open Oboe stream: %s", oboe::convertToText(result));
-        mAudioStream.reset();
-        return false;
-    }
-    return true;
+    return tryOpen(oboe::SharingMode::Shared, oboe::PerformanceMode::None);
 }
 
 bool NativeAudioEngine::startOboeStream() {

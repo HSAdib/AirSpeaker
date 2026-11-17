@@ -114,6 +114,7 @@ class MainActivity : AppCompatActivity() {
     private var userEditedPcIp: String? = null
     private var lastAppliedDiscoveredPcIp: String? = null
     private var lastAdvLogTime: Long = 0L
+    private var userManuallyStoppedPlayer = false
 
     private val bitrateValues = listOf("10", "24", "32", "64", "96", "128", "160", "192", "256", "320")
 
@@ -286,6 +287,22 @@ class MainActivity : AppCompatActivity() {
         binding.tvPartyJoinTargetBufferValue.text = textStr
     }
 
+    private fun syncAllBufferModeRadioGroups(mode: String) {
+        val lowBtns = listOf(binding.rbBufLow, binding.rbServeBufLow, binding.rbPartyHostBufLow, binding.rbPartyJoinBufLow)
+        val medBtns = listOf(binding.rbBufMed, binding.rbServeBufMed, binding.rbPartyHostBufMed, binding.rbPartyJoinBufMed)
+        val highBtns = listOf(binding.rbBufHigh, binding.rbServeBufHigh, binding.rbPartyHostBufHigh, binding.rbPartyJoinBufHigh)
+        val autoBtns = listOf(binding.rbBufAuto, binding.rbServeBufAuto, binding.rbPartyHostBufAuto, binding.rbPartyJoinBufAuto)
+        val customBtns = listOf(binding.rbBufCustom, binding.rbServeBufCustom, binding.rbPartyHostBufCustom, binding.rbPartyJoinBufCustom)
+
+        when (mode) {
+            "LOW" -> lowBtns.forEach { if (!it.isChecked) it.isChecked = true }
+            "MEDIUM" -> medBtns.forEach { if (!it.isChecked) it.isChecked = true }
+            "HIGH" -> highBtns.forEach { if (!it.isChecked) it.isChecked = true }
+            "AUTO" -> autoBtns.forEach { if (!it.isChecked) it.isChecked = true }
+            "CUSTOM" -> customBtns.forEach { if (!it.isChecked) it.isChecked = true }
+        }
+    }
+
     private fun applyEffectiveEqualizerState() {
         val prefs = getSharedPreferences("PhoneSpeakerEQ", MODE_PRIVATE)
         val univEnabled = prefs.getBoolean("universal_enabled", false)
@@ -294,7 +311,7 @@ class MainActivity : AppCompatActivity() {
         val univBands = FloatArray(5) { i -> prefs.getFloat("universal_band_$i", 0f) }
 
         // RX: Active between play & party_join
-        val isPartyJoin = binding.rbRoleJoin.isChecked
+        val isPartyJoin = (partyModeScreen == "JOIN") || binding.rbPartyJoin.isChecked
         val rxKey = if (isPartyJoin) "party_join" else "play"
         val rxModeEnabled = prefs.getBoolean("${rxKey}_enabled", false)
         val rxModeBands = FloatArray(5) { i -> prefs.getFloat("${rxKey}_band_$i", 0f) }
@@ -308,7 +325,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // TX: Active between serve & party_host
-        val isPartyHost = binding.rbRoleHost.isChecked
+        val isPartyHost = (partyModeScreen == "HOST") || binding.rbPartyHost.isChecked
         val txKey = if (isPartyHost) "party_host" else "serve"
         val txModeEnabled = prefs.getBoolean("${txKey}_enabled", false)
         val txModeBands = FloatArray(5) { i -> prefs.getFloat("${txKey}_band_$i", 0f) }
@@ -403,6 +420,12 @@ class MainActivity : AppCompatActivity() {
             textSize = 11f
             typeface = android.graphics.Typeface.MONOSPACE
         }
+        val btnDeletePreset = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+            text = "🗑 Delete"
+            setTextColor(Color.parseColor("#FF4444"))
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
         val btnFlat = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
             text = "↺ Flat"
             setTextColor(Color.WHITE)
@@ -410,6 +433,7 @@ class MainActivity : AppCompatActivity() {
             typeface = android.graphics.Typeface.MONOSPACE
         }
         btnRow.addView(btnSavePreset)
+        btnRow.addView(btnDeletePreset)
         btnRow.addView(btnFlat)
         layout.addView(btnRow)
 
@@ -562,6 +586,24 @@ class MainActivity : AppCompatActivity() {
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
+        }
+
+        btnDeletePreset.setOnClickListener {
+            if (BUILTIN_EQ_PRESETS.containsKey(currentPreset) || currentPreset == "Custom") {
+                Toast.makeText(this, "Built-in presets cannot be deleted", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val toDelete = currentPreset
+            val set = prefs.getStringSet("custom_presets", emptySet())?.toMutableSet() ?: mutableSetOf()
+            if (set.remove(toDelete)) {
+                val ed = prefs.edit().putStringSet("custom_presets", set)
+                for (b in 0 until 5) ed.remove("preset_${toDelete}_band_$b")
+                ed.apply()
+                allPresetNames.remove(toDelete)
+                (spinnerPresets.adapter as ArrayAdapter<String>).notifyDataSetChanged()
+                btnFlat.performClick()
+                Toast.makeText(this, "Deleted preset '$toDelete'", Toast.LENGTH_SHORT).show()
+            }
         }
 
         AlertDialog.Builder(this)
@@ -867,6 +909,7 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.isExtendingParty = false
             }
         }
+        applyEffectiveEqualizerState()
         updateStatsUI()
     }
 
@@ -1038,7 +1081,7 @@ class MainActivity : AppCompatActivity() {
                 val qVal = quantizeTarget(value)
                 AudioNative.nativeSetTargetBufferMs(qVal)
                 syncAllTargetBufferSliders(qVal, fromSlider = s)
-                binding.rbBufCustom.isChecked = true
+                syncAllBufferModeRadioGroups("CUSTOM")
                 if (!suppressSync) binding.rbProfileCustom.isChecked = true
                 onLocalSettingChanged()
             }
@@ -1048,35 +1091,55 @@ class MainActivity : AppCompatActivity() {
         binding.sliderPartyHostTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
         binding.sliderPartyJoinTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
 
-        // Buffer presets radio group
-        binding.rgBufferMode.setOnCheckedChangeListener { _, checkedId ->
-            if (suppressSync) return@setOnCheckedChangeListener
-            binding.rbProfileCustom.isChecked = true
-            when (checkedId) {
-                R.id.rbBufLow -> {
-                    AudioNative.nativeSetTargetBufferMs(20f)
-                    AudioNative.nativeSetAutoMode(false)
-                    syncAllTargetBufferSliders(20f)
-                }
-                R.id.rbBufMed -> {
-                    AudioNative.nativeSetTargetBufferMs(40f)
-                    AudioNative.nativeSetAutoMode(false)
-                    syncAllTargetBufferSliders(40f)
-                }
-                R.id.rbBufHigh -> {
-                    AudioNative.nativeSetTargetBufferMs(80f)
-                    AudioNative.nativeSetAutoMode(false)
-                    syncAllTargetBufferSliders(80f)
-                }
-                R.id.rbBufAuto -> {
-                    AudioNative.nativeSetAutoMode(true)
-                }
-                R.id.rbBufCustom -> {
-                    AudioNative.nativeSetAutoMode(false)
+        // Buffer presets radio groups (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
+        var updatingBufferGroups = false
+        val setupBufferGroup: (android.widget.RadioGroup, Int, Int, Int, Int, Int) -> Unit = { group, lowId, medId, highId, autoId, customId ->
+            group.setOnCheckedChangeListener { _, checkedId ->
+                if (updatingBufferGroups) return@setOnCheckedChangeListener
+                updatingBufferGroups = true
+                try {
+                    when (checkedId) {
+                        lowId -> {
+                            AudioNative.nativeSetTargetBufferMs(20f)
+                            AudioNative.nativeSetAutoMode(false)
+                            syncAllTargetBufferSliders(20f)
+                            syncAllBufferModeRadioGroups("LOW")
+                        }
+                        medId -> {
+                            AudioNative.nativeSetTargetBufferMs(40f)
+                            AudioNative.nativeSetAutoMode(false)
+                            syncAllTargetBufferSliders(40f)
+                            syncAllBufferModeRadioGroups("MEDIUM")
+                        }
+                        highId -> {
+                            AudioNative.nativeSetTargetBufferMs(80f)
+                            AudioNative.nativeSetAutoMode(false)
+                            syncAllTargetBufferSliders(80f)
+                            syncAllBufferModeRadioGroups("HIGH")
+                        }
+                        autoId -> {
+                            AudioNative.nativeSetAutoMode(true)
+                            syncAllBufferModeRadioGroups("AUTO")
+                        }
+                        customId -> {
+                            AudioNative.nativeSetAutoMode(false)
+                            syncAllBufferModeRadioGroups("CUSTOM")
+                        }
+                    }
+                    if (!suppressSync) {
+                        binding.rbProfileCustom.isChecked = true
+                        onLocalSettingChanged()
+                    }
+                } finally {
+                    updatingBufferGroups = false
                 }
             }
-            onLocalSettingChanged()
         }
+
+        setupBufferGroup(binding.rgBufferMode, R.id.rbBufLow, R.id.rbBufMed, R.id.rbBufHigh, R.id.rbBufAuto, R.id.rbBufCustom)
+        setupBufferGroup(binding.rgServeBufferMode, R.id.rbServeBufLow, R.id.rbServeBufMed, R.id.rbServeBufHigh, R.id.rbServeBufAuto, R.id.rbServeBufCustom)
+        setupBufferGroup(binding.rgPartyHostBufferMode, R.id.rbPartyHostBufLow, R.id.rbPartyHostBufMed, R.id.rbPartyHostBufHigh, R.id.rbPartyHostBufAuto, R.id.rbPartyHostBufCustom)
+        setupBufferGroup(binding.rgPartyJoinBufferMode, R.id.rbPartyJoinBufLow, R.id.rbPartyJoinBufMed, R.id.rbPartyJoinBufHigh, R.id.rbPartyJoinBufAuto, R.id.rbPartyJoinBufCustom)
 
         // Audio Profile / Focus radio group
         binding.rgAudioProfile.setOnCheckedChangeListener { _, checkedId ->
@@ -1531,6 +1594,7 @@ class MainActivity : AppCompatActivity() {
         // Start / Stop Player Button (Strictly Normal 1-to-1 Stream: Relaying is OFF)
         binding.btnToggleStream.setOnClickListener {
             if (AudioStreamService.isStreaming) {
+                userManuallyStoppedPlayer = true
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_STOP
                 }
@@ -1542,6 +1606,7 @@ class MainActivity : AppCompatActivity() {
                     refreshServiceButtonState()
                 }, 500L)
             } else {
+                userManuallyStoppedPlayer = false
                 AudioNative.nativeSetPartyRelay(false)
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
@@ -1710,13 +1775,14 @@ class MainActivity : AppCompatActivity() {
                 AudioNative.nativeSetTargetBufferMs(buf)
             }
             if (json.has("buffer_mode")) {
-                when (json.getString("buffer_mode")) {
-                    "LOW" -> binding.rbBufLow.isChecked = true
-                    "MEDIUM" -> binding.rbBufMed.isChecked = true
-                    "HIGH" -> binding.rbBufHigh.isChecked = true
-                    "AUTO" -> binding.rbBufAuto.isChecked = true
-                    else -> binding.rbBufCustom.isChecked = true
+                val mode = when (json.getString("buffer_mode")) {
+                    "LOW" -> "LOW"
+                    "MEDIUM" -> "MEDIUM"
+                    "HIGH" -> "HIGH"
+                    "AUTO" -> "AUTO"
+                    else -> "CUSTOM"
                 }
+                syncAllBufferModeRadioGroups(mode)
             }
             if (json.has("auto_buffer")) {
                 AudioNative.nativeSetAutoMode(json.getBoolean("auto_buffer"))
@@ -1794,6 +1860,11 @@ class MainActivity : AppCompatActivity() {
 
             val lowLatency = binding.rbEngineOboe.isChecked && !binding.switchAudioFx.isChecked
             AudioNative.nativeSetLowLatencyMode(lowLatency)
+
+            if (json.optBoolean("pc_streaming", false) && !AudioStreamService.isStreaming && !AudioStreamService.isServing && !userManuallyStoppedPlayer) {
+                Log.i(TAG, "PC started streaming; auto-starting speaker player")
+                binding.btnToggleStream.performClick()
+            }
         } finally {
             suppressSync = false
         }

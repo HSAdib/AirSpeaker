@@ -1551,6 +1551,7 @@ class PhoneSpeakerApp:
         if hasattr(self, "party_host_frame"):
             self.party_host_frame.pack(fill="both", expand=True)
         self._refresh_party_qr()
+        self._on_eq_changed()
 
     def _enter_party_join_mode(self) -> None:
         self._party_view_state = "JOIN"
@@ -1567,6 +1568,7 @@ class PhoneSpeakerApp:
         self._refresh_discovered_hosts_ui()
         if not self._party_joined_active and hasattr(self, "party_extend_card"):
             self.party_extend_card.pack_forget()
+        self._on_eq_changed()
 
     def _back_to_party_chooser(self) -> None:
         if self._party_streaming:
@@ -1589,6 +1591,7 @@ class PhoneSpeakerApp:
             self.party_extend_details_frame.pack_forget()
         if hasattr(self, "party_chooser_frame"):
             self.party_chooser_frame.pack(fill="both", expand=True)
+        self._on_eq_changed()
 
     def _toggle_party_extend_pc(self) -> None:
         active = not self.party_extend_var.get()
@@ -2025,6 +2028,7 @@ class PhoneSpeakerApp:
             "volume_gain": self.volume_gain_var.get(),
             "muted": self.muted_var.get(),
             "pc_name": socket.gethostname(),
+            "pc_streaming": bool(self._streaming),
             "audio_output_engine": self._phone_audio_engine,
             "enable_audio_effects": self._phone_audio_fx,
             "exclusive_audio_mode": self._phone_exclusive_mode,
@@ -2401,6 +2405,7 @@ class PhoneSpeakerApp:
         self._refresh_audio_devices()
         self._refresh_pc_outputs()
 
+        self.direction_var.set("FULL_DUPLEX" if self._play_active else "PC_TO_PHONE")
         direction = self.direction_var.get()
         target_ip, target_port = self._sanitize_ip_and_port()
         if self._control_listener and target_ip:
@@ -2409,11 +2414,10 @@ class PhoneSpeakerApp:
             if not target_ip and self._party_devices:
                 target_ip = next(iter(self._party_devices))
             if not target_ip:
-                target_ip = "127.0.0.1"
+                target_ip = "255.255.255.255"
         else:
-            if direction in ("PC_TO_PHONE", "FULL_DUPLEX") and not target_ip:
-                messagebox.showwarning("PhoneSpeaker", "Please enter the phone's IP address or select a discovered phone.")
-                return
+            if not target_ip:
+                target_ip = "255.255.255.255"
 
         codec = self.codec_var.get()
         bitrate = int(self.bitrate_var.get()) * 1000
@@ -2438,54 +2442,53 @@ class PhoneSpeakerApp:
                 if not self._party_streaming:
                     self._udp_sender.set_party_mode(False)
         else:
-            # 1. Start PC -> Phone Stream if in PC_TO_PHONE or FULL_DUPLEX
-            if direction in ("PC_TO_PHONE", "FULL_DUPLEX"):
-                if codec == CODEC_OPUS:
-                    self._opus_encoder = OpusEncoder(bitrate=bitrate, frame_ms=frame_ms)
-                    if not self._opus_encoder.available:
-                        codec = CODEC_PCM16
-                        self._opus_encoder = None
-                else:
+            # Unconditionally start PC -> Phone Stream whenever _start_streaming is called
+            if codec == CODEC_OPUS:
+                self._opus_encoder = OpusEncoder(bitrate=bitrate, frame_ms=frame_ms)
+                if not self._opus_encoder.available:
+                    codec = CODEC_PCM16
                     self._opus_encoder = None
+            else:
+                self._opus_encoder = None
 
-                if codec == CODEC_PCM16 and frame_ms != 5:
-                    frame_ms = 5
-                    self.frame_ms_var.set("5")
+            if codec == CODEC_PCM16 and frame_ms != 5:
+                frame_ms = 5
+                self.frame_ms_var.set("5")
 
-                self._audio_queue = AudioQueue()
+            self._audio_queue = AudioQueue()
 
-                self._udp_sender = UDPSender(
-                    audio_queue=self._audio_queue,
-                    opus_encoder=self._opus_encoder,
-                    on_stats=self._on_pps_update,
-                )
-                self._udp_sender.set_party_mode(as_party or self.party_mode_var.get())
-                self._udp_sender.configure(target_ip, target_port, codec, frame_ms, bind_ip=bind_ip)
-                if as_party or self.party_mode_var.get():
-                    for dev_ip, dev_info in self._party_devices.items():
-                        self._udp_sender.add_party_target(dev_ip, dev_info.get("port", AUDIO_PORT))
-                self._udp_sender.set_routing_and_gain(True, self.volume_gain_var.get(), self.muted_var.get())
-                self._udp_sender.start()
-                self._on_eq_changed()
+            self._udp_sender = UDPSender(
+                audio_queue=self._audio_queue,
+                opus_encoder=self._opus_encoder,
+                on_stats=self._on_pps_update,
+            )
+            self._udp_sender.set_party_mode(as_party or self.party_mode_var.get())
+            self._udp_sender.configure(target_ip, target_port, codec, frame_ms, bind_ip=bind_ip)
+            if as_party or self.party_mode_var.get():
+                for dev_ip, dev_info in self._party_devices.items():
+                    self._udp_sender.add_party_target(dev_ip, dev_info.get("port", AUDIO_PORT))
+            self._udp_sender.set_routing_and_gain(True, self.volume_gain_var.get(), self.muted_var.get())
+            self._udp_sender.start()
+            self._on_eq_changed()
 
-                # Audio capture device
-                dev_idx = None
-                sel = self.audio_dev_combo.current()
-                if sel >= 1 and (sel - 1) < len(self._audio_devices):
-                    dev_idx = self._audio_devices[sel - 1]["index"]
+            # Audio capture device
+            dev_idx = None
+            sel = self.audio_dev_combo.current()
+            if sel >= 1 and (sel - 1) < len(self._audio_devices):
+                dev_idx = self._audio_devices[sel - 1]["index"]
 
-                self._queue_adapter = _QueueAdapter(self._audio_queue, mirror_callback=None)
-                self._audio_capture = AudioCapture(
-                    device_index=dev_idx,
-                    output_queue=self._queue_adapter,
-                    on_error=self._on_audio_error,
-                    frame_ms=frame_ms,
-                )
-                ok = self._audio_capture.start()
-                if not ok:
-                    self._stop_streaming()
-                    self._status_set("CAPTURE ERROR", ERROR_COLOR)
-                    return
+            self._queue_adapter = _QueueAdapter(self._audio_queue, mirror_callback=None)
+            self._audio_capture = AudioCapture(
+                device_index=dev_idx,
+                output_queue=self._queue_adapter,
+                on_error=self._on_audio_error,
+                frame_ms=frame_ms,
+            )
+            ok = self._audio_capture.start()
+            if not ok:
+                self._stop_streaming()
+                self._status_set("CAPTURE ERROR", ERROR_COLOR)
+                return
 
         self._streaming = True
         if as_party:
@@ -2502,6 +2505,7 @@ class PhoneSpeakerApp:
                 activebackground="#550000", activeforeground=ERROR_COLOR
             )
 
+        self._on_eq_changed()
         self._update_combined_status()
         self._refresh_party_ui()
         logger.info("Streaming started (as_party=%s, target=%s:%d)", as_party, target_ip, target_port)
@@ -2552,6 +2556,7 @@ class PhoneSpeakerApp:
             self.pps_var.set("TX Packets: 0/s")
             self._level_canvas.coords(self._level_bar, 0, 0, 0, 12)
 
+        self._on_eq_changed()
         self._update_combined_status()
         self._refresh_party_ui()
         logger.info("Streaming stopped (from_party=%s, normal=%s, party=%s)", from_party, self._normal_streaming, self._party_streaming)
@@ -2865,6 +2870,12 @@ class PhoneSpeakerApp:
                     elif kind == "config_sync":
                         sender_ip = data.get("_sender_ip")
                         if sender_ip:
+                            if self._manual_ip_override is None and self.ip_var.get().strip() != sender_ip:
+                                self.ip_var.set(sender_ip)
+                                if self._control_listener:
+                                    self._control_listener.set_target_ip(sender_ip)
+                                if self._streaming and self._udp_sender:
+                                    self._udp_sender.update_target(sender_ip, int(self.ip_port_var.get() or AUDIO_PORT))
                             if data.get("party_join") or (self._party_view_state == "HOST" and self.party_mode_var.get()):
                                 self._register_party_device(sender_ip, data.get("device", "Android Phone"), data.get("audio_port", AUDIO_PORT), force=True)
                             if data.get("party_mode") or data.get("party_host") or data.get("role") == "HOST":
@@ -2958,21 +2969,29 @@ class PhoneSpeakerApp:
 
                         if not is_ip_focused and self._manual_ip_override is None:
                             current_ip = self.ip_var.get().strip()
-                            if not self._streaming or not current_ip:
-                                should_update_ip = (not current_ip) or (current_ip not in candidates)
-                                if not should_update_ip and active_adapter_ip:
-                                    act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
-                                    if not current_ip.startswith(act_prefix) and best_ip.startswith(act_prefix):
-                                        should_update_ip = True
+                            should_update_ip = (
+                                not current_ip
+                                or current_ip in ("127.0.0.1", "0.0.0.0", "255.255.255.255")
+                                or (current_ip not in candidates)
+                            )
+                            if not should_update_ip and active_adapter_ip:
+                                act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
+                                if not current_ip.startswith(act_prefix) and best_ip.startswith(act_prefix):
+                                    should_update_ip = True
 
-                                if should_update_ip:
-                                    old_ip = current_ip
-                                    self.ip_var.set(best_ip)
-                                    if old_ip != best_ip or not old_ip:
-                                        try:
-                                            send_control_message(best_ip, self._get_current_config(), CONTROL_PORT)
-                                        except Exception:
-                                            pass
+                            if should_update_ip:
+                                old_ip = current_ip
+                                self.ip_var.set(best_ip)
+                                if self._control_listener:
+                                    self._control_listener.set_target_ip(best_ip)
+                                if self._streaming and self._udp_sender:
+                                    self._udp_sender.update_target(best_ip, int(self.ip_port_var.get() or AUDIO_PORT))
+                                    self._update_combined_status()
+                                if old_ip != best_ip or not old_ip:
+                                    try:
+                                        send_control_message(best_ip, self._get_current_config(), CONTROL_PORT)
+                                    except Exception:
+                                        pass
 
                     elif kind == "stats":
                         s = data

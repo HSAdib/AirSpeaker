@@ -73,7 +73,6 @@ jobs:
           fi
           echo "Selected APK: $APK_PATH"
           cp "$APK_PATH" PhoneSpeaker.v2.1.apk
-          cp "$APK_PATH" "PhoneSpeaker v2.apk"
           sha256sum PhoneSpeaker.v2.1.apk | tee PhoneSpeaker.v2.1.apk.sha256
 
       - name: Upload Android APK Artifact
@@ -82,7 +81,6 @@ jobs:
           name: PhoneSpeaker-v2.1-APK
           path: |
             PhoneSpeaker.v2.1.apk
-            PhoneSpeaker v2.apk
 
   # ====================================================
   # 2. WINDOWS BUILD JOB (Python 3.11, Tests & PyInstaller)
@@ -112,10 +110,12 @@ jobs:
           cd phonespeaker-pc
           python build_exe.py
 
-      - name: Package Windows Artifact
+      - name: Verify Windows Artifact & Generate SHA256
         shell: pwsh
         run: |
-          Copy-Item "PhoneSpeaker.v2.exe" "PhoneSpeaker.v2.1.exe" -Force
+          if (-not (Test-Path "PhoneSpeaker.v2.1.exe")) {
+            Copy-Item "phonespeaker-pc/dist/PhoneSpeaker v2.exe" "PhoneSpeaker.v2.1.exe" -Force
+          }
           Get-FileHash -Algorithm SHA256 "PhoneSpeaker.v2.1.exe" | Out-File "PhoneSpeaker.v2.1.exe.sha256"
           Write-Host "Windows EXE SHA256:"
           Get-Content "PhoneSpeaker.v2.1.exe.sha256"
@@ -126,7 +126,6 @@ jobs:
           name: PhoneSpeaker-v2.1-EXE
           path: |
             PhoneSpeaker.v2.1.exe
-            PhoneSpeaker.v2.exe
             PhoneSpeaker-v2-Linux-Installer.run
             PhoneSpeaker-v2-macOS-Installer.command
 
@@ -232,7 +231,7 @@ jobs:
       - name: Populate Release Artifacts from Repository
         run: |
           mkdir -p release-artifacts
-          for f in "PhoneSpeaker.v2.1.exe" "PhoneSpeaker.v2.exe" "PhoneSpeaker.v2.1.apk" "PhoneSpeaker v2.apk" \
+          for f in "PhoneSpeaker.v2.1.exe" "PhoneSpeaker.v2.1.apk" \
                    "PhoneSpeaker-v2-Linux-Installer.run" "PhoneSpeaker-v2-macOS-Installer.command" \
                    "PhoneSpeaker-v2-macOS.dmg" "PhoneSpeaker-v2-iOS.ipa" "install_linux.sh"; do
             if [ -f "$f" ] && [ ! -f "release-artifacts/$f" ]; then

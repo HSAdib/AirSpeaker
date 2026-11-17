@@ -89,6 +89,7 @@ private:
     // Thread Synchronization
     // ---------------------------------------------------------
     alignas(64) std::atomic<bool> mIsRunning{false};
+    alignas(64) std::atomic<bool> mStreamResetPending{false};
     std::thread mDecodeThread;
     std::mutex mConditionMutex;
     std::condition_variable mCondition;

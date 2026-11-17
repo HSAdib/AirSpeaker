@@ -73,7 +73,8 @@ void JitterBuffer::pushPacket(const AudioPacket& packet) {
     }
 
     int64_t nowMs = getNowMs();
-    mLastPacketRecvTimeMs.store(nowMs, std::memory_order_relaxed);
+    int64_t prevRecvMs = mLastPacketRecvTimeMs.exchange(nowMs, std::memory_order_relaxed);
+    int64_t gapSinceLastPacketMs = (prevRecvMs > 0) ? (nowMs - prevRecvMs) : 0;
 
     // Calculate packets-per-second (PPS) atomically
     mRxPacketsInterval.fetch_add(1, std::memory_order_relaxed);
@@ -91,9 +92,18 @@ void JitterBuffer::pushPacket(const AudioPacket& packet) {
         std::lock_guard<std::mutex> lock(mPacketMutex);
 
         uint32_t expected = mWorkerExpectedSeq.load(std::memory_order_relaxed);
+
+        // Detect sender restart (seq reset to 1..15) or stream pause > 600ms
+        if (gapSinceLastPacketMs > 600 || (expected > 30 && packet.header.seq < 15)) {
+            mPacketMap.clear();
+            mWorkerExpectedSeq.store(packet.header.seq, std::memory_order_relaxed);
+            mStreamResetPending.store(true, std::memory_order_release);
+            expected = packet.header.seq;
+        }
+
         if (expected > 0) {
             int32_t diff = seqDiff(packet.header.seq, expected);
-            if (diff < 0 && diff > -1000) {
+            if (diff < 0 && diff > -200) {
                 mLateCount.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
@@ -151,7 +161,8 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         mCurrentRxPps.store(0, std::memory_order_relaxed);
     }
 
-    if (!mHasStarted || sinceLastRxMs > 800) {
+    bool resetReq = mStreamResetPending.exchange(false, std::memory_order_acq_rel);
+    if (!mHasStarted || resetReq || sinceLastRxMs > 800) {
         mHasStarted = false;
         mIsPrebuffering = true;
         std::lock_guard<std::mutex> lock(mPacketMutex);
@@ -227,7 +238,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             // If sequence is far behind, catch up to prevent stale playout
             uint32_t earliestSeq = mPacketMap.begin()->first;
             int32_t gap = seqDiff(earliestSeq, mExpectedSeq);
-            if (gap > 4 || (mConsecutiveLosses >= 2 && gap > 0)) {
+            if (gap > 4 || gap < -20 || (mConsecutiveLosses >= 2 && gap != 0)) {
                 mExpectedSeq = earliestSeq;
                 mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
             }
@@ -251,6 +262,12 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         }
 
         if (has_packet) {
+            mCurrentCodec = pkt.header.codec;
+            mActiveCodec.store(mCurrentCodec, std::memory_order_relaxed);
+            if (pkt.header.sample_rate_div100 > 0) {
+                mSampleRate = pkt.header.sample_rate_div100 * 100;
+            }
+
             // Normal decode
             int total_frames = 0;
             const int pktChannels = (pkt.header.channels == 1) ? 1 : 2;

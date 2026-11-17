@@ -30,7 +30,7 @@ _DEFAULTS: Dict[str, Any] = {
     "phone_ip": "",
     "phone_port": 5004,
     "audio_profile": "BALANCED",
-    "codec": 1,          # Unified default: 1=Opus, 0=PCM16
+    "codec": 0,          # Unified default: 0=PCM16, 1=Opus
     "bitrate": 192000,
     "opus_bitrate_kbps": 192,
     "frame_ms": 5,

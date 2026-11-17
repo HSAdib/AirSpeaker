@@ -36,8 +36,8 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 
 | Platform | Package / Installer | Description | Direct 1-Click Download | Package Registry |
 |---|---|---|---|---|
-| **Windows 11 / 10** | `PhoneSpeaker.v2.1.exe` *(or `PhoneSpeaker v2.exe`)* | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **Android (8.0–15+)** | `PhoneSpeaker.v2.1.apk` *(or `PhoneSpeaker v2.apk`)* | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Windows 11 / 10** | `PhoneSpeaker.v2.1.exe` | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Android (8.0–15+)** | `PhoneSpeaker.v2.1.apk` | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 | **Linux (All Distros)** | `PhoneSpeaker-v2-Linux-Installer.run` | Self-extracting bundle for PipeWire & PulseAudio | [**Download `.run`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-Linux-Installer.run) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 | **macOS (Apple Silicon & Intel)** | `PhoneSpeaker-v2-macOS.dmg` | Drag-and-drop macOS Disk Image (.app bundle) | [**Download DMG**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS.dmg) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
 | **macOS (One-Click Script)** | `PhoneSpeaker-v2-macOS-Installer.command` | Interactive terminal installer & dependency manager | [**Download `.command`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS-Installer.command) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
@@ -58,11 +58,11 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 - **Supported Architectures:** Compatible with all **ARM64** (`arm64-v8a`), **ARMv7** (`armeabi-v7a`), **x86_64**, and **x86** devices (smartphones, tablets, Android TV, and emulators).
 
 **Download APK:**
-- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.apk`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk) *(local build filename: `PhoneSpeaker v2.apk`)*
+- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.apk`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk)
 - 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/PhoneSpeaker/releases)
 
 **How to Install on Phone:**
-- **Direct File Transfer (Simplest):** Send `PhoneSpeaker v2.apk` to your phone via Google Drive, Quick Share, Telegram, or USB cable. Tap the downloaded file and select *Install* (allow *Install unknown apps* for your browser/file manager if prompted).
+- **Direct File Transfer (Simplest):** Send `PhoneSpeaker.v2.1.apk` to your phone via Google Drive, Quick Share, Telegram, or USB cable. Tap the downloaded file and select *Install* (allow *Install unknown apps* for your browser/file manager if prompted).
 - **Windows Helper Script:** Run the included PowerShell helper:
   ```powershell
   .\install_apk.ps1
@@ -72,7 +72,7 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
   ```powershell
   adb pair <phone_ip>:<pairing_port>
   adb connect <phone_ip>:<connect_port>
-  adb install -r "PhoneSpeaker v2.apk"
+  adb install -r "PhoneSpeaker.v2.1.apk"
   ```
 
 > **Permissions:** PhoneSpeaker requests **MediaProjection** (when streaming internal mobile audio in SERVE mode), **Notifications** (to keep foreground streaming active), and a **Battery Optimization Exemption** (strongly recommended so Android doesn't throttle audio playback when the screen is locked).
@@ -83,7 +83,7 @@ Requires Android Studio / SDK 34, NDK, CMake 3.22.1, and JDK 17 (CMake automatic
 cd PhoneSpeakerAndroid
 .\gradlew.bat assembleDebug
 ```
-The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-debug.apk` and copied to the root as `PhoneSpeaker v2.apk`.
+The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-debug.apk` and copied to the root as `PhoneSpeaker.v2.1.apk`.
 
 ---
 
@@ -93,12 +93,12 @@ The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-deb
 - **Windows 11** & **Windows 10** (64-bit).
 
 **Download Windows Binary:**
-- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.exe`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe) *(local build filename: `PhoneSpeaker.v2.exe`)*
+- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.exe`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe)
 - 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/PhoneSpeaker/releases)
 
 **How to Run:**
 - **No installation required!** `PhoneSpeaker.v2.1.exe` is a standalone, single-file executable with bundled 64-bit `opus.dll` and zero external dependencies.
-- Simply double-click `PhoneSpeaker v2.exe` to run.
+- Simply double-click `PhoneSpeaker.v2.1.exe` to run.
 - **Windows Firewall:** Click **Add Firewall Rules** in the app's *Virtual Device* tab, or run in Administrator PowerShell:
   ```powershell
   foreach ($p in 5004,5005) {
@@ -113,7 +113,7 @@ python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 .\.venv\Scripts\python build_exe.py
 ```
-*(Automatically fetches `opus.dll`, builds `PhoneSpeaker v2.exe`, and packages the self-extracting Linux installer)*.
+*(Automatically fetches `opus.dll`, builds `PhoneSpeaker.v2.1.exe`, and packages the self-extracting Linux installer)*.
 
 ---
 
@@ -138,9 +138,9 @@ curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_lin
 
 > **What this one-liner does automatically:**
 > 1. Detects your package manager (`apt`, `pacman`, or `dnf`) and ensures dependencies (`python3-tk`, `libopus0`, `pulseaudio-utils`, `portaudio`) are present.
-> 2. Downloads the pre-built `PhoneSpeaker v2.0` bundle from GitHub Releases.
+> 2. Downloads the pre-built `PhoneSpeaker v2.1` bundle from GitHub Releases.
 > 3. Installs the application to `~/.local/opt/phonespeaker`.
-> 4. Adds **PhoneSpeaker v2.0 Studio** with icon to your desktop application menu.
+> 4. Adds **PhoneSpeaker v2.1 Studio** with icon to your desktop application menu.
 > 5. Adds the `phonespeaker` terminal command and launches the app.
 
 ---
@@ -176,14 +176,14 @@ chmod +x PhoneSpeaker-v2-Linux-Installer.run
 ---
 
 #### Launching on Linux:
-- **Application Menu:** Open your desktop app launcher and click **PhoneSpeaker v2.0 Studio**.
+- **Application Menu:** Open your desktop app launcher and click **PhoneSpeaker v2.1 Studio**.
 - **Terminal:** Type:
   ```bash
   phonespeaker
   ```
 
 #### Uninstalling on Linux:
-To completely remove **PhoneSpeaker v2.0 Studio**, its desktop icon, configuration files, and terminal command on any Linux distribution, run:
+To completely remove **PhoneSpeaker v2.1 Studio**, its desktop icon, configuration files, and terminal command on any Linux distribution, run:
 ```bash
 pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
 rm -rf ~/.local/opt/phonespeaker ~/.local/bin/phonespeaker ~/.local/share/applications/phonespeaker.desktop ~/.local/share/icons/phonespeaker.png ~/.config/PhoneSpeaker
@@ -289,7 +289,7 @@ Select your connected iPhone or iPad and press **Cmd + R** to run!
 python phonespeaker-pc/tests/verify_pc.py
 ```
 
-Runs eleven checks: adapter filtering, PCM packet size, the Opus encoder, silence pacing, audio capture opening, sample-format conversion, a UDP localhost integration test, protocol v2.0 bidirectional settings sync, system-volume access, burst UDP packet reception, and multi-target Party Mode fan-out. Capture tests need a working audio device, so run them on a machine with sound.
+Runs fifteen checks: adapter filtering, PCM packet size, the Opus encoder, silence pacing, audio capture opening, sample-format conversion, a UDP localhost integration test, protocol v2.0 bidirectional settings sync, system-volume access, burst UDP packet reception, multi-target Party Mode fan-out, queue drop-oldest overflow policy, queue rapid producer stress, 5-band biquad DSP processing & limiting, and EqualizerManager preset/context lifecycle. Capture tests need a working audio device, so run them on a machine with sound.
 
 ### Firewall
 
@@ -329,6 +329,7 @@ sudo firewall-cmd --add-port=5004/udp --add-port=5005/udp --permanent && sudo fi
   - **Balanced Auto (BALANCED):** Opus 192 kbps, 5 ms frame, Auto Adaptive buffer (30 ms base), dynamically adjusts jitter buffer to match network conditions.
   - **Custom (CUSTOM):** Freely customize codec (Opus 10–320 kbps or Lossless PCM16 1536 kbps), frame size (5, 10, 20 ms), and buffer target (10–200 ms).
 - **Lossless PCM16** (1536 kbps, 48 kHz stereo) or **Opus** with selectable bitrates up to **320 kbps** (10, 24, 32, 64, 96, 128, 160, 192, 256, 320 kbps) with Studio Complexity 10 & Constrained VBR, and 5, 10, or 20 ms frames.
+- **🎛️ 5-Context + Universal 5-Band Studio Equalizer:** Independent 5-band biquad equalizers (60 Hz, 230 Hz, 910 Hz, 3.6 kHz, 14 kHz, -12 dB to +12 dB with soft-knee limiting) for PLAY, SERVE, PARTY HOST, and PARTY JOIN, plus a master Universal Device Equalizer in SETTINGS with independent TX (Host/Serve) and RX (Play/Join) routing checkmarks and custom user preset saving.
 - Any Windows or Linux playback format (float32, int16, int24, int32; 44.1, 48, 96 kHz) is converted to 48 kHz stereo, with stateful `soxr.ResampleStream` (HQ) eliminating all sample-boundary clicks and crackles.
 - Silence keep-alive keeps the phone's clock running when nothing is playing.
 
@@ -516,6 +517,7 @@ PCM16 uses 5 ms frames: 240 samples per channel, a 960-byte payload, 972 bytes o
 │   ├── src/
 │   │   ├── main.py                        # entry point
 │   │   ├── ui.py                          # Tk interface, Party Mode, sync engine, tray
+│   │   ├── equalizer.py                   # 5-band stereo biquad EQ DSP, presets & studio dialog
 │   │   ├── audio_capture.py               # WASAPI loopback / parec / CoreAudio capture
 │   │   ├── audio_output.py                # PC playback, phone-mic receiver
 │   │   ├── network.py                     # UDP sender, control listener, adapter filtering

@@ -311,7 +311,6 @@
                     android:id="@+id/rbPlayerCodecOpus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:checked="true"
                     android:text="Opus"
                     android:textColor="#FFFFFF"
                     android:fontFamily="monospace" />
@@ -321,6 +320,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="16dp"
+                    android:checked="true"
                     android:text="Lossless PCM16"
                     android:textColor="#FFFFFF"
                     android:fontFamily="monospace" />
@@ -377,48 +377,59 @@
                 android:id="@+id/rgBufferMode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp">
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal">
 
                 <RadioButton
                     android:id="@+id/rbBufLow"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="Low (20 ms) — Fast for Gaming &amp; Video"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="20ms"
                     android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textSize="11sp" />
 
                 <RadioButton
                     android:id="@+id/rbBufMed"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="Medium (40 ms) — Balanced Everyday"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="40ms"
                     android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textSize="11sp" />
 
                 <RadioButton
                     android:id="@+id/rbBufHigh"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="High (80 ms) — Smooth Music (No Dropouts)"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="80ms"
                     android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textSize="11sp" />
 
                 <RadioButton
                     android:id="@+id/rbBufAuto"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:checked="true"
-                    android:text="Auto (Adjusts Automatically)"
+                    android:fontFamily="monospace"
+                    android:text="Auto"
                     android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textSize="11sp" />
 
                 <RadioButton
                     android:id="@+id/rbBufCustom"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="Custom Buffer Size"
+                    android:layout_weight="1.2"
+                    android:fontFamily="monospace"
+                    android:text="Custom"
                     android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textSize="11sp" />
             </RadioGroup>
 
             <!-- Custom Target Buffer Slider -->
@@ -775,6 +786,65 @@
                 <TextView android:fontFamily="monospace" android:id="@+id/tvServeTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
             </LinearLayout>
 
+            <RadioGroup
+                android:id="@+id/rgServeBufferMode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/rbServeBufLow"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="20ms"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+
+                <RadioButton
+                    android:id="@+id/rbServeBufMed"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="40ms"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+
+                <RadioButton
+                    android:id="@+id/rbServeBufHigh"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="80ms"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+
+                <RadioButton
+                    android:id="@+id/rbServeBufAuto"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:checked="true"
+                    android:fontFamily="monospace"
+                    android:text="Auto"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+
+                <RadioButton
+                    android:id="@+id/rbServeBufCustom"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.2"
+                    android:fontFamily="monospace"
+                    android:text="Custom"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+            </RadioGroup>
+
             <com.google.android.material.slider.Slider
                 android:id="@+id/sliderServeTargetBuffer"
                 android:layout_width="match_parent"
@@ -1082,6 +1152,65 @@
                     <TextView android:fontFamily="monospace" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="PARTY HOST TARGET BUFFER:" android:textColor="#888888" android:textSize="11sp"/>
                     <TextView android:fontFamily="monospace" android:id="@+id/tvPartyHostTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
                 </LinearLayout>
+
+                <RadioGroup
+                    android:id="@+id/rgPartyHostBufferMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/rbPartyHostBufLow"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:text="20ms"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyHostBufMed"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:text="40ms"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyHostBufHigh"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:text="80ms"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyHostBufAuto"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:checked="true"
+                        android:fontFamily="monospace"
+                        android:text="Auto"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyHostBufCustom"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1.2"
+                        android:fontFamily="monospace"
+                        android:text="Custom"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+                </RadioGroup>
 
                 <com.google.android.material.slider.Slider
                     android:id="@+id/sliderPartyHostTargetBuffer"
@@ -1396,6 +1525,65 @@
                     <TextView android:fontFamily="monospace" android:id="@+id/tvPartyJoinTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
                 </LinearLayout>
 
+                <RadioGroup
+                    android:id="@+id/rgPartyJoinBufferMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/rbPartyJoinBufLow"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:text="20ms"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyJoinBufMed"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:text="40ms"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyJoinBufHigh"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:text="80ms"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyJoinBufAuto"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:checked="true"
+                        android:fontFamily="monospace"
+                        android:text="Auto"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <RadioButton
+                        android:id="@+id/rbPartyJoinBufCustom"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1.2"
+                        android:fontFamily="monospace"
+                        android:text="Custom"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+                </RadioGroup>
+
                 <com.google.android.material.slider.Slider
                     android:id="@+id/sliderPartyJoinTargetBuffer"
                     android:layout_width="match_parent"
@@ -1630,7 +1818,6 @@
                     android:id="@+id/rbCodecOpus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:checked="true"
                     android:text="Compressed (Opus — Recommended)"
                     android:textColor="#FFFFFF"
                     android:fontFamily="monospace" />
@@ -1639,6 +1826,7 @@
                     android:id="@+id/rbCodecPcm"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:checked="true"
                     android:text="Uncompressed (Lossless PCM16 48 kHz)"
                     android:textColor="#FFFFFF"
                     android:fontFamily="monospace" />

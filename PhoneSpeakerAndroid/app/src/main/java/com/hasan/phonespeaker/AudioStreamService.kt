@@ -381,7 +381,7 @@ class AudioStreamService : Service() {
             }
             if (json.has("volume_gain")) {
                 savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                AudioNative.nativeSetVolumeGain(1.0f)
+                AudioNative.nativeSetVolumeGain(if (savedVolumeGain > 0.01f) savedVolumeGain else 1.0f)
             }
             if (json.has("muted")) {
                 userMuted = json.getBoolean("muted")

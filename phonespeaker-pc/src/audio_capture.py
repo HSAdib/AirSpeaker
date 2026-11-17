@@ -246,6 +246,21 @@ def _list_linux_pulse_monitors() -> List[dict]:
                             devices.insert(0, entry)
                         else:
                             devices.append(entry)
+        if default_sink:
+            def_idx = f"pulse:{default_sink}.monitor"
+            existing = [d for d in devices if d.get("index") == def_idx]
+            if existing:
+                devices.remove(existing[0])
+                existing[0]["is_default"] = True
+                devices.insert(0, existing[0])
+            else:
+                devices.insert(0, {
+                    "index": def_idx,
+                    "name": f"Monitor: {default_sink}.monitor",
+                    "sample_rate": TARGET_RATE,
+                    "channels": TARGET_CHANNELS,
+                    "is_default": True,
+                })
     except Exception as exc:
         logger.debug("Error listing Linux PulseAudio/PipeWire monitors: %s", exc)
     return devices
@@ -408,7 +423,7 @@ class AudioCapture:
             "--format=s16le",
             f"--rate={TARGET_RATE}",
             f"--channels={TARGET_CHANNELS}",
-            "--latency-msec=15",
+            "--latency-msec=5",
         ]
         dev_arg = source_name if (source_name and source_name != "default") else "@DEFAULT_MONITOR@"
         cmd.append(f"--device={dev_arg}")
@@ -499,40 +514,35 @@ class AudioCapture:
                 else:
                     self._resampler = None
 
-                # Choose format: prefer float32, fall back to int16
-                try:
-                    self._pa.is_format_supported(
-                        self._in_rate,
-                        input_device=self._device_index,
-                        input_channels=self._in_channels,
-                        input_format=pyaudio.paFloat32,
-                    )
-                    self._in_format = pyaudio.paFloat32
-                except Exception:
-                    self._in_format = pyaudio.paInt16
-
                 # Chunk size in input frames
                 chunk = max(64, (self._in_rate * self._frame_ms) // 1000)
-
-                open_kwargs = dict(
-                    format=self._in_format,
-                    channels=self._in_channels,
-                    rate=self._in_rate,
-                    input=True,
-                    input_device_index=self._device_index,
-                    frames_per_buffer=chunk,
-                    stream_callback=self._callback,
-                )
-                try:
-                    # PyAudioWPatch exposes loopback endpoints directly as input devices
-                    self._stream = self._pa.open(**open_kwargs)
-                except Exception:
-                    # Fallback for legacy PyAudio WASAPI forks that require as_loopback=True (Windows PyAudioWPatch only)
-                    if hasattr(self._pa, "get_default_wasapi_loopback"):
-                        open_kwargs["as_loopback"] = True
+                self._stream = None
+                for fmt in (pyaudio.paFloat32, pyaudio.paInt16):
+                    open_kwargs = dict(
+                        format=fmt,
+                        channels=self._in_channels,
+                        rate=self._in_rate,
+                        input=True,
+                        input_device_index=self._device_index,
+                        frames_per_buffer=chunk,
+                        stream_callback=self._callback,
+                    )
+                    try:
                         self._stream = self._pa.open(**open_kwargs)
-                    else:
-                        raise
+                        self._in_format = fmt
+                        break
+                    except Exception:
+                        if hasattr(self._pa, "get_default_wasapi_loopback"):
+                            try:
+                                open_kwargs["as_loopback"] = True
+                                self._stream = self._pa.open(**open_kwargs)
+                                self._in_format = fmt
+                                break
+                            except Exception:
+                                continue
+                if self._stream is None:
+                    raise RuntimeError(f"Could not open audio capture device {self._device_index}")
+
                 self._stream.start_stream()
                 self._running = True
                 logger.info(
