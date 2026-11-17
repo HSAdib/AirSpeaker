@@ -19,8 +19,13 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.widget.ArrayAdapter
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.TextView
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.switchmaterial.SwitchMaterial
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
@@ -245,6 +250,327 @@ class MainActivity : AppCompatActivity() {
     private fun quantizeGain(value: Float): Float {
         val safe = if (value.isFinite()) value else 1.0f
         return safe.coerceIn(0f, 2.0f)
+    }
+
+    companion object {
+        val EQ_BAND_FREQS = intArrayOf(60, 230, 910, 3600, 14000)
+        val EQ_BAND_LABELS = arrayOf("60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz")
+        val BUILTIN_EQ_PRESETS: Map<String, FloatArray> = mapOf(
+            "Flat" to floatArrayOf(0f, 0f, 0f, 0f, 0f),
+            "Bass Boost" to floatArrayOf(6.5f, 4.0f, 0.0f, 1.0f, 1.5f),
+            "Vocal Crisp" to floatArrayOf(-2.0f, -1.0f, 3.5f, 5.0f, 2.0f),
+            "Gaming Footsteps" to floatArrayOf(-3.0f, 1.5f, 4.5f, 6.0f, 3.5f),
+            "Warm Studio" to floatArrayOf(3.5f, 2.5f, -0.5f, 1.5f, 2.5f),
+            "Treble Air" to floatArrayOf(0.0f, 0.0f, 1.0f, 4.0f, 7.0f)
+        )
+    }
+
+    private fun syncAllTargetBufferSliders(qVal: Float, fromSlider: com.google.android.material.slider.Slider? = null) {
+        val clamped = quantizeTarget(qVal)
+        val textStr = if (clamped % 1f == 0f) "${clamped.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", clamped)
+
+        val sliders = listOf(
+            binding.sliderTargetBuffer,
+            binding.sliderServeTargetBuffer,
+            binding.sliderPartyHostTargetBuffer,
+            binding.sliderPartyJoinTargetBuffer
+        )
+        for (s in sliders) {
+            if (s !== fromSlider && kotlin.math.abs(s.value - clamped) > 0.1f) {
+                s.value = clamped
+            }
+        }
+        binding.tvTargetBufferValue.text = textStr
+        binding.tvServeTargetBufferValue.text = textStr
+        binding.tvPartyHostTargetBufferValue.text = textStr
+        binding.tvPartyJoinTargetBufferValue.text = textStr
+    }
+
+    private fun applyEffectiveEqualizerState() {
+        val prefs = getSharedPreferences("PhoneSpeakerEQ", MODE_PRIVATE)
+        val univEnabled = prefs.getBoolean("universal_enabled", false)
+        val univApplyTx = prefs.getBoolean("universal_apply_tx", false)
+        val univApplyRx = prefs.getBoolean("universal_apply_rx", false)
+        val univBands = FloatArray(5) { i -> prefs.getFloat("universal_band_$i", 0f) }
+
+        // RX: Active between play & party_join
+        val isPartyJoin = binding.rbRoleJoin.isChecked
+        val rxKey = if (isPartyJoin) "party_join" else "play"
+        val rxModeEnabled = prefs.getBoolean("${rxKey}_enabled", false)
+        val rxModeBands = FloatArray(5) { i -> prefs.getFloat("${rxKey}_band_$i", 0f) }
+
+        val rxEffectiveEnabled = rxModeEnabled || (univEnabled && univApplyRx)
+        val rxEffectiveBands = FloatArray(5) { i ->
+            var sum = 0f
+            if (rxModeEnabled) sum += rxModeBands[i]
+            if (univEnabled && univApplyRx) sum += univBands[i]
+            sum.coerceIn(-12.0f, 12.0f)
+        }
+
+        // TX: Active between serve & party_host
+        val isPartyHost = binding.rbRoleHost.isChecked
+        val txKey = if (isPartyHost) "party_host" else "serve"
+        val txModeEnabled = prefs.getBoolean("${txKey}_enabled", false)
+        val txModeBands = FloatArray(5) { i -> prefs.getFloat("${txKey}_band_$i", 0f) }
+
+        val txEffectiveEnabled = txModeEnabled || (univEnabled && univApplyTx)
+        val txEffectiveBands = FloatArray(5) { i ->
+            var sum = 0f
+            if (txModeEnabled) sum += txModeBands[i]
+            if (univEnabled && univApplyTx) sum += univBands[i]
+            sum.coerceIn(-12.0f, 12.0f)
+        }
+
+        AudioNative.nativeSetEqBands(rxEffectiveEnabled, rxEffectiveBands)
+        InternalAudioStreamer.setOutboundEq(txEffectiveEnabled, txEffectiveBands)
+        updateEqButtonLabels()
+    }
+
+    private fun updateEqButtonLabels() {
+        val prefs = getSharedPreferences("PhoneSpeakerEQ", MODE_PRIVATE)
+        fun formatLabel(ctx: String, prefix: String): String {
+            val en = prefs.getBoolean("${ctx}_enabled", false)
+            val pr = prefs.getString("${ctx}_preset", "Flat") ?: "Flat"
+            return if (en) "[ 🎛️ $prefix: ON ($pr) ]" else "[ 🎛️ $prefix: OFF ]"
+        }
+        binding.btnEqualizerPlay.text = formatLabel("play", "PLAY EQUALIZER")
+        binding.btnEqualizerServe.text = formatLabel("serve", "SERVE EQUALIZER & PRESETS")
+        binding.btnEqualizerPartyHost.text = formatLabel("party_host", "PARTY HOST EQUALIZER & PRESETS")
+        binding.btnEqualizerPartyJoin.text = formatLabel("party_join", "PARTY JOINER EQUALIZER")
+        val uEn = prefs.getBoolean("universal_enabled", false)
+        val uPr = prefs.getString("universal_preset", "Flat") ?: "Flat"
+        binding.btnEqualizerUniversal.text = if (uEn) "[ 🎛️ UNIVERSAL 5-BAND EQUALIZER: ON ($uPr) ]" else "[ 🎛️ OPEN UNIVERSAL 5-BAND EQUALIZER & PRESETS ]"
+    }
+
+    private fun showEqualizerDialog(contextKey: String, title: String) {
+        val prefs = getSharedPreferences("PhoneSpeakerEQ", MODE_PRIVATE)
+        val currentEnabled = prefs.getBoolean("${contextKey}_enabled", false)
+        var currentPreset = prefs.getString("${contextKey}_preset", "Flat") ?: "Flat"
+        val currentBands = FloatArray(5) { i -> prefs.getFloat("${contextKey}_band_$i", 0f) }
+
+        val sv = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#080808"))
+            setPadding(32, 24, 32, 24)
+        }
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        sv.addView(layout)
+
+        // Title
+        val tvTitle = TextView(this).apply {
+            text = "🎛️ ${title.uppercase()}"
+            setTextColor(Color.parseColor("#00FF88"))
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvTitle)
+
+        // Switch
+        val swEnable = SwitchMaterial(this).apply {
+            text = "Enable Equalizer"
+            setTextColor(Color.WHITE)
+            isChecked = currentEnabled
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        layout.addView(swEnable)
+
+        // Preset selector
+        val customPresets = prefs.getStringSet("custom_presets", emptySet()) ?: emptySet()
+        val allPresetNames = ArrayList<String>()
+        allPresetNames.addAll(BUILTIN_EQ_PRESETS.keys)
+        allPresetNames.addAll(customPresets.sorted())
+        if (!allPresetNames.contains("Custom")) allPresetNames.add("Custom")
+
+        val spinnerPresets = Spinner(this).apply {
+            setBackgroundColor(Color.parseColor("#18222C"))
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, allPresetNames)
+            setAdapter(adapter)
+            val selIdx = allPresetNames.indexOf(currentPreset).coerceAtLeast(0)
+            setSelection(selIdx)
+        }
+        layout.addView(spinnerPresets)
+
+        // Buttons row: Save Preset, Flat
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 16, 0, 16)
+        }
+        val btnSavePreset = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+            text = "💾 Save Preset"
+            setTextColor(Color.parseColor("#00EEEE"))
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        val btnFlat = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+            text = "↺ Flat"
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        btnRow.addView(btnSavePreset)
+        btnRow.addView(btnFlat)
+        layout.addView(btnRow)
+
+        // 5 Sliders
+        val sliders = ArrayList<com.google.android.material.slider.Slider>()
+        val valLabels = ArrayList<TextView>()
+
+        for (i in 0 until 5) {
+            val bandRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 4, 0, 4)
+            }
+            val lblName = TextView(this).apply {
+                text = EQ_BAND_LABELS[i]
+                setTextColor(Color.parseColor("#38B6FF"))
+                textSize = 11f
+                typeface = android.graphics.Typeface.MONOSPACE
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
+            }
+            val slider = com.google.android.material.slider.Slider(this).apply {
+                valueFrom = -12f
+                valueTo = 12f
+                stepSize = 0.5f
+                value = currentBands[i].coerceIn(-12f, 12f)
+                thumbTintList = ColorStateList.valueOf(Color.WHITE)
+                trackActiveTintList = ColorStateList.valueOf(Color.parseColor("#00FF88"))
+                trackInactiveTintList = ColorStateList.valueOf(Color.parseColor("#444444"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 3f)
+            }
+            val lblVal = TextView(this).apply {
+                text = String.format(java.util.Locale.US, "%+.1f dB", slider.value)
+                setTextColor(Color.parseColor("#00FF88"))
+                textSize = 11f
+                typeface = android.graphics.Typeface.MONOSPACE
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
+            }
+            sliders.add(slider)
+            valLabels.add(lblVal)
+            bandRow.addView(lblName)
+            bandRow.addView(slider)
+            bandRow.addView(lblVal)
+            layout.addView(bandRow)
+        }
+
+        var isUpdatingUi = false
+
+        fun saveDialogState() {
+            val editor = prefs.edit()
+            editor.putBoolean("${contextKey}_enabled", swEnable.isChecked)
+            editor.putString("${contextKey}_preset", currentPreset)
+            for (idx in 0 until 5) {
+                editor.putFloat("${contextKey}_band_$idx", sliders[idx].value)
+            }
+            editor.apply()
+            applyEffectiveEqualizerState()
+        }
+
+        swEnable.setOnCheckedChangeListener { _, isChecked ->
+            if (!isUpdatingUi) {
+                saveDialogState()
+            }
+        }
+
+        for (i in 0 until 5) {
+            sliders[i].addOnChangeListener { _, value, fromUser ->
+                valLabels[i].text = String.format(java.util.Locale.US, "%+.1f dB", value)
+                if (fromUser && !isUpdatingUi) {
+                    currentPreset = "Custom"
+                    val customIdx = allPresetNames.indexOf("Custom")
+                    if (customIdx >= 0 && spinnerPresets.selectedItemPosition != customIdx) {
+                        isUpdatingUi = true
+                        spinnerPresets.setSelection(customIdx)
+                        isUpdatingUi = false
+                    }
+                    if (!swEnable.isChecked) {
+                        swEnable.isChecked = true
+                    }
+                    saveDialogState()
+                }
+            }
+        }
+
+        spinnerPresets.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (isUpdatingUi) return
+                val selectedName = allPresetNames[position]
+                if (selectedName == "Custom") {
+                    currentPreset = "Custom"
+                    return
+                }
+                var targetBands: FloatArray? = BUILTIN_EQ_PRESETS[selectedName]
+                if (targetBands == null) {
+                    targetBands = FloatArray(5) { b -> prefs.getFloat("preset_${selectedName}_band_$b", 0f) }
+                }
+                isUpdatingUi = true
+                currentPreset = selectedName
+                for (b in 0 until 5) {
+                    val bandVal = targetBands[b].coerceIn(-12f, 12f)
+                    sliders[b].value = bandVal
+                    valLabels[b].text = String.format(java.util.Locale.US, "%+.1f dB", bandVal)
+                }
+                swEnable.isChecked = true
+                isUpdatingUi = false
+                saveDialogState()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
+        btnFlat.setOnClickListener {
+            isUpdatingUi = true
+            currentPreset = "Flat"
+            val flatIdx = allPresetNames.indexOf("Flat")
+            if (flatIdx >= 0) spinnerPresets.setSelection(flatIdx)
+            for (b in 0 until 5) {
+                sliders[b].value = 0f
+                valLabels[b].text = "+0.0 dB"
+            }
+            isUpdatingUi = false
+            saveDialogState()
+        }
+
+        btnSavePreset.setOnClickListener {
+            val input = EditText(this).apply {
+                hint = "Enter preset name (e.g. Bass Ultra)"
+                setTextColor(Color.WHITE)
+                setHintTextColor(Color.GRAY)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Save Custom Preset")
+                .setView(input)
+                .setPositiveButton("Save") { _, _ ->
+                    val name = input.text.toString().trim()
+                    if (name.isNotEmpty() && !BUILTIN_EQ_PRESETS.containsKey(name)) {
+                        val set = prefs.getStringSet("custom_presets", emptySet())?.toMutableSet() ?: mutableSetOf()
+                        set.add(name)
+                        val ed = prefs.edit()
+                        ed.putStringSet("custom_presets", set)
+                        for (b in 0 until 5) {
+                            ed.putFloat("preset_${name}_band_$b", sliders[b].value)
+                        }
+                        ed.apply()
+                        if (!allPresetNames.contains(name)) {
+                            allPresetNames.add(allPresetNames.size - 1, name)
+                            (spinnerPresets.adapter as ArrayAdapter<String>).notifyDataSetChanged()
+                        }
+                        spinnerPresets.setSelection(allPresetNames.indexOf(name))
+                        Toast.makeText(this, "Saved preset '$name'", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        AlertDialog.Builder(this)
+            .setView(sv)
+            .setPositiveButton("✔ Done") { dialog, _ ->
+                saveDialogState()
+                dialog.dismiss()
+            }
+            .show()
     }
 
     @Synchronized
@@ -703,21 +1029,24 @@ class MainActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
 
-        // Buffer target slider
+        // Buffer target sliders (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
         val initialTarget = quantizeTarget(AudioNative.nativeGetTargetBufferMs())
-        binding.sliderTargetBuffer.value = initialTarget
-        binding.tvTargetBufferValue.text = if (initialTarget % 1f == 0f) "${initialTarget.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", initialTarget)
+        syncAllTargetBufferSliders(initialTarget)
 
-        binding.sliderTargetBuffer.addOnChangeListener { _, value, fromUser ->
+        val onBufferSliderChanged: (com.google.android.material.slider.Slider, Float, Boolean) -> Unit = { s, value, fromUser ->
             if (fromUser) {
                 val qVal = quantizeTarget(value)
                 AudioNative.nativeSetTargetBufferMs(qVal)
-                binding.tvTargetBufferValue.text = if (qVal % 1f == 0f) "${qVal.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", qVal)
+                syncAllTargetBufferSliders(qVal, fromSlider = s)
                 binding.rbBufCustom.isChecked = true
                 if (!suppressSync) binding.rbProfileCustom.isChecked = true
                 onLocalSettingChanged()
             }
         }
+        binding.sliderTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
+        binding.sliderServeTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
+        binding.sliderPartyHostTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
+        binding.sliderPartyJoinTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
 
         // Buffer presets radio group
         binding.rgBufferMode.setOnCheckedChangeListener { _, checkedId ->
@@ -727,20 +1056,17 @@ class MainActivity : AppCompatActivity() {
                 R.id.rbBufLow -> {
                     AudioNative.nativeSetTargetBufferMs(20f)
                     AudioNative.nativeSetAutoMode(false)
-                    binding.sliderTargetBuffer.value = 20f
-                    binding.tvTargetBufferValue.text = "20 ms"
+                    syncAllTargetBufferSliders(20f)
                 }
                 R.id.rbBufMed -> {
                     AudioNative.nativeSetTargetBufferMs(40f)
                     AudioNative.nativeSetAutoMode(false)
-                    binding.sliderTargetBuffer.value = 40f
-                    binding.tvTargetBufferValue.text = "40 ms"
+                    syncAllTargetBufferSliders(40f)
                 }
                 R.id.rbBufHigh -> {
                     AudioNative.nativeSetTargetBufferMs(80f)
                     AudioNative.nativeSetAutoMode(false)
-                    binding.sliderTargetBuffer.value = 80f
-                    binding.tvTargetBufferValue.text = "80 ms"
+                    syncAllTargetBufferSliders(80f)
                 }
                 R.id.rbBufAuto -> {
                     AudioNative.nativeSetAutoMode(true)
@@ -768,8 +1094,7 @@ class MainActivity : AppCompatActivity() {
                             binding.spPlayerBitrate.setSelection(idx)
                         }
                         binding.rbBufHigh.isChecked = true
-                        binding.sliderTargetBuffer.value = quantizeTarget(80f)
-                        binding.tvTargetBufferValue.text = "80 ms"
+                        syncAllTargetBufferSliders(80f)
                         AudioNative.nativeSetTargetBufferMs(80f)
                         AudioNative.nativeSetAutoMode(false)
                     } finally {
@@ -788,8 +1113,7 @@ class MainActivity : AppCompatActivity() {
                             binding.spPlayerBitrate.setSelection(idx)
                         }
                         binding.rbBufLow.isChecked = true
-                        binding.sliderTargetBuffer.value = quantizeTarget(20f)
-                        binding.tvTargetBufferValue.text = "20 ms"
+                        syncAllTargetBufferSliders(20f)
                         AudioNative.nativeSetTargetBufferMs(20f)
                         AudioNative.nativeSetAutoMode(false)
                     } finally {
@@ -808,8 +1132,7 @@ class MainActivity : AppCompatActivity() {
                             binding.spPlayerBitrate.setSelection(idx)
                         }
                         binding.rbBufAuto.isChecked = true
-                        binding.sliderTargetBuffer.value = quantizeTarget(30f)
-                        binding.tvTargetBufferValue.text = "30 ms"
+                        syncAllTargetBufferSliders(30f)
                         AudioNative.nativeSetTargetBufferMs(30f)
                         AudioNative.nativeSetAutoMode(true)
                     } finally {
@@ -820,6 +1143,29 @@ class MainActivity : AppCompatActivity() {
             updateCodecBitrateUiState(binding.rbCodecOpus.isChecked)
             onLocalSettingChanged()
         }
+
+        // Equalizer dialog triggers
+        binding.btnEqualizerPlay.setOnClickListener { showEqualizerDialog("play", "Play Equalizer") }
+        binding.btnEqualizerServe.setOnClickListener { showEqualizerDialog("serve", "Serve Outbound Equalizer") }
+        binding.btnEqualizerPartyHost.setOnClickListener { showEqualizerDialog("party_host", "Party Host Broadcast Equalizer") }
+        binding.btnEqualizerPartyJoin.setOnClickListener { showEqualizerDialog("party_join", "Party Joiner Equalizer") }
+        binding.btnEqualizerUniversal.setOnClickListener { showEqualizerDialog("universal", "Universal Device Equalizer") }
+
+        val eqPrefs = getSharedPreferences("PhoneSpeakerEQ", MODE_PRIVATE)
+        binding.cbUniversalEqServeHost.isChecked = eqPrefs.getBoolean("universal_apply_tx", false)
+        binding.cbUniversalEqPlayJoin.isChecked = eqPrefs.getBoolean("universal_apply_rx", false)
+
+        binding.cbUniversalEqServeHost.setOnCheckedChangeListener { _, isChecked ->
+            eqPrefs.edit().putBoolean("universal_apply_tx", isChecked).apply()
+            applyEffectiveEqualizerState()
+        }
+        binding.cbUniversalEqPlayJoin.setOnCheckedChangeListener { _, isChecked ->
+            eqPrefs.edit().putBoolean("universal_apply_rx", isChecked).apply()
+            applyEffectiveEqualizerState()
+        }
+
+        applyEffectiveEqualizerState()
+        updateEqButtonLabels()
 
         // Gain slider & Mute
         try {
@@ -1358,10 +1704,9 @@ class MainActivity : AppCompatActivity() {
 
             if (json.has("custom_buffer_ms")) {
                 val buf = quantizeTarget(json.getDouble("custom_buffer_ms").toFloat())
-                if (!binding.sliderTargetBuffer.isPressed && kotlin.math.abs(binding.sliderTargetBuffer.value - buf) > 0.1f) {
-                    binding.sliderTargetBuffer.value = buf
+                if (!binding.sliderTargetBuffer.isPressed) {
+                    syncAllTargetBufferSliders(buf)
                 }
-                binding.tvTargetBufferValue.text = if (buf % 1f == 0f) "${buf.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", buf)
                 AudioNative.nativeSetTargetBufferMs(buf)
             }
             if (json.has("buffer_mode")) {

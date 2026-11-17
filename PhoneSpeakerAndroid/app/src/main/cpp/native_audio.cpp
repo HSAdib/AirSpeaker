@@ -236,10 +236,34 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
     // Guaranteed real-time safe: ZERO mutexes, ZERO allocations, ZERO opus decodes.
     mJitterBuffer.readAudio(output, numFrames);
 
-    // Real-time safe mute and volume scaling
+    // Real-time safe mute, equalizer, and volume scaling
     if (mMuted.load(std::memory_order_relaxed)) {
         std::memset(output, 0, numFrames * 2 * sizeof(int16_t));
     } else {
+        if (mEqEnabled.load(std::memory_order_acquire)) {
+            const double knee = 0.85;
+            for (int n = 0; n < numFrames; ++n) {
+                for (int ch = 0; ch < 2; ++ch) {
+                    double x = output[n * 2 + ch] / 32768.0;
+                    for (int b = 0; b < 5; ++b) {
+                        const auto& c = mEqCoeffs[b];
+                        if (!c.active) continue;
+                        double y = c.b0 * x + mEqZ1[b][ch];
+                        mEqZ1[b][ch] = c.b1 * x - c.a1 * y + mEqZ2[b][ch];
+                        mEqZ2[b][ch] = c.b2 * x - c.a2 * y;
+                        x = y;
+                    }
+                    if (x > knee) {
+                        x = knee + (1.0 - knee) * std::tanh((x - knee) / (1.0 - knee));
+                    } else if (x < -knee) {
+                        x = -knee - (1.0 - knee) * std::tanh((-x - knee) / (1.0 - knee));
+                    }
+                    int32_t clamped = static_cast<int32_t>(std::round(std::clamp(x, -1.0, 1.0) * 32767.0));
+                    output[n * 2 + ch] = static_cast<int16_t>(std::clamp(clamped, -32768, 32767));
+                }
+            }
+        }
+
         float gain = mVolumeGain.load(std::memory_order_relaxed);
         if (std::abs(gain - 1.0f) > 0.001f) {
             int total_samples = numFrames * 2;
@@ -372,6 +396,61 @@ void NativeAudioEngine::setPartyPeers(const std::vector<std::string>& peers) {
     }
     std::lock_guard<std::mutex> lock(mPartyPeersMutex);
     mPartyPeerAddrs = std::move(addrs);
+}
+
+void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, float b2, float b3, float b4) {
+    float bands[5] = {
+        std::clamp(b0, -12.0f, 12.0f),
+        std::clamp(b1, -12.0f, 12.0f),
+        std::clamp(b2, -12.0f, 12.0f),
+        std::clamp(b3, -12.0f, 12.0f),
+        std::clamp(b4, -12.0f, 12.0f)
+    };
+    for (int i = 0; i < 5; ++i) {
+        mEqGainsDb[i].store(bands[i], std::memory_order_relaxed);
+    }
+
+    constexpr double PI = 3.14159265358979323846;
+    const double freqs[5] = {60.0, 230.0, 910.0, 3600.0, 14000.0};
+    const double sr = 48000.0;
+    const double q = 1.15;
+    bool any_active = false;
+
+    for (int i = 0; i < 5; ++i) {
+        double gainDb = bands[i];
+        if (std::abs(gainDb) <= 0.05) {
+            mEqCoeffs[i] = {1.0, 0.0, 0.0, 0.0, 0.0, false};
+            continue;
+        }
+        any_active = true;
+        double A = std::pow(10.0, gainDb / 40.0);
+        double w0 = 2.0 * PI * freqs[i] / sr;
+        double alpha = std::sin(w0) / (2.0 * q);
+        double cos_w0 = std::cos(w0);
+
+        double b_0 = 1.0 + alpha * A;
+        double b_1 = -2.0 * cos_w0;
+        double b_2 = 1.0 - alpha * A;
+        double a_0 = 1.0 + alpha / A;
+        double a_1 = -2.0 * cos_w0;
+        double a_2 = 1.0 - alpha / A;
+
+        mEqCoeffs[i] = {
+            b_0 / a_0,
+            b_1 / a_0,
+            b_2 / a_0,
+            a_1 / a_0,
+            a_2 / a_0,
+            true
+        };
+    }
+
+    bool active = enabled && any_active;
+    if (!active) {
+        std::memset(mEqZ1, 0, sizeof(mEqZ1));
+        std::memset(mEqZ2, 0, sizeof(mEqZ2));
+    }
+    mEqEnabled.store(active, std::memory_order_release);
 }
 
 int32_t NativeAudioEngine::getAudioSessionId() const {

@@ -125,6 +125,7 @@ struct StudioTabButton: View {
 struct PlayerStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
     @State private var pcIpInput: String = ""
+    @State private var showEQSheet: Bool = false
 
     var body: some View {
         ScrollView {
@@ -247,55 +248,21 @@ struct PlayerStudioTab: View {
                 }
 
                 // Stability / Delay Buffer
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("STABILITY / DELAY BUFFER:")
+                TargetBufferControlSection(engine: engine)
+
+                // Equalizer Trigger
+                Button(action: {
+                    showEQSheet = true
+                }) {
+                    Text("[ 🎛️ EQUALIZER: \(engine.playEQ.enabled ? engine.playEQ.presetName : "OFF") ]")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        RadioLine(title: "Low (20 ms) — Fast for Gaming & Video", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 20) {
-                            engine.bufferMode = "FIXED"
-                            engine.bufferTargetMs = 20
-                            engine.sendConfigSync()
-                        }
-                        RadioLine(title: "Medium (40 ms) — Balanced Everyday", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 40) {
-                            engine.bufferMode = "FIXED"
-                            engine.bufferTargetMs = 40
-                            engine.sendConfigSync()
-                        }
-                        RadioLine(title: "High (80 ms) — Smooth Music (No Dropouts)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 80) {
-                            engine.bufferMode = "FIXED"
-                            engine.bufferTargetMs = 80
-                            engine.sendConfigSync()
-                        }
-                        RadioLine(title: "Auto (Adjusts Automatically)", isSelected: engine.bufferMode == "AUTO") {
-                            engine.bufferMode = "AUTO"
-                            engine.sendConfigSync()
-                        }
-                    }
-
-                    HStack {
-                        Text("TARGET BUFFER:")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Color(white: 0.6))
-                        Spacer()
-                        Text("\(engine.bufferTargetMs) ms")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                    }
-
-                    Slider(
-                        value: Binding(
-                            get: { Double(engine.bufferTargetMs) },
-                            set: { newVal in
-                                engine.bufferTargetMs = Int(newVal)
-                                engine.sendConfigSync()
-                            }
-                        ),
-                        in: 10.0...200.0,
-                        step: 2.5
-                    )
-                    .accentColor(.white)
+                        .foregroundColor(engine.playEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .background(engine.playEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.playEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                }
+                .sheet(isPresented: $showEQSheet) {
+                    StudioEqualizerSheetView(title: "PLAYER EQUALIZER", config: $engine.playEQ, engine: engine)
                 }
 
                 // Stream Volume (Relative to Phone)
@@ -378,6 +345,7 @@ struct PlayerStudioTab: View {
 struct ServeStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
     @State private var targetIpInput: String = ""
+    @State private var showEQSheet: Bool = false
 
     var body: some View {
         ScrollView {
@@ -480,6 +448,24 @@ struct ServeStudioTab: View {
                     }
                 }
 
+                // Target Buffer Control
+                TargetBufferControlSection(engine: engine)
+
+                // Equalizer Trigger
+                Button(action: {
+                    showEQSheet = true
+                }) {
+                    Text("[ 🎛️ EQUALIZER: \(engine.serveEQ.enabled ? engine.serveEQ.presetName : "OFF") ]")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(engine.serveEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .background(engine.serveEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.serveEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                }
+                .sheet(isPresented: $showEQSheet) {
+                    StudioEqualizerSheetView(title: "SERVE EQUALIZER", config: $engine.serveEQ, engine: engine)
+                }
+
                 // Live Audio Level & Telemetry
                 VStack(alignment: .leading, spacing: 6) {
                     Text("LIVE AUDIO STREAM METERS:")
@@ -554,6 +540,8 @@ struct PartyStudioTab: View {
     @State private var showScanner: Bool = false
     @State private var manualJoinIp: String = ""
     @State private var manualPeerInput: String = ""
+    @State private var showHostEQSheet: Bool = false
+    @State private var showJoinEQSheet: Bool = false
 
     var body: some View {
         ScrollView {
@@ -679,6 +667,23 @@ struct PartyStudioTab: View {
                         Text(engine.isAudioPlaying ? "PARTY STATUS: HOSTING / RELAYING (\(engine.partyMembers.count) peer(s) connected)" : "PARTY STATUS: STANDBY — Tap Start Party Broadcast")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(engine.isAudioPlaying ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+
+                        // Target Buffer Control & Host Equalizer
+                        TargetBufferControlSection(engine: engine)
+
+                        Button(action: {
+                            showHostEQSheet = true
+                        }) {
+                            Text("[ 🎛️ HOST EQUALIZER: \(engine.partyHostEQ.enabled ? engine.partyHostEQ.presetName : "OFF") ]")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                                .frame(maxWidth: .infinity, minHeight: 34)
+                                .background(engine.partyHostEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                        }
+                        .sheet(isPresented: $showHostEQSheet) {
+                            StudioEqualizerSheetView(title: "PARTY HOST EQUALIZER", config: $engine.partyHostEQ, engine: engine)
+                        }
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text("LIVE DELAY GRAPH")
@@ -866,6 +871,23 @@ struct PartyStudioTab: View {
                             .background(Color(red: 0.07, green: 0.07, blue: 0.07))
                             .foregroundColor(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
 
+                        // Target Buffer Control & Join Equalizer
+                        TargetBufferControlSection(engine: engine)
+
+                        Button(action: {
+                            showJoinEQSheet = true
+                        }) {
+                            Text("[ 🎛️ JOIN EQUALIZER: \(engine.partyJoinEQ.enabled ? engine.partyJoinEQ.presetName : "OFF") ]")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                                .frame(maxWidth: .infinity, minHeight: 34)
+                                .background(engine.partyJoinEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                        }
+                        .sheet(isPresented: $showJoinEQSheet) {
+                            StudioEqualizerSheetView(title: "PARTY JOIN EQUALIZER", config: $engine.partyJoinEQ, engine: engine)
+                        }
+
                         VStack(alignment: .leading, spacing: 4) {
                             Text("LIVE DELAY GRAPH")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -938,6 +960,7 @@ struct PartyStudioTab: View {
 // MARK: - Tab 4: SETTINGS STUDIO TAB
 struct SettingsStudioTab: View {
     @ObservedObject var engine: PhoneSpeakerEngine
+    @State private var showUniversalEQSheet: Bool = false
 
     var body: some View {
         ScrollView {
@@ -989,6 +1012,44 @@ struct SettingsStudioTab: View {
                         .foregroundColor(.white)
                 }
                 .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+
+                // Universal Device Equalizer (5-Band)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("UNIVERSAL DEVICE EQUALIZER (5-BAND):")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    Button(action: {
+                        showUniversalEQSheet = true
+                    }) {
+                        Text("[ 🎛️ UNIVERSAL EQUALIZER: \(engine.universalEQ.enabled ? engine.universalEQ.presetName : "OFF") ]")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(engine.universalEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                            .background(engine.universalEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.universalEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                    }
+                    .sheet(isPresented: $showUniversalEQSheet) {
+                        StudioEqualizerSheetView(title: "UNIVERSAL EQUALIZER", config: $engine.universalEQ, engine: engine)
+                    }
+
+                    Toggle(isOn: $engine.universalApplyTx) {
+                        Text("Apply Universal EQ to Outbound Audio (SERVE / HOST)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Color(white: 0.8))
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+
+                    Toggle(isOn: $engine.universalApplyRx) {
+                        Text("Apply Universal EQ to Inbound Audio (PLAYER / JOIN)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Color(white: 0.8))
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                }
+                .padding(10)
+                .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
                 // Exclusive Audio
                 VStack(alignment: .leading, spacing: 6) {
@@ -1169,6 +1230,248 @@ struct TelemetryRow: View {
             Text(value)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(.white)
+        }
+    }
+}
+
+// MARK: - Target Buffer Control Section (Reusable across tabs)
+struct TargetBufferControlSection: View {
+    @ObservedObject var engine: PhoneSpeakerEngine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("STABILITY / DELAY BUFFER:")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.white)
+
+            HStack(spacing: 4) {
+                RadioChip(title: "20 ms (Low)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 20) {
+                    engine.bufferMode = "FIXED"
+                    engine.bufferTargetMs = 20
+                    engine.sendConfigSync()
+                }
+                RadioChip(title: "40 ms (Med)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 40) {
+                    engine.bufferMode = "FIXED"
+                    engine.bufferTargetMs = 40
+                    engine.sendConfigSync()
+                }
+                RadioChip(title: "80 ms (High)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 80) {
+                    engine.bufferMode = "FIXED"
+                    engine.bufferTargetMs = 80
+                    engine.sendConfigSync()
+                }
+                RadioChip(title: "Auto", isSelected: engine.bufferMode == "AUTO") {
+                    engine.bufferMode = "AUTO"
+                    engine.sendConfigSync()
+                }
+            }
+
+            HStack {
+                Text("TARGET BUFFER:")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(white: 0.6))
+                Spacer()
+                Text("\(engine.bufferTargetMs) ms")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+            }
+
+            Slider(
+                value: Binding(
+                    get: { Double(engine.bufferTargetMs) },
+                    set: { newVal in
+                        engine.bufferTargetMs = Int(newVal)
+                        engine.sendConfigSync()
+                    }
+                ),
+                in: 10.0...200.0,
+                step: 2.5
+            )
+            .accentColor(.white)
+        }
+    }
+}
+
+// MARK: - Studio 5-Band Equalizer Sheet View
+struct StudioEqualizerSheetView: View {
+    let title: String
+    @Binding var config: StudioEQConfig
+    @ObservedObject var engine: PhoneSpeakerEngine
+    @Environment(\.presentationMode) var presentationMode
+    @State private var newPresetName: String = ""
+
+    private let bandLabels = ["60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz"]
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 12) {
+                // Header
+                HStack {
+                    Text("🎛️ \(title)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                    Spacer()
+                    Button("✕ CLOSE") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        // Enable Toggle
+                        Toggle(isOn: $config.enabled) {
+                            Text("Enable Equalizer")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+
+                        // Presets
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("PRESETS:")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(white: 0.6))
+
+                            // Built-in presets
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(Array(PhoneSpeakerEngine.builtinEQPresets.keys.sorted()), id: \.self) { pName in
+                                        Button(action: {
+                                            if let pGains = PhoneSpeakerEngine.builtinEQPresets[pName] {
+                                                config.presetName = pName
+                                                config.bands = pGains
+                                                config.enabled = true
+                                            }
+                                        }) {
+                                            Text(pName)
+                                                .font(.system(size: 10, weight: config.presetName == pName ? .bold : .regular, design: .monospaced))
+                                                .foregroundColor(config.presetName == pName ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(config.presetName == pName ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(config.presetName == pName ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.2), lineWidth: 1))
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Custom presets if any
+                            if !engine.customEQPresets.isEmpty {
+                                Text("CUSTOM PRESETS:")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.5))
+                                    .padding(.top, 4)
+
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(Array(engine.customEQPresets.keys.sorted()), id: \.self) { cName in
+                                            HStack(spacing: 2) {
+                                                Button(action: {
+                                                    if let cGains = engine.customEQPresets[cName] {
+                                                        config.presetName = cName
+                                                        config.bands = cGains
+                                                        config.enabled = true
+                                                    }
+                                                }) {
+                                                    Text(cName)
+                                                        .font(.system(size: 10, weight: config.presetName == cName ? .bold : .regular, design: .monospaced))
+                                                        .foregroundColor(config.presetName == cName ? Color(red: 0.22, green: 0.71, blue: 1.0) : Color(white: 0.7))
+                                                }
+                                                Button(action: {
+                                                    engine.deleteCustomEQPreset(name: cName)
+                                                }) {
+                                                    Text("×")
+                                                        .font(.system(size: 12, weight: .bold))
+                                                        .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
+                                                }
+                                            }
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 3)
+                                            .background(Color(white: 0.06))
+                                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Save new preset
+                            HStack(spacing: 6) {
+                                TextField("New Preset Name", text: $newPresetName)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .padding(6)
+                                    .background(Color(white: 0.08))
+                                    .foregroundColor(.white)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                                Button("SAVE") {
+                                    let trimmed = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !trimmed.isEmpty {
+                                        engine.saveCustomEQPreset(name: trimmed, bands: config.bands)
+                                        config.presetName = trimmed
+                                        newPresetName = ""
+                                    }
+                                }
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+
+                                Button("FLAT RESET") {
+                                    config.bands = [0.0, 0.0, 0.0, 0.0, 0.0]
+                                    config.presetName = "Flat"
+                                }
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(white: 0.7))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.3), lineWidth: 1))
+                            }
+                            .padding(.top, 4)
+                        }
+
+                        // 5 Sliders
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("FREQUENCY BANDS (-12 dB to +12 dB):")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+
+                            ForEach(0..<5, id: \.self) { idx in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack {
+                                        Text(bandLabels[idx])
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                        Spacer()
+                                        Text(String(format: "%+.1f dB", idx < config.bands.count ? config.bands[idx] : 0.0))
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white)
+                                    }
+                                    Slider(
+                                        value: Binding(
+                                            get: { Double(idx < config.bands.count ? config.bands[idx] : 0.0) },
+                                            set: { newVal in
+                                                while config.bands.count < 5 { config.bands.append(0.0) }
+                                                config.bands[idx] = Float(newVal)
+                                                config.presetName = "Custom"
+                                            }
+                                        ),
+                                        in: -12.0...12.0,
+                                        step: 0.5
+                                    )
+                                    .accentColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
+            .padding(14)
         }
     }
 }

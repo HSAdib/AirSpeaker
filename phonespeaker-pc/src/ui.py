@@ -41,6 +41,7 @@ from audio_output import (
     list_output_devices,
     normalize_device_name,
 )
+from equalizer import EqualizerManager, open_equalizer_dialog
 from virtual_device import (
     detect_virtual_devices,
     open_windows_sound_settings,
@@ -226,6 +227,10 @@ class PhoneSpeakerApp:
         self.root = root
         self.cfg = cfg
 
+        # Equalizer & Buffer syncing
+        self._eq_manager = EqualizerManager(self.cfg.get("eq_settings", {}), on_change=self._on_eq_changed)
+        self._buffer_val_labels: List[tk.Label] = []
+
         # Streaming & Engine state
         self._streaming = False
         self._normal_streaming = False
@@ -317,6 +322,68 @@ class PhoneSpeakerApp:
         self._control_listener.set_target_ip(self.ip_var.get().strip())
 
         self._schedule_ui_update()
+
+    def _build_target_buffer_card(self, parent: tk.Misc, title: str = " Target Buffer & Stability Presets ") -> tk.LabelFrame:
+        bf = tk.LabelFrame(parent, text=title, bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=2)
+        buf_box = tk.Frame(bf, bg=BG)
+        buf_box.pack(fill="x", padx=4, pady=1)
+        for text, val in [("20ms (Low)", "LOW"), ("40ms (Med)", "MEDIUM"), ("80ms (High)", "HIGH"), ("Auto", "AUTO"), ("Custom", "CUSTOM")]:
+            tk.Radiobutton(
+                buf_box, text=text, variable=self.buffer_mode_var, value=val,
+                bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM,
+                activebackground=BG, activeforeground=ACCENT,
+                command=self._on_buffer_mode_changed
+            ).pack(side="left", padx=(2, 4))
+
+        custom_row = tk.Frame(bf, bg=BG)
+        custom_row.pack(fill="x", padx=4, pady=(1, 2))
+        tk.Label(custom_row, text="Target Buffer:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+        sc = tk.Scale(
+            custom_row, from_=10.0, to=200.0, resolution=2.5, orient="horizontal",
+            variable=self.custom_buffer_var, showvalue=False,
+            bg=BG, fg=FG, troughcolor="#222222", highlightthickness=0, bd=0, length=170,
+            command=self._on_buffer_slider_changed
+        )
+        sc.pack(side="left", padx=4)
+        lbl = tk.Label(custom_row, text=f"{self.custom_buffer_var.get():.1f} ms", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
+        lbl.pack(side="left")
+        self._buffer_val_labels.append(lbl)
+        self.buffer_val_label = lbl
+        return bf
+
+    def _build_eq_bar(self, parent: tk.Misc, ctx_key: str, title_label: str) -> tk.Frame:
+        row = tk.Frame(parent, bg=BG)
+        status_var = tk.StringVar(value=self._eq_manager.summary_text(ctx_key))
+        if not hasattr(self, "_eq_status_vars"):
+            self._eq_status_vars = {}
+        self._eq_status_vars[ctx_key] = status_var
+
+        StudioButton(
+            row, text=f"🎛️ {title_label}", bg="#18222C", fg="#00EEEE",
+            font=FONT_MONO_BOLD, padx=8, pady=2,
+            command=lambda: open_equalizer_dialog(
+                self.root, self._eq_manager, ctx_key, title_label,
+                FONT_MONO_SM, FONT_MONO_BOLD, on_updated=self._on_eq_changed
+            )
+        ).pack(side="left")
+        tk.Label(row, textvariable=status_var, bg=BG, fg=ACCENT, font=FONT_MONO_SM).pack(side="left", padx=8)
+        return row
+
+    def _on_eq_changed(self) -> None:
+        if hasattr(self, "_eq_status_vars"):
+            for k, v in self._eq_status_vars.items():
+                v.set(self._eq_manager.summary_text(k))
+        if self._udp_sender:
+            tx_on, tx_gains = self._eq_manager.get_effective_tx_gains(is_party_host=self._party_streaming)
+            self._udp_sender.set_eq_gains(tx_on, tx_gains)
+        if self._phone_receiver:
+            rx_on, rx_gains = self._eq_manager.get_effective_rx_gains(is_party_join=False)
+            self._phone_receiver.set_eq_gains(rx_on, rx_gains)
+        if self._party_join_receiver:
+            pj_on, pj_gains = self._eq_manager.get_effective_rx_gains(is_party_join=True)
+            self._party_join_receiver.set_eq_gains(pj_on, pj_gains)
+        self.cfg["eq_settings"] = self._eq_manager.to_dict()
+        self._save_config()
 
     def _setup_window(self) -> None:
         self.root.title("PhoneSpeaker v2.1 Studio")
@@ -464,38 +531,7 @@ class PhoneSpeakerApp:
         self.play_rx_btn.pack(fill="x", padx=8, pady=(2, 4))
 
         # 3. Buffer Presets & Target Frame
-        bf = tk.LabelFrame(f, text=" Playout Buffer Presets ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
-        bf.pack(fill="x", **pad)
-
-        buf_box = tk.Frame(bf, bg=BG)
-        buf_box.pack(fill="x", padx=4, pady=2)
-        buf_modes = [
-            ("20 ms (Low)", "LOW"),
-            ("40 ms (Medium)", "MEDIUM"),
-            ("80 ms (High)", "HIGH"),
-            ("Auto", "AUTO"),
-            ("Custom", "CUSTOM"),
-        ]
-        for text, val in buf_modes:
-            tk.Radiobutton(
-                buf_box, text=text, variable=self.buffer_mode_var, value=val,
-                bg=BG, fg=FG, selectcolor="#222222", font=FONT_MONO_SM,
-                activebackground=BG, activeforeground=ACCENT,
-                command=self._on_buffer_mode_changed
-            ).pack(side="left", padx=(2, 6))
-
-        custom_row = tk.Frame(bf, bg=BG)
-        custom_row.pack(fill="x", padx=4, pady=(2, 2))
-        tk.Label(custom_row, text="Target Buffer:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
-        self.buffer_slider = tk.Scale(
-            custom_row, from_=10.0, to=200.0, resolution=2.5, orient="horizontal",
-            variable=self.custom_buffer_var, showvalue=False,
-            bg=BG, fg=FG, troughcolor="#222222", highlightthickness=0, bd=0, length=180,
-            command=self._on_buffer_slider_changed
-        )
-        self.buffer_slider.pack(side="left", padx=4)
-        self.buffer_val_label = tk.Label(custom_row, text=f"{self.custom_buffer_var.get():.1f} ms", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
-        self.buffer_val_label.pack(side="left")
+        self._build_target_buffer_card(f, " Playout Buffer Presets ").pack(fill="x", **pad)
 
         # 4. Stream Volume (0..200%)
         vf = tk.LabelFrame(f, text=" Stream Volume (0 - 200%) ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
@@ -517,6 +553,7 @@ class PhoneSpeakerApp:
             command=self._toggle_mute
         )
         self.mute_btn.pack(side="right", padx=4)
+        self._build_eq_bar(f, "play", "Play Equalizer (Optional)").pack(fill="x", padx=8, pady=2)
 
         # 5. Live Delay Graph Canvas
         dg_frame = tk.LabelFrame(f, text=" Live Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
@@ -688,6 +725,9 @@ class PhoneSpeakerApp:
         tk.Label(cb_row, text="kbps", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
 
         tk.Label(qf_tab1, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
+
+        self._build_target_buffer_card(f, " Target Buffer (Synced to Receiver) ").pack(fill="x", **pad)
+        self._build_eq_bar(f, "serve", "Serve Outbound Equalizer & Presets").pack(fill="x", padx=8, pady=2)
 
         # 5. Live Audio Level Meter & Server Telemetry
         status_frame = tk.LabelFrame(f, text=" Live Audio Meters & Telemetry ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
@@ -889,6 +929,9 @@ class PhoneSpeakerApp:
 
         ttk.Button(add_row, text="+ Add to Party", command=self._on_add_party_device_manual).pack(side="left")
 
+        self._build_target_buffer_card(self.party_host_frame, " Party Host Target Buffer ").pack(fill="x", **pad)
+        self._build_eq_bar(self.party_host_frame, "party_host", "Party Host Broadcast Equalizer & Presets").pack(fill="x", padx=8, pady=2)
+
         # Live Party Delay Graph for Host
         dg_phost = tk.LabelFrame(self.party_host_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
         dg_phost.pack(fill="x", **pad)
@@ -995,6 +1038,9 @@ class PhoneSpeakerApp:
         )
         self.party_join_status_label.pack(fill="x", padx=8, pady=(0, 4))
 
+        self._build_target_buffer_card(self.party_join_frame, " Party Joiner Target Buffer ").pack(fill="x", **pad)
+        self._build_eq_bar(self.party_join_frame, "party_join", "Party Joiner Equalizer (Optional)").pack(fill="x", padx=8, pady=2)
+
         # Live Party Delay Graph for Joiner
         dg_pjoin = tk.LabelFrame(self.party_join_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
         dg_pjoin.pack(fill="x", padx=8, pady=(0, 4))
@@ -1078,6 +1124,34 @@ class PhoneSpeakerApp:
 
         # Expected delay label
         tk.Label(qf, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+
+        # Universal Device Equalizer Frame
+        uf = tk.LabelFrame(f, text=" Universal Device Equalizer (Master TX / RX Curve) ", bg=BG, fg="#00EEEE", font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
+        uf.pack(fill="x", **pad)
+        u_ctx = self._eq_manager.get_context("universal")
+        self.univ_eq_tx_var = tk.BooleanVar(value=bool(u_ctx.get("apply_tx", False)))
+        self.univ_eq_rx_var = tk.BooleanVar(value=bool(u_ctx.get("apply_rx", False)))
+
+        def _on_univ_scope_toggled() -> None:
+            self._eq_manager.update_context(
+                "universal",
+                enabled=bool(self.univ_eq_tx_var.get() or self.univ_eq_rx_var.get() or self._eq_manager.get_context("universal").get("enabled", False)),
+                apply_tx=bool(self.univ_eq_tx_var.get()),
+                apply_rx=bool(self.univ_eq_rx_var.get()),
+            )
+            self._on_eq_changed()
+
+        tk.Checkbutton(
+            uf, text="Apply Universal EQ to Hosting & Serving (SERVE + PARTY HOST)",
+            variable=self.univ_eq_tx_var, bg=BG, fg=FG, selectcolor="#222222",
+            font=FONT_MONO_SM, command=_on_univ_scope_toggled
+        ).pack(anchor="w", padx=4)
+        tk.Checkbutton(
+            uf, text="Apply Universal EQ to Playing & Joining (PLAY + PARTY JOIN)",
+            variable=self.univ_eq_rx_var, bg=BG, fg=FG, selectcolor="#222222",
+            font=FONT_MONO_SM, command=_on_univ_scope_toggled
+        ).pack(anchor="w", padx=4)
+        self._build_eq_bar(uf, "universal", "Open Universal 5-Band Equalizer & Presets").pack(fill="x", padx=4, pady=3)
 
         # Available Network Adapters Listbox
         af = tk.LabelFrame(f, text=" Available Network Adapter IPs ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
@@ -1791,10 +1865,12 @@ class PhoneSpeakerApp:
             self._party_join_receiver = PhoneAudioReceiver(
                 port=port,
                 output_device_index=pc_out_idx,
+                target_buffer_ms=self.custom_buffer_var.get(),
                 on_stats=self._on_party_join_stats,
                 on_packet=self._relay_party_packet,
             )
             self._party_join_receiver.start()
+            self._on_eq_changed()
         except Exception as exc:
             messagebox.showerror("Party Mode", f"Failed to start party audio receiver on port {port}:\n{exc}")
             self._party_join_receiver = None
@@ -2014,8 +2090,17 @@ class PhoneSpeakerApp:
                 self.frame_ms_var.set("5")
                 self.buffer_mode_var.set("AUTO")
                 self.custom_buffer_var.set(30.0)
+            for lbl in getattr(self, "_buffer_val_labels", []):
+                try:
+                    lbl.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+                except Exception:
+                    pass
             if hasattr(self, "buffer_val_label"):
                 self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+            if self._phone_receiver:
+                self._phone_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
+            if self._party_join_receiver:
+                self._party_join_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
             self._update_codec_ui_state()
         finally:
             self._suppress_sync = False
@@ -2060,13 +2145,33 @@ class PhoneSpeakerApp:
             self.custom_buffer_var.set(40.0)
         elif mode == "HIGH":
             self.custom_buffer_var.set(80.0)
-        self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+        for lbl in getattr(self, "_buffer_val_labels", []):
+            try:
+                lbl.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+            except Exception:
+                pass
+        if hasattr(self, "buffer_val_label"):
+            self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+        if self._phone_receiver:
+            self._phone_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
+        if self._party_join_receiver:
+            self._party_join_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
         self._on_local_setting_changed()
 
     def _on_buffer_slider_changed(self, val) -> None:
         if self._suppress_sync:
             return
-        self.buffer_val_label.config(text=f"{float(val):.1f} ms")
+        for lbl in getattr(self, "_buffer_val_labels", []):
+            try:
+                lbl.config(text=f"{float(val):.1f} ms")
+            except Exception:
+                pass
+        if hasattr(self, "buffer_val_label"):
+            self.buffer_val_label.config(text=f"{float(val):.1f} ms")
+        if self._phone_receiver:
+            self._phone_receiver.set_target_buffer_ms(float(val))
+        if self._party_join_receiver:
+            self._party_join_receiver.set_target_buffer_ms(float(val))
         self.buffer_mode_var.set("CUSTOM")
         self.audio_profile_var.set("CUSTOM")
         self._on_local_setting_changed()
@@ -2200,7 +2305,17 @@ class PhoneSpeakerApp:
                     c = float(msg["custom_buffer_ms"])
                     c = max(10.0, min(200.0, c))
                     self.custom_buffer_var.set(c)
-                    self.buffer_val_label.config(text=f"{c:.1f} ms")
+                    for lbl in getattr(self, "_buffer_val_labels", []):
+                        try:
+                            lbl.config(text=f"{c:.1f} ms")
+                        except Exception:
+                            pass
+                    if hasattr(self, "buffer_val_label"):
+                        self.buffer_val_label.config(text=f"{c:.1f} ms")
+                    if self._phone_receiver:
+                        self._phone_receiver.set_target_buffer_ms(c)
+                    if self._party_join_receiver:
+                        self._party_join_receiver.set_target_buffer_ms(c)
                 except (ValueError, TypeError):
                     pass
 
@@ -2351,6 +2466,7 @@ class PhoneSpeakerApp:
                         self._udp_sender.add_party_target(dev_ip, dev_info.get("port", AUDIO_PORT))
                 self._udp_sender.set_routing_and_gain(True, self.volume_gain_var.get(), self.muted_var.get())
                 self._udp_sender.start()
+                self._on_eq_changed()
 
                 # Audio capture device
                 dev_idx = None
@@ -2464,9 +2580,11 @@ class PhoneSpeakerApp:
         self._phone_receiver = AudioReceiver(
             port=AUDIO_PORT,
             output_device_index=pc_out_idx,
+            target_buffer_ms=self.custom_buffer_var.get(),
             on_stats=self._on_rx_pps_update,
         )
         self._phone_receiver.start()
+        self._on_eq_changed()
         self._play_active = True
         if hasattr(self, "play_rx_btn"):
             self.play_rx_btn.config(
@@ -2984,7 +3102,17 @@ class PhoneSpeakerApp:
         self.frame_ms_var.set(str(self.cfg.get("frame_ms", 5)))
         self.buffer_mode_var.set(self.cfg.get("buffer_mode", "AUTO"))
         self.custom_buffer_var.set(float(self.cfg.get("custom_buffer_ms", 30.0)))
-        self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+        for lbl in getattr(self, "_buffer_val_labels", []):
+            try:
+                lbl.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+            except Exception:
+                pass
+        if hasattr(self, "buffer_val_label"):
+            self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+        if self._phone_receiver:
+            self._phone_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
+        if self._party_join_receiver:
+            self._party_join_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
         self.volume_gain_var.set(float(self.cfg.get("volume_gain", 1.0)))
         self.gain_val_label.config(text=f"{int(self.volume_gain_var.get() * 100)}%")
         if hasattr(self, "conn_vol_pct_label"):

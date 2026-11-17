@@ -21,6 +21,11 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.tanh
+import kotlin.math.round
 
 /**
  * InternalAudioStreamer captures system internal audio playback (media, games, YouTube)
@@ -40,7 +45,50 @@ class InternalAudioStreamer {
         const val HEADER_BYTES = 12
         const val PACKET_SIZE = HEADER_BYTES + PAYLOAD_BYTES         // 972 bytes
         const val CODEC_PCM16 = 0
+
+        data class EqCoeffs(val b0: Double, val b1: Double, val b2: Double, val a1: Double, val a2: Double, val active: Boolean)
+
+        @Volatile var eqEnabled = false
+        @Volatile var eqGainsDb = FloatArray(5)
+        @Volatile var eqCoeffs = Array(5) { EqCoeffs(1.0, 0.0, 0.0, 0.0, 0.0, false) }
+
+        fun setOutboundEq(enabled: Boolean, gains: FloatArray) {
+            val copy = FloatArray(5)
+            for (i in 0 until minOf(5, gains.size)) {
+                copy[i] = gains[i].coerceIn(-12.0f, 12.0f)
+            }
+            eqGainsDb = copy
+
+            val freqs = doubleArrayOf(60.0, 230.0, 910.0, 3600.0, 14000.0)
+            val sr = 48000.0
+            val q = 1.15
+            val newCoeffs = Array(5) { i ->
+                val gDb = copy[i].toDouble()
+                if (abs(gDb) <= 0.05) {
+                    EqCoeffs(1.0, 0.0, 0.0, 0.0, 0.0, false)
+                } else {
+                    val A = 10.0.pow(gDb / 40.0)
+                    val w0 = 2.0 * Math.PI * freqs[i] / sr
+                    val alpha = sin(w0) / (2.0 * q)
+                    val cosW0 = cos(w0)
+                    val a0 = 1.0 + alpha / A
+                    EqCoeffs(
+                        b0 = (1.0 + alpha * A) / a0,
+                        b1 = (-2.0 * cosW0) / a0,
+                        b2 = (1.0 - alpha * A) / a0,
+                        a1 = (-2.0 * cosW0) / a0,
+                        a2 = (1.0 - alpha / A) / a0,
+                        active = true
+                    )
+                }
+            }
+            eqCoeffs = newCoeffs
+            eqEnabled = enabled && newCoeffs.any { it.active }
+        }
     }
+
+    private val z1 = Array(5) { DoubleArray(2) }
+    private val z2 = Array(5) { DoubleArray(2) }
 
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
@@ -168,6 +216,32 @@ class InternalAudioStreamer {
                     if (a > maxSample) maxSample = a
                 }
                 peakLevel.set(maxSample.toFloat() / 32768.0f)
+
+                if (eqEnabled) {
+                    val coeffs = eqCoeffs
+                    val knee = 0.85
+                    val numFrames = TOTAL_SAMPLES / 2
+                    for (n in 0 until numFrames) {
+                        for (ch in 0 until 2) {
+                            var x = shortBuf[n * 2 + ch].toDouble() / 32768.0
+                            for (b in 0 until 5) {
+                                val c = coeffs[b]
+                                if (!c.active) continue
+                                val y = c.b0 * x + z1[b][ch]
+                                z1[b][ch] = c.b1 * x - c.a1 * y + z2[b][ch]
+                                z2[b][ch] = c.b2 * x - c.a2 * y
+                                x = y
+                            }
+                            if (x > knee) {
+                                x = knee + (1.0 - knee) * tanh((x - knee) / (1.0 - knee))
+                            } else if (x < -knee) {
+                                x = -knee - (1.0 - knee) * tanh((-x - knee) / (1.0 - knee))
+                            }
+                            val clamped = round(x.coerceIn(-1.0, 1.0) * 32767.0).toInt()
+                            shortBuf[n * 2 + ch] = clamped.coerceIn(-32768, 32767).toShort()
+                        }
+                    }
+                }
 
                 // Build 12-byte Little-Endian Header:
                 // uint32 seq, uint32 timestamp_ms, uint8 codec (0=PCM16), uint8 channels (2), uint16 sr_div100 (480)

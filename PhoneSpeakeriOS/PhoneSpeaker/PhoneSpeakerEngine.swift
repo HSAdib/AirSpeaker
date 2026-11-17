@@ -77,9 +77,134 @@ final class AtomicInt {
     }
 }
 
+// MARK: - 5-Band Biquad Equalizer Config & DSP
+public struct StudioEQConfig: Codable, Equatable {
+    public var enabled: Bool = false
+    public var presetName: String = "Flat"
+    public var bands: [Float] = [0, 0, 0, 0, 0] // 60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz
+
+    public init(enabled: Bool = false, presetName: String = "Flat", bands: [Float] = [0, 0, 0, 0, 0]) {
+        self.enabled = enabled
+        self.presetName = presetName
+        self.bands = (bands + [0, 0, 0, 0, 0]).prefix(5).map { $0 }
+    }
+}
+
+public final class Swift5BandBiquadDSP {
+    private struct Coeffs {
+        var b0: Double = 1.0
+        var b1: Double = 0.0
+        var b2: Double = 0.0
+        var a1: Double = 0.0
+        var a2: Double = 0.0
+        var active: Bool = false
+    }
+    private let lock = NSLock()
+    private var coeffs: [Coeffs] = Array(repeating: Coeffs(), count: 5)
+    private var z1 = [[Double]](repeating: [0.0, 0.0], count: 5)
+    private var z2 = [[Double]](repeating: [0.0, 0.0], count: 5)
+    private var isEnabled: Bool = false
+
+    public func setGains(enabled: Bool, gains: [Float]) {
+        lock.lock()
+        defer { lock.unlock() }
+        let freqs: [Double] = [60.0, 230.0, 910.0, 3600.0, 14000.0]
+        let sr: Double = 48000.0
+        let q: Double = 1.15
+        var anyActive = false
+
+        for i in 0..<5 {
+            let g = i < gains.count ? Double(max(-12.0, min(12.0, gains[i]))) : 0.0
+            if abs(g) <= 0.05 {
+                coeffs[i] = Coeffs(b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, active: false)
+                continue
+            }
+            anyActive = true
+            let A = pow(10.0, g / 40.0)
+            let w0 = 2.0 * Double.pi * freqs[i] / sr
+            let alpha = sin(w0) / (2.0 * q)
+            let cos_w0 = cos(w0)
+            let a0 = 1.0 + alpha / A
+
+            coeffs[i] = Coeffs(
+                b0: (1.0 + alpha * A) / a0,
+                b1: (-2.0 * cos_w0) / a0,
+                b2: (1.0 - alpha * A) / a0,
+                a1: (-2.0 * cos_w0) / a0,
+                a2: (1.0 - alpha / A) / a0,
+                active: true
+            )
+        }
+        isEnabled = enabled && anyActive
+        if !isEnabled {
+            for i in 0..<5 {
+                z1[i] = [0.0, 0.0]
+                z2[i] = [0.0, 0.0]
+            }
+        }
+    }
+
+    public func processInt16Samples(_ samples: inout [Int16], channels: Int = 2) {
+        lock.lock()
+        guard isEnabled, !samples.isEmpty else {
+            lock.unlock()
+            return
+        }
+        let localCoeffs = coeffs
+        lock.unlock()
+
+        let ch = channels == 1 ? 1 : 2
+        let numFrames = samples.count / ch
+        let knee: Double = 0.85
+
+        for n in 0..<numFrames {
+            for c in 0..<ch {
+                var x = Double(samples[n * ch + c]) / 32768.0
+                for b in 0..<5 {
+                    let coeff = localCoeffs[b]
+                    if !coeff.active { continue }
+                    let y = coeff.b0 * x + z1[b][c]
+                    z1[b][c] = coeff.b1 * x - coeff.a1 * y + z2[b][c]
+                    z2[b][c] = coeff.b2 * x - coeff.a2 * y
+                    x = y
+                }
+                if x > knee {
+                    x = knee + (1.0 - knee) * tanh((x - knee) / (1.0 - knee))
+                } else if x < -knee {
+                    x = -knee - (1.0 - knee) * tanh((-x - knee) / (1.0 - knee))
+                }
+                let clamped = Int32(round(max(-1.0, min(1.0, x)) * 32767.0))
+                samples[n * ch + c] = Int16(max(-32768, min(32767, clamped)))
+            }
+        }
+    }
+}
+
 // MARK: - PhoneSpeakerEngine
 public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     public static let shared = PhoneSpeakerEngine()
+
+    private let rxEQDSP = Swift5BandBiquadDSP()
+    private let txEQDSP = Swift5BandBiquadDSP()
+
+    // MARK: - Equalizer States
+    @Published public var playEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var serveEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var partyHostEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var partyJoinEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var universalEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var universalApplyTx: Bool = false { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var universalApplyRx: Bool = false { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var customEQPresets: [String: [Float]] = [:] { didSet { saveEQState() } }
+
+    public static let builtinEQPresets: [String: [Float]] = [
+        "Flat": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "Bass Boost": [6.5, 4.0, 0.0, 1.0, 1.5],
+        "Vocal Crisp": [-2.0, -1.0, 3.5, 5.0, 2.0],
+        "Gaming Footsteps": [-3.0, 1.5, 4.5, 6.0, 3.5],
+        "Warm Studio": [3.5, 2.5, -0.5, 1.5, 2.5],
+        "Treble Air": [0.0, 0.0, 1.0, 4.0, 7.0]
+    ]
 
     // MARK: - Published UI States
     @Published public var isAudioPlaying: Bool = false
@@ -221,10 +346,73 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         // Start Control Channel (Port 5005) & 1-second Beacon Discovery IMMEDIATELY on init
         startControlSocket()
         startBeaconTimer()
+        loadEQState()
     }
 
     deinit {
         stopAll()
+    }
+
+    // MARK: - Equalizer Manager Logic
+    public func updateEffectiveEQ() {
+        let isParty = isPartyJoined
+        let modeRX = isParty ? partyJoinEQ : playEQ
+        let rxEnabled = modeRX.enabled || (universalEQ.enabled && universalApplyRx)
+        var rxBands: [Float] = [0, 0, 0, 0, 0]
+        for i in 0..<5 {
+            var sum: Float = 0
+            if modeRX.enabled && i < modeRX.bands.count { sum += modeRX.bands[i] }
+            if universalEQ.enabled && universalApplyRx && i < universalEQ.bands.count { sum += universalEQ.bands[i] }
+            rxBands[i] = max(-12.0, min(12.0, sum))
+        }
+        rxEQDSP.setGains(enabled: rxEnabled, gains: rxBands)
+
+        let isHost = isPartyHost
+        let modeTX = isHost ? partyHostEQ : serveEQ
+        let txEnabled = modeTX.enabled || (universalEQ.enabled && universalApplyTx)
+        var txBands: [Float] = [0, 0, 0, 0, 0]
+        for i in 0..<5 {
+            var sum: Float = 0
+            if modeTX.enabled && i < modeTX.bands.count { sum += modeTX.bands[i] }
+            if universalEQ.enabled && universalApplyTx && i < universalEQ.bands.count { sum += universalEQ.bands[i] }
+            txBands[i] = max(-12.0, min(12.0, sum))
+        }
+        txEQDSP.setGains(enabled: txEnabled, gains: txBands)
+    }
+
+    public func saveCustomEQPreset(name: String, bands: [Float]) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        customEQPresets[clean] = Array((bands + [0, 0, 0, 0, 0]).prefix(5))
+    }
+
+    public func deleteCustomEQPreset(name: String) {
+        customEQPresets.removeValue(forKey: name)
+    }
+
+    private func saveEQState() {
+        let defaults = UserDefaults.standard
+        if let playData = try? JSONEncoder().encode(playEQ) { defaults.set(playData, forKey: "ps_playEQ") }
+        if let serveData = try? JSONEncoder().encode(serveEQ) { defaults.set(serveData, forKey: "ps_serveEQ") }
+        if let phData = try? JSONEncoder().encode(partyHostEQ) { defaults.set(phData, forKey: "ps_partyHostEQ") }
+        if let pjData = try? JSONEncoder().encode(partyJoinEQ) { defaults.set(pjData, forKey: "ps_partyJoinEQ") }
+        if let univData = try? JSONEncoder().encode(universalEQ) { defaults.set(univData, forKey: "ps_universalEQ") }
+        defaults.set(universalApplyTx, forKey: "ps_universalApplyTx")
+        defaults.set(universalApplyRx, forKey: "ps_universalApplyRx")
+        if let customData = try? JSONEncoder().encode(customEQPresets) { defaults.set(customData, forKey: "ps_customEQPresets") }
+    }
+
+    private func loadEQState() {
+        let defaults = UserDefaults.standard
+        if let d = defaults.data(forKey: "ps_playEQ"), let c = try? JSONDecoder().decode(StudioEQConfig.self, from: d) { playEQ = c }
+        if let d = defaults.data(forKey: "ps_serveEQ"), let c = try? JSONDecoder().decode(StudioEQConfig.self, from: d) { serveEQ = c }
+        if let d = defaults.data(forKey: "ps_partyHostEQ"), let c = try? JSONDecoder().decode(StudioEQConfig.self, from: d) { partyHostEQ = c }
+        if let d = defaults.data(forKey: "ps_partyJoinEQ"), let c = try? JSONDecoder().decode(StudioEQConfig.self, from: d) { partyJoinEQ = c }
+        if let d = defaults.data(forKey: "ps_universalEQ"), let c = try? JSONDecoder().decode(StudioEQConfig.self, from: d) { universalEQ = c }
+        universalApplyTx = defaults.bool(forKey: "ps_universalApplyTx")
+        universalApplyRx = defaults.bool(forKey: "ps_universalApplyRx")
+        if let d = defaults.data(forKey: "ps_customEQPresets"), let c = try? JSONDecoder().decode([String: [Float]].self, from: d) { customEQPresets = c }
+        updateEffectiveEQ()
     }
 
     private func syncRelayFlags() {
@@ -467,45 +655,27 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 pcmBuf.frameLength = frameCount
                 let left = pcmBuf.floatChannelData![0]
                 let right = pcmBuf.floatChannelData![1]
-                // Bit-perfect direct path when unmuted and volume is 100% (gain = 1.0)
-                let isUnity = abs(curVolume - 1.0) < 0.001 && !curMuted
-                if isUnity {
-                    if channels == 1 {
-                        for i in 0..<Int(frameCount) {
-                            let off = 12 + i * 2
-                            let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                            let s = Float(Int16(bitPattern: u16)) / 32767.0
-                            left[i] = s
-                            right[i] = s
-                        }
-                    } else {
-                        for i in 0..<Int(frameCount) {
-                            let off = 12 + i * 4
-                            let uL = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                            let uR = UInt16(buffer[off + 2]) | (UInt16(buffer[off + 3]) << 8)
-                            left[i] = Float(Int16(bitPattern: uL)) / 32767.0
-                            right[i] = Float(Int16(bitPattern: uR)) / 32767.0
-                        }
+
+                let totalInt16Count = channels == 1 ? Int(frameCount) : Int(frameCount) * 2
+                var int16Samples = [Int16](repeating: 0, count: totalInt16Count)
+                for i in 0..<totalInt16Count {
+                    let off = 12 + i * 2
+                    let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
+                    int16Samples[i] = Int16(bitPattern: u16)
+                }
+                rxEQDSP.processInt16Samples(&int16Samples, channels: channels)
+
+                let gain: Float = curMuted ? 0.0 : curVolume
+                if channels == 1 {
+                    for i in 0..<Int(frameCount) {
+                        let sample = PhoneSpeakerEngine.softKneeLimit((Float(int16Samples[i]) / 32767.0) * gain)
+                        left[i] = sample
+                        right[i] = sample
                     }
                 } else {
-                    let gain: Float = curMuted ? 0.0 : curVolume
-                    if channels == 1 {
-                        for i in 0..<Int(frameCount) {
-                            let off = 12 + i * 2
-                            let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                            let s16 = Int16(bitPattern: u16)
-                            let sample = PhoneSpeakerEngine.softKneeLimit((Float(s16) / 32767.0) * gain)
-                            left[i] = sample
-                            right[i] = sample
-                        }
-                    } else {
-                        for i in 0..<Int(frameCount) {
-                            let off = 12 + i * 4
-                            let uL = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                            let uR = UInt16(buffer[off + 2]) | (UInt16(buffer[off + 3]) << 8)
-                            left[i] = PhoneSpeakerEngine.softKneeLimit((Float(Int16(bitPattern: uL)) / 32767.0) * gain)
-                            right[i] = PhoneSpeakerEngine.softKneeLimit((Float(Int16(bitPattern: uR)) / 32767.0) * gain)
-                        }
+                    for i in 0..<Int(frameCount) {
+                        left[i] = PhoneSpeakerEngine.softKneeLimit((Float(int16Samples[i * 2]) / 32767.0) * gain)
+                        right[i] = PhoneSpeakerEngine.softKneeLimit((Float(int16Samples[i * 2 + 1]) / 32767.0) * gain)
                     }
                 }
 

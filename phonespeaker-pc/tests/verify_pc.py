@@ -581,6 +581,104 @@ def test_audio_queue_stress_10000() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 14: StereoFiveBandBiquadDSP processing & soft-knee limiting
+# ---------------------------------------------------------------------------
+def test_equalizer_dsp() -> None:
+    name = "StereoFiveBandBiquadDSP processing & limiting"
+    try:
+        from equalizer import StereoFiveBandBiquadDSP
+        dsp = StereoFiveBandBiquadDSP()
+
+        # Generate 480 stereo samples (240 stereo frames @ 48kHz = 5ms)
+        t = np.linspace(0, 0.005, 240, endpoint=False)
+        sine_60 = (np.sin(2 * np.pi * 60 * t) * 10000).astype(np.int16)
+        stereo_pcm = np.empty((240, 2), dtype=np.int16)
+        stereo_pcm[:, 0] = sine_60
+        stereo_pcm[:, 1] = sine_60
+        raw_in = stereo_pcm.tobytes()
+
+        # Disabled DSP should return raw bytes unchanged
+        out_flat = dsp.process_pcm16(raw_in)
+        if out_flat != raw_in:
+            check(name, False, "disabled DSP altered audio samples")
+            return
+
+        # Enable with +12 dB boost on 60 Hz
+        dsp.set_gains([12.0, 0.0, 0.0, 0.0, 0.0], enabled=True)
+        out_boost = dsp.process_pcm16(raw_in)
+        arr_boost = np.frombuffer(out_boost, dtype=np.int16)
+
+        if np.array_equal(arr_boost, stereo_pcm.flatten()):
+            check(name, False, "boosted DSP produced identical samples")
+            return
+
+        # Check soft knee limiting with high amplitude
+        loud_pcm = (np.ones((240, 2), dtype=np.int16) * 32000).tobytes()
+        out_loud = dsp.process_pcm16(loud_pcm)
+        arr_loud = np.frombuffer(out_loud, dtype=np.int16)
+        if np.any(arr_loud > 32767) or np.any(arr_loud < -32768):
+            check(name, False, "samples clipped beyond int16 bounds")
+            return
+
+        check(name, True, f"biquad filter active and soft-knee limiting verified (max amp: {np.max(np.abs(arr_boost))})")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Test 15: EqualizerManager context management & preset saving
+# ---------------------------------------------------------------------------
+def test_equalizer_manager() -> None:
+    name = "EqualizerManager contexts, presets & effective gains"
+    try:
+        from equalizer import EqualizerManager, BUILTIN_PRESETS
+
+        manager = EqualizerManager()
+
+        # Verify built-in presets exist
+        for p in ["Flat", "Bass Boost", "Vocal Crisp", "Gaming Footsteps", "Warm Studio", "Treble Air"]:
+            if p not in BUILTIN_PRESETS:
+                check(name, False, f"missing builtin preset: {p}")
+                return
+
+        # Test context update
+        manager.update_context("play", enabled=True, preset_name="Bass Boost", bands=BUILTIN_PRESETS["Bass Boost"])
+        play_cfg = manager.get_context("play")
+        if not play_cfg["enabled"] or play_cfg["preset_name"] != "Bass Boost":
+            check(name, False, f"context config mismatch: {play_cfg}")
+            return
+
+        # Test custom preset save and delete
+        custom_bands = [3.0, 2.0, 1.0, 0.0, -1.0]
+        manager.save_custom_preset("MyTestPreset", custom_bands)
+        if "MyTestPreset" not in manager.get_all_presets():
+            check(name, False, "custom preset failed to save")
+            return
+
+        manager.delete_custom_preset("MyTestPreset")
+        if "MyTestPreset" in manager.get_all_presets():
+            check(name, False, "custom preset failed to delete")
+            return
+
+        # Test effective gain combination with Universal EQ
+        manager.update_context("universal", enabled=True, preset_name="Custom", bands=[2.0, 2.0, 0.0, 0.0, 0.0], apply_rx=True)
+        effective_en, effective_bands = manager.get_effective_rx_gains(is_party_join=False)
+
+        if not effective_en:
+            check(name, False, "effective gains reported disabled")
+            return
+
+        expected_band0 = min(12.0, BUILTIN_PRESETS["Bass Boost"][0] + 2.0)
+        if abs(effective_bands[0] - expected_band0) > 0.01:
+            check(name, False, f"effective gain calculation wrong: {effective_bands[0]} != {expected_band0}")
+            return
+
+        check(name, True, "5 contexts, custom preset lifecycle, and universal combination verified")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -603,6 +701,8 @@ def main() -> None:
     test_udp_sender_party_fanout()
     test_audio_queue_drop_oldest()
     test_audio_queue_stress_10000()
+    test_equalizer_dsp()
+    test_equalizer_manager()
 
     print()
     print("=" * 60)

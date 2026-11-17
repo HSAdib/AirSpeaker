@@ -49,6 +49,7 @@ object AudioNative {
     external fun nativeSetPartyRelay(enabled: Boolean)
     external fun nativeIsPartyRelay(): Boolean
     external fun nativeSetPartyPeers(peers: Array<String>)
+    external fun nativeSetEqBands(enabled: Boolean, gainsDb: FloatArray)
     external fun nativeGetAudioSessionId(): Int
     external fun nativeGetStats(): FloatArray?
     external fun nativeGetAdvancedStats(): DoubleArray?

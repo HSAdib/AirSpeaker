@@ -14,6 +14,8 @@ static float gSavedVolumeGain = 1.0f;
 static bool gSavedLowLatency = true;
 static bool gSavedPartyRelay = false;
 static std::vector<std::string> gSavedPartyPeers;
+static bool gSavedEqEnabled = false;
+static float gSavedEqBands[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 extern "C" {
 
@@ -30,6 +32,7 @@ Java_com_hasan_phonespeaker_AudioNative_nativeStart(JNIEnv* /*env*/, jobject /*t
     gAudioEngine->setLowLatencyMode(gSavedLowLatency);
     gAudioEngine->setPartyRelayEnabled(gSavedPartyRelay);
     gAudioEngine->setPartyPeers(gSavedPartyPeers);
+    gAudioEngine->setEqualizerBands(gSavedEqEnabled, gSavedEqBands[0], gSavedEqBands[1], gSavedEqBands[2], gSavedEqBands[3], gSavedEqBands[4]);
     return gAudioEngine->start(port) ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -160,6 +163,23 @@ Java_com_hasan_phonespeaker_AudioNative_nativeSetPartyPeers(JNIEnv* env, jobject
     gSavedPartyPeers = peerList;
     if (gAudioEngine) {
         gAudioEngine->setPartyPeers(gSavedPartyPeers);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_hasan_phonespeaker_AudioNative_nativeSetEqBands(JNIEnv* env, jobject /*thiz*/, jboolean enabled, jfloatArray gainsDb) {
+    std::lock_guard<std::mutex> lock(gEngineMutex);
+    gSavedEqEnabled = (enabled == JNI_TRUE);
+    if (gainsDb != nullptr) {
+        jsize len = env->GetArrayLength(gainsDb);
+        jfloat* elements = env->GetFloatArrayElements(gainsDb, nullptr);
+        for (int i = 0; i < 5; ++i) {
+            gSavedEqBands[i] = (i < len) ? elements[i] : 0.0f;
+        }
+        env->ReleaseFloatArrayElements(gainsDb, elements, JNI_ABORT);
+    }
+    if (gAudioEngine) {
+        gAudioEngine->setEqualizerBands(gSavedEqEnabled, gSavedEqBands[0], gSavedEqBands[1], gSavedEqBands[2], gSavedEqBands[3], gSavedEqBands[4]);
     }
 }
 

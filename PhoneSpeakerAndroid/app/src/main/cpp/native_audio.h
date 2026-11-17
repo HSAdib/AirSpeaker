@@ -56,6 +56,7 @@ public:
     void setPartyRelayEnabled(bool enabled);
     bool isPartyRelayEnabled() const;
     void setPartyPeers(const std::vector<std::string>& peers);
+    void setEqualizerBands(bool enabled, float b0, float b1, float b2, float b3, float b4);
     int32_t getAudioSessionId() const;
 
     JitterStats getStats();
@@ -101,6 +102,17 @@ private:
     alignas(64) std::atomic<uint64_t> mTotalCallbackMicros{0};
     alignas(64) std::atomic<int64_t> mMaxCallbackMicros{0};
     alignas(64) std::atomic<uint64_t> mDeadlineMisses{0};
+
+    // 5-Band Biquad Equalizer state
+    struct EqBandCoeffs {
+        double b0{1.0}, b1{0.0}, b2{0.0}, a1{0.0}, a2{0.0};
+        bool active{false};
+    };
+    std::atomic<bool> mEqEnabled{false};
+    std::atomic<float> mEqGainsDb[5]{{0.0f}, {0.0f}, {0.0f}, {0.0f}, {0.0f}};
+    EqBandCoeffs mEqCoeffs[5];
+    double mEqZ1[5][2]{{0.0}};
+    double mEqZ2[5][2]{{0.0}};
 
     JitterBuffer mJitterBuffer;
 };

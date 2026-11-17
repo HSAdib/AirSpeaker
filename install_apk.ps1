@@ -1,4 +1,4 @@
-# install_apk.ps1 — Helper to install and launch PhoneSpeaker APK on Android
+﻿# install_apk.ps1 — Helper to install and launch PhoneSpeaker APK on Android
 
 $ErrorActionPreference = "Stop"
 
@@ -16,16 +16,14 @@ try {
 }
 
 $builtApk = Join-Path $PSScriptRoot "PhoneSpeakerAndroid\app\build\outputs\apk\debug\app-debug.apk"
-$apkPath = Join-Path $PSScriptRoot "PhoneSpeaker v2.apk"
-if (-not (Test-Path $apkPath) -and (Test-Path (Join-Path $PSScriptRoot "PhoneSpeaker.apk"))) {
-    $apkPath = Join-Path $PSScriptRoot "PhoneSpeaker.apk"
-}
+$apkPath = Join-Path $PSScriptRoot "PhoneSpeaker.v2.1.apk"
 if (Test-Path $builtApk) {
-    Copy-Item -Path $builtApk -Destination (Join-Path $PSScriptRoot "PhoneSpeaker v2.apk") -Force
-    $apkPath = Join-Path $PSScriptRoot "PhoneSpeaker v2.apk"
+    Copy-Item -Path $builtApk -Destination $apkPath -Force
 }
 if (-not (Test-Path $apkPath)) {
-    if (Test-Path $builtApk) {
+    if (Test-Path (Join-Path $PSScriptRoot "PhoneSpeaker v2.apk")) {
+        $apkPath = Join-Path $PSScriptRoot "PhoneSpeaker v2.apk"
+    } elseif (Test-Path $builtApk) {
         $apkPath = $builtApk
     }
 }

@@ -15,6 +15,7 @@ import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+from equalizer import StereoFiveBandBiquadDSP
 
 try:
     try:
@@ -284,11 +285,14 @@ class AudioReceiver:
         self,
         port: int = AUDIO_PORT,
         output_device_index: Optional[object] = None,
+        target_buffer_ms: float = 30.0,
         on_stats: Optional[Callable[[int], None]] = None,
         on_packet: Optional[Callable[[bytes, Tuple[str, int]], None]] = None,
     ):
         self._port = port
         self._device_index = output_device_index
+        self._target_buffer_ms = max(10.0, min(200.0, float(target_buffer_ms)))
+        self._rx_eq_dsp = StereoFiveBandBiquadDSP(SAMPLE_RATE)
         self._on_stats = on_stats
         self._on_packet = on_packet
 
@@ -320,6 +324,12 @@ class AudioReceiver:
         self._pps_count = 0
         self._last_pps_time = 0.0
         self.peak_level: float = 0.0
+
+    def set_target_buffer_ms(self, target_ms: float) -> None:
+        self._target_buffer_ms = max(10.0, min(200.0, float(target_ms)))
+
+    def set_eq_gains(self, enabled: bool, gains_db: List[float]) -> None:
+        self._rx_eq_dsp.set_gains(gains_db, enabled=enabled)
 
     @property
     def is_running(self) -> bool:
@@ -543,6 +553,7 @@ class AudioReceiver:
 
     def _render_and_write(self, pcm_data: bytes, channels: int) -> None:
         try:
+            pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, channels)
             out_pcm = pcm_data
             if self._dev_rate != SAMPLE_RATE or self._dev_channels != channels:
                 pcm_arr = np.frombuffer(pcm_data, dtype="<i2")
@@ -599,8 +610,10 @@ class AudioReceiver:
         """Dedicated audio playback thread consuming decoded mic frames smoothly."""
         while self._running:
             try:
+                min_packets = max(2, int(round(self._target_buffer_ms / 5.0)))
+                max_packets = max(min_packets + 6, int(round((self._target_buffer_ms + 30.0) / 5.0)))
                 if self._is_prebuffering:
-                    if len(self._pcm_queue) < 6:
+                    if len(self._pcm_queue) < min_packets:
                         self._queue_event.wait(timeout=0.02)
                         self._queue_event.clear()
                         continue
@@ -608,7 +621,7 @@ class AudioReceiver:
 
                 if self._pcm_queue:
                     self._conceal_count = 0
-                    while len(self._pcm_queue) > 18:
+                    while len(self._pcm_queue) > max_packets:
                         try:
                             self._pcm_queue.popleft()
                         except IndexError:

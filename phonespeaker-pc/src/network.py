@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import psutil
 
+from equalizer import StereoFiveBandBiquadDSP
 from protocol import (
     AUDIO_PORT,
     CONTROL_PORT,
@@ -249,7 +250,11 @@ class UDPSender:
         self._muted: bool = False
         self._volume_gain: float = 1.0
         self._send_enabled: bool = True
+        self._tx_eq_dsp = StereoFiveBandBiquadDSP(48000)
         self._lock = threading.Lock()
+
+    def set_eq_gains(self, enabled: bool, gains_db: List[float]) -> None:
+        self._tx_eq_dsp.set_gains(gains_db, enabled=enabled)
 
     def set_party_mode(self, enabled: bool) -> None:
         with self._lock:
@@ -435,6 +440,9 @@ class UDPSender:
                 pcm_frame = pcm_frame[:expected_pcm_len]
             else:
                 pcm_frame = pcm_frame + b'\x00' * (expected_pcm_len - len(pcm_frame))
+
+        if not muted and gain > 0.001:
+            pcm_frame = self._tx_eq_dsp.process_pcm16(pcm_frame, 2)
 
         if muted or gain <= 0.001:
             pcm_frame = b'\x00' * len(pcm_frame)

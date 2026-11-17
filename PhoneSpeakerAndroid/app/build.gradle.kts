@@ -98,12 +98,10 @@ dependencies {
 tasks.register("copyDebugApkToRoot") {
     doLast {
         val srcApk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
-        val destApk = rootProject.projectDir.parentFile.resolve("PhoneSpeaker v2.apk")
         val destApkV21 = rootProject.projectDir.parentFile.resolve("PhoneSpeaker.v2.1.apk")
         if (srcApk.exists()) {
-            srcApk.copyTo(destApk, overwrite = true)
             srcApk.copyTo(destApkV21, overwrite = true)
-            println("Copied ${srcApk.absolutePath} to ${destApk.absolutePath} and ${destApkV21.absolutePath}")
+            println("Copied ${srcApk.absolutePath} to ${destApkV21.absolutePath}")
         }
     }
 }
