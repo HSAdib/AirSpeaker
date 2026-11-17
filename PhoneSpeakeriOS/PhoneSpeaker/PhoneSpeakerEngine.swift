@@ -294,7 +294,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         isRunningAudio = false
         playerNode.stop()
 
-        stopStatsTimer()
+        if !isInternalAudioServing {
+            stopStatsTimer()
+        }
         closeSocket(&audioRxSocket)
         audioBufferQueueCount.reset()
 
@@ -643,6 +645,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 } else {
                     self?.isInternalAudioServing = true
                     self?.statusMessage = "Serving Internal Audio (Port 5004)"
+                    self?.startStatsTimer()
                 }
             }
         }
@@ -660,6 +663,23 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
+
+        if atomicRelayActive {
+            self.peersLock.lock()
+            let peers = Array(self.partyPeerIps)
+            self.peersLock.unlock()
+            for peer in peers where peer != toIp {
+                var peerAddr = sockaddr_in()
+                peerAddr.sin_family = sa_family_t(AF_INET)
+                peerAddr.sin_port = in_port_t(5004).bigEndian
+                inet_pton(AF_INET, peer, &peerAddr.sin_addr)
+                withUnsafePointer(to: &peerAddr) { addrPtr in
+                    _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                        sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+                }
+            }
+        }
     }
 
     public func stopServingInternalAudio() {
@@ -669,6 +689,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                 self?.isInternalAudioServing = false
                 self?.statusMessage = "Internal Audio Sender Stopped"
                 self?.closeSocket(&self!.serveTxSocket)
+                if let playing = self?.isAudioPlaying, !playing {
+                    self?.stopStatsTimer()
+                }
             }
         }
     }
@@ -1074,6 +1097,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func startStatsTimer() {
+        statsTimer?.invalidate()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.stateLock.lock()
@@ -1084,8 +1108,16 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
 
             let total = curRx + curLost
             self.packetLossPercent = total > 0 ? (Double(curLost) / Double(total)) * 100.0 : 0.0
-            let curBufMs = Double(self.audioBufferQueueCount.value * 5)
-            self.latencyMs = curBufMs > 0 ? curBufMs : Double(self.bufferTargetMs)
+            let queueBufMs = Double(self.audioBufferQueueCount.value * 5)
+            let curBufMs: Double
+            if queueBufMs > 0 {
+                curBufMs = queueBufMs
+            } else if self.isInternalAudioServing && self.serveTxPps > 0 {
+                curBufMs = Double(self.bufferTargetMs) + Double(self.servePeakLevel * 5.0)
+            } else {
+                curBufMs = 0.0
+            }
+            self.latencyMs = curBufMs
 
             self.delayHistory.append(curBufMs)
             if self.delayHistory.count > 60 {

@@ -1561,6 +1561,19 @@ class MainActivity : AppCompatActivity() {
             val (estTotal, _) = computeExpectedDelayMs()
             binding.latencyGraph.pushSample(safeBuffer, target, estTotal.toFloat())
 
+            val servePpsNow = AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0
+            val servePeakNow = AudioStreamService.internalAudioStreamerInstance?.peakLevel?.get() ?: 0f
+            val activeServeBuf = if (safeBuffer > 0.1f) {
+                safeBuffer
+            } else if (AudioStreamService.isServing && servePpsNow > 0) {
+                target + (servePeakNow * 5.0f)
+            } else {
+                0f
+            }
+            binding.latencyGraphServe.pushSample(activeServeBuf, target, estTotal.toFloat())
+            binding.latencyGraphPartyHost.pushSample(activeServeBuf, target, estTotal.toFloat())
+            binding.latencyGraphPartyJoin.pushSample(safeBuffer, target, estTotal.toFloat())
+
             binding.tvBufferLevel.text = String.format("%.1f ms", safeBuffer)
             val targetText = if (target % 1f == 0f) "${target.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", target)
             binding.tvActiveTarget.text = targetText

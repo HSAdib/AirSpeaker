@@ -264,6 +264,7 @@ jobs:
           #### Unified Architecture Highlights:
           - **Zero-Loss PCM16 Playout:** Default 48 kHz stereo lossless PCM16 transmission with sub-35 ms latency, lock-free SPSC PCM ring buffer, and hardened prebuffering.
           - **Option A Internal System Audio Capture (SERVE):** Stream internal audio directly from Android 10+ (MediaProjection AudioPlaybackCaptureConfiguration) and iOS (ReplayKit app audio capture) on UDP port 5004.
+          - **Real-Time Live Delay Graphs:** Real-time buffer latency and jitter visualization active across all PLAY, SERVE, and PARTY (Host & Join) tabs on PC, Android, and iOS.
           - **Unified Monospace UI:** Exact identical tabs across all platforms:
             - **Phone (Android & iOS — Exactly 4 Tabs):** `[ PLAY ]` *(Default on startup)* | `[ SERVE ]` | `[ PARTY ]` | `[ SETTINGS ]`
             - **PC (Windows, macOS, Linux — Exactly 5 Tabs):** `[ PLAY ]` | `[ SERVE ]` *(Default on startup)* | `[ PARTY ]` | `[ SETTINGS ]` | `[ VIRTUAL DEVICE ]`

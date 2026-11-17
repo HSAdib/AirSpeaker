@@ -719,6 +719,12 @@ class PhoneSpeakerApp:
                 row=i // 2, column=i % 2, sticky="ew"
             )
 
+        dg_serve = tk.LabelFrame(status_frame, text=" Live Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=2)
+        dg_serve.pack(fill="both", expand=True, padx=4, pady=(3, 2))
+        tk.Label(dg_serve, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
+        self._serve_delay_canvas = tk.Canvas(dg_serve, width=480, height=55, bg="#080808", highlightthickness=1, highlightbackground="#333333")
+        self._serve_delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 2))
+
     # ------------------------------------------------------------------
     # TAB 2: Dedicated Party Mode
     # ------------------------------------------------------------------
@@ -883,6 +889,13 @@ class PhoneSpeakerApp:
 
         ttk.Button(add_row, text="+ Add to Party", command=self._on_add_party_device_manual).pack(side="left")
 
+        # Live Party Delay Graph for Host
+        dg_phost = tk.LabelFrame(self.party_host_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
+        dg_phost.pack(fill="x", **pad)
+        tk.Label(dg_phost, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
+        self._party_host_delay_canvas = tk.Canvas(dg_phost, width=480, height=55, bg="#080808", highlightthickness=1, highlightbackground="#333333")
+        self._party_host_delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 2))
+
         # Hotspot Quick Guide
         hf = tk.LabelFrame(
             self.party_host_frame, text=" How Party Mode Works with Mobile Hotspot ",
@@ -981,6 +994,13 @@ class PhoneSpeakerApp:
             bg="#0D151A", fg="#38B6FF", font=FONT_MONO_BOLD, anchor="w", padx=8, pady=6, bd=1, relief="solid"
         )
         self.party_join_status_label.pack(fill="x", padx=8, pady=(0, 4))
+
+        # Live Party Delay Graph for Joiner
+        dg_pjoin = tk.LabelFrame(self.party_join_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
+        dg_pjoin.pack(fill="x", padx=8, pady=(0, 4))
+        tk.Label(dg_pjoin, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
+        self._party_join_delay_canvas = tk.Canvas(dg_pjoin, width=480, height=55, bg="#080808", highlightthickness=1, highlightbackground="#333333")
+        self._party_join_delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 2))
 
         # 4. POST-JOIN EXTEND PARTY CARD (Hidden until successfully joined a host!)
         self.party_extend_card = tk.LabelFrame(
@@ -2518,42 +2538,42 @@ class PhoneSpeakerApp:
             f"Delay: {current_buf:.1f} ms (Est. Total: ~{est_total} ms) | Target: {target_buf:.0f} ms | Loss: {losses}"
         )
 
-        c = self._delay_canvas
-        w = c.winfo_width()
-        if w <= 10:
-            w = 360
-        h = c.winfo_height()
-        if h <= 10:
-            h = 75
         max_ms = 160.0
-
-        c.delete("all")
-        c.create_rectangle(0, 0, w, h, fill="#080808", outline="")
-
-        # Grid lines at 50, 100, 150 ms
-        for ms in [50.0, 100.0, 150.0]:
-            y = max(1.0, min(float(h - 1), h - (ms / max_ms) * h))
-            c.create_line(0, y, w, y, fill="#222222", width=1)
-
-        # Title overlay
-        c.create_text(8, 10, text="LIVE DELAY GRAPH (0 - 160 ms)", fill="#555555", anchor="w", font=FONT_MONO_SM)
-
-        # Target line (dashed)
-        target_y = max(2.0, min(float(h - 2), h - (min(target_buf, max_ms) / max_ms) * h))
-        c.create_line(0, target_y, w, target_y, fill="#888888", width=1, dash=(4, 4))
-
-        # Actual buffer line
-        points = []
         n_pts = len(self._delay_history)
-        step_x = float(w) / max(1, n_pts - 1)
-        for idx, val in enumerate(self._delay_history):
-            x = idx * step_x
-            y = max(2.0, min(float(h - 2), h - (min(val, max_ms) / max_ms) * h))
-            points.extend([x, y])
-
         line_color = WARN if (current_buf > target_buf + 20.0) else ACCENT
-        if len(points) >= 4:
-            c.create_line(*points, fill=line_color, width=2)
+
+        for attr in ("_delay_canvas", "_serve_delay_canvas", "_party_host_delay_canvas", "_party_join_delay_canvas"):
+            c = getattr(self, attr, None)
+            if c is None:
+                continue
+            w = c.winfo_width()
+            if w <= 10:
+                w = 360
+            h = c.winfo_height()
+            if h <= 10:
+                h = 60
+
+            c.delete("all")
+            c.create_rectangle(0, 0, w, h, fill="#080808", outline="")
+
+            for ms in [50.0, 100.0, 150.0]:
+                y = max(1.0, min(float(h - 1), h - (ms / max_ms) * h))
+                c.create_line(0, y, w, y, fill="#222222", width=1)
+
+            c.create_text(8, 10, text="LIVE DELAY GRAPH (0 - 160 ms)", fill="#555555", anchor="w", font=FONT_MONO_SM)
+
+            target_y = max(2.0, min(float(h - 2), h - (min(target_buf, max_ms) / max_ms) * h))
+            c.create_line(0, target_y, w, target_y, fill="#888888", width=1, dash=(4, 4))
+
+            points = []
+            step_x = float(w) / max(1, n_pts - 1)
+            for idx, val in enumerate(self._delay_history):
+                x = idx * step_x
+                y = max(2.0, min(float(h - 2), h - (min(val, max_ms) / max_ms) * h))
+                points.extend([x, y])
+
+            if len(points) >= 4:
+                c.create_line(*points, fill=line_color, width=2)
 
     def _schedule_ui_update(self) -> None:
         try:
@@ -2561,11 +2581,14 @@ class PhoneSpeakerApp:
 
             cap_level = getattr(self._audio_capture, "peak_level", 0.0) if (self._streaming and self._audio_capture) else 0.0
             recv_level = getattr(self._phone_receiver, "peak_level", 0.0) if self._phone_receiver else 0.0
-            target_level = max(cap_level, recv_level)
+            party_recv_level = getattr(self._party_join_receiver, "peak_level", 0.0) if getattr(self, "_party_join_receiver", None) else 0.0
+            target_level = max(cap_level, recv_level, party_recv_level)
             if self._audio_capture:
                 self._audio_capture.peak_level = 0.0
             if self._phone_receiver:
                 self._phone_receiver.peak_level = 0.0
+            if getattr(self, "_party_join_receiver", None):
+                self._party_join_receiver.peak_level = 0.0
 
             if target_level > self._peak_level:
                 self._peak_level = target_level
@@ -2590,11 +2613,22 @@ class PhoneSpeakerApp:
                     if isinstance(t, (int, float)):
                         tgt_val = float(t)
                     losses = self._phone_stats.get("lost_packets", 0)
-                if buf_val == 0.0 and self._play_active and self._phone_receiver and self._rx_pps > 0:
+                if buf_val == 0.0 and getattr(self, "_party_joined_active", False) and getattr(self, "_party_join_receiver", None) and getattr(self, "_party_join_rx_pps", 0) > 0:
+                    try:
+                        buf_val = float(len(self._party_join_receiver._pcm_queue) * 5.0)
+                    except Exception:
+                        pass
+                elif buf_val == 0.0 and self._play_active and self._phone_receiver and self._rx_pps > 0:
                     try:
                         buf_val = float(len(self._phone_receiver._pcm_queue) * 5.0)
                         if hasattr(self, "play_buf_level_var"):
                             self.play_buf_level_var.set(f"{buf_val:.1f} ms")
+                    except Exception:
+                        pass
+                elif buf_val == 0.0 and self._streaming and self._pps > 0:
+                    try:
+                        q_ms = float((self._audio_queue.qsize() if self._audio_queue else 0) * int(self.frame_ms_var.get() or 5))
+                        buf_val = tgt_val + q_ms
                     except Exception:
                         pass
                 est_total, _ = self._compute_expected_delay_ms()
@@ -2846,7 +2880,10 @@ class PhoneSpeakerApp:
 
                         if hasattr(self, "play_buf_level_var"):
                             buf_ms = s.get("buffer_ms", "--")
-                            self.play_buf_level_var.set(f"{buf_ms:.1f} ms" if isinstance(buf_ms, (int, float)) else "-- ms")
+                            if isinstance(buf_ms, (int, float)) and buf_ms > 0.0:
+                                self.play_buf_level_var.set(f"{buf_ms:.1f} ms")
+                            elif not (self._play_active and self._rx_pps > 0):
+                                self.play_buf_level_var.set(f"{buf_ms:.1f} ms" if isinstance(buf_ms, (int, float)) else "-- ms")
                         if hasattr(self, "play_target_var"):
                             tgt_ms = s.get("target_ms", self.custom_buffer_var.get())
                             self.play_target_var.set(f"{tgt_ms:.1f} ms" if isinstance(tgt_ms, (int, float)) else f"{self.custom_buffer_var.get():.1f} ms")

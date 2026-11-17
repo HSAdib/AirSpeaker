@@ -530,6 +530,18 @@ struct ServeStudioTab: View {
                 .padding(10)
                 .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                 .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("LIVE DELAY GRAPH")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    LiveDelayGraphView(
+                        history: engine.delayHistory,
+                        targetMs: Double(engine.bufferTargetMs),
+                        currentBufMs: engine.latencyMs
+                    )
+                }
             }
             .padding(14)
         }
@@ -667,6 +679,18 @@ struct PartyStudioTab: View {
                         Text(engine.isAudioPlaying ? "PARTY STATUS: HOSTING / RELAYING (\(engine.partyMembers.count) peer(s) connected)" : "PARTY STATUS: STANDBY — Tap Start Party Broadcast")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(engine.isAudioPlaying ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("LIVE DELAY GRAPH")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+
+                            LiveDelayGraphView(
+                                history: engine.delayHistory,
+                                targetMs: Double(engine.bufferTargetMs),
+                                currentBufMs: engine.latencyMs
+                            )
+                        }
 
                         // Manual Add Peer
                         HStack(spacing: 6) {
@@ -841,6 +865,18 @@ struct PartyStudioTab: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color(red: 0.07, green: 0.07, blue: 0.07))
                             .foregroundColor(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("LIVE DELAY GRAPH")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+
+                            LiveDelayGraphView(
+                                history: engine.delayHistory,
+                                targetMs: Double(engine.bufferTargetMs),
+                                currentBufMs: engine.latencyMs
+                            )
+                        }
 
                         // Post-Join: Extend This Party (Hotspot Repeater)
                         if engine.isPartyJoined {

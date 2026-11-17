@@ -194,6 +194,18 @@ class InternalAudioStreamer {
                     // Ignore transient network errors
                 }
 
+                if (ControlChannel.isHostingOrExtendingParty && ControlChannel.partyPeerIps.isNotEmpty()) {
+                    for (peerIp in ControlChannel.partyPeerIps) {
+                        if (peerIp != targetIpStr) {
+                            try {
+                                val peerAddr = InetAddress.getByName(peerIp)
+                                val peerDgram = DatagramPacket(packetBytes, PACKET_SIZE, peerAddr, targetPort)
+                                sock.send(peerDgram)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+
                 sequence++
                 packetsSent.incrementAndGet()
                 ppsCounter++
