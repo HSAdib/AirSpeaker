@@ -1,4 +1,5 @@
-PyAudioWPatch
+PyAudioWPatch>=0.2.12.6; sys_platform == "win32"
+PyAudio>=0.2.14; sys_platform != "win32"
 numpy
 soxr
 pystray

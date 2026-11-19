@@ -70,25 +70,62 @@ jobs:
           fi
           rm -f /tmp/release.keystore
 
-      - name: Locate and Package Android Artifact
+      - name: Locate, Verify, and Package Android Artifacts
         run: |
-          APK_PATH=""
-          if [ -n "$PHONESPEAKER_KEYSTORE_PATH" ]; then
-            APK_PATH=$(find AirSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
+          APK_DIR="AirSpeakerAndroid/app/build/outputs/apk/release"
+          if [ ! -d "$APK_DIR" ] || [ -z "$(find "$APK_DIR" -name "*.apk" 2>/dev/null)" ]; then
+            APK_DIR="AirSpeakerAndroid/app/build/outputs/apk/debug"
           fi
-          if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find AirSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
-          fi
-          echo "Selected APK: $APK_PATH"
-          cp "$APK_PATH" AirSpeaker-v1.apk
-          sha256sum AirSpeaker-v1.apk | tee AirSpeaker-v1.apk.sha256
+          echo "Using APK directory: $APK_DIR"
+          ls -la "$APK_DIR"
 
-      - name: Upload Android APK Artifact
+          mkdir -p android-deliverables
+
+          # Locate build-tools apksigner
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: apksigner not found in $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          echo "Using apksigner: $APKSIGNER"
+
+          copy_and_verify() {
+            local pattern="$1"
+            local dest="$2"
+            local src=$(find "$APK_DIR" -name "*$pattern*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
+            if [ -z "$src" ] || [ ! -f "$src" ]; then
+              echo "ERROR: Missing required APK variant for $pattern in $APK_DIR"
+              exit 1
+            fi
+            echo "Verifying signature for $src ..."
+            $APKSIGNER verify --verbose "$src" || {
+              echo "ERROR: $src signature verification failed!"
+              exit 1
+            }
+            cp -f "$src" "android-deliverables/$dest"
+            echo "Packaged: android-deliverables/$dest (from $src)"
+          }
+
+          copy_and_verify "arm64-v8a" "AirSpeaker-v1-arm64-v8a.apk"
+          copy_and_verify "armeabi-v7a" "AirSpeaker-v1-armeabi-v7a.apk"
+          copy_and_verify "x86_64" "AirSpeaker-v1-x86_64.apk"
+          copy_and_verify "x86" "AirSpeaker-v1-x86.apk"
+          copy_and_verify "universal" "AirSpeaker-v1-universal.apk"
+
+          # Universal alias for backward compatibility
+          cp -f "android-deliverables/AirSpeaker-v1-universal.apk" "android-deliverables/AirSpeaker-v1.apk"
+
+          cd android-deliverables
+          sha256sum *.apk | tee SHA256SUMS-android.txt
+          ls -la
+
+      - name: Upload Android APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: AirSpeaker-v1-APK
           path: |
-            AirSpeaker-v1.apk
+            android-deliverables/*.apk
+            android-deliverables/SHA256SUMS-android.txt
 
   # ====================================================
   # 2. WINDOWS BUILD JOB (Inno Setup 6 + PyInstaller)
@@ -263,7 +300,7 @@ jobs:
   release-publish:
     name: Publish Official Release Deliverables
     needs: [build-android, build-windows, build-linux, build-apple]
-    if: always() && (startsWith(github.ref, 'refs/tags/v1.') || github.ref_name == 'main')
+    if: (startsWith(github.ref, 'refs/tags/v1.') || github.ref_name == 'main') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -272,7 +309,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Download Android Artifact
+      - name: Download Android Artifacts
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -341,7 +378,13 @@ jobs:
           #### Deliverables for All 5 Operating Systems:
           - **Windows (Installed App):** \`AirSpeaker-v1-Setup.exe\` (Native Start Menu & Windows Settings setup)
           - **Windows (Portable):** \`AirSpeaker-v1-Portable.exe\` (Standalone zero-install single-file executable)
-          - **Android:** \`AirSpeaker-v1.apk\` (C++ Oboe AAudio player & MediaProjection internal audio streamer)
+          - **Android (Architecture Splits + Universal APK):**
+            - \`AirSpeaker-v1-arm64-v8a.apk\` — **Recommended for modern phones** (64-bit ARM, smaller download & optimal performance)
+            - \`AirSpeaker-v1-universal.apk\` — **Universal APK** (All architectures bundled, fallback if unsure of your CPU)
+            - \`AirSpeaker-v1.apk\` — *(Universal compatibility alias)*
+            - \`AirSpeaker-v1-armeabi-v7a.apk\` — Older 32-bit ARM phones
+            - \`AirSpeaker-v1-x86_64.apk\` — 64-bit x86 tablets, emulators & ChromeOS
+            - \`AirSpeaker-v1-x86.apk\` — 32-bit x86 emulators & devices
           - **macOS:** \`AirSpeaker-v1-macOS.dmg\` (Drag-and-Drop installer with Applications symlink)
           - **Linux:** \`AirSpeaker-v1-Linux-x86_64.tar.gz\` & One-Click Installer (\`install_linux.sh\`)
           - **iOS:** \`AirSpeaker-v1-iOS.ipa\` (AVAudioEngine player & ReplayKit internal streamer for sideloading)

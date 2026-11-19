@@ -369,6 +369,7 @@ class AudioReceiver:
                 )
                 self._dev_rate = SAMPLE_RATE
                 self._dev_channels = CHANNELS
+                self._use_float32 = False
                 return True
 
         if not _PYAUDIO_AVAILABLE:

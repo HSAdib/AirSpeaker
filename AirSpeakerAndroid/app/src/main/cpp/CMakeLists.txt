@@ -42,3 +42,5 @@ target_link_libraries(airspeaker_native PRIVATE
     android
 )
 
+target_link_options(airspeaker_native PRIVATE "-Wl,-z,max-page-size=16384")
+

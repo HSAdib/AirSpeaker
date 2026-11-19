@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
 class AudioStreamService : Service() {
@@ -75,6 +76,8 @@ class AudioStreamService : Service() {
     private var savedVolumeGain = 1.0f
     private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
     private var lastAttachedSessionId = 0
+    private var currentMediaProjection: MediaProjection? = null
+    private var mediaProjectionCallback: MediaProjection.Callback? = null
     private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun applyEffectiveMuteAndGain() {
@@ -115,7 +118,12 @@ class AudioStreamService : Service() {
             addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
             addAction(Intent.ACTION_HEADSET_PLUG)
         }
-        registerReceiver(noisyReceiver, filter)
+        ContextCompat.registerReceiver(
+            this,
+            noisyReceiver,
+            filter,
+            ContextCompat.RECEIVER_EXPORTED
+        )
     }
 
     override fun onDestroy() {
@@ -315,6 +323,22 @@ class AudioStreamService : Service() {
             return
         }
 
+        val mpCallback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.i(TAG, "MediaProjection stopped by system")
+                serviceHandler.post {
+                    stopServingInternalAudio()
+                }
+            }
+        }
+        try {
+            projection.registerCallback(mpCallback, serviceHandler)
+            currentMediaProjection = projection
+            mediaProjectionCallback = mpCallback
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register MediaProjection callback: ${e.message}")
+        }
+
         if (internalStreamer == null) {
             internalStreamer = InternalAudioStreamer()
             internalAudioStreamerInstance = internalStreamer
@@ -333,6 +357,13 @@ class AudioStreamService : Service() {
             isServing = false
             internalStreamer = null
             internalAudioStreamerInstance = null
+            try {
+                if (currentMediaProjection != null && mediaProjectionCallback != null) {
+                    currentMediaProjection?.unregisterCallback(mediaProjectionCallback!!)
+                }
+            } catch (_: Exception) {}
+            currentMediaProjection = null
+            mediaProjectionCallback = null
             if (!isStreaming) {
                 releaseLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -349,6 +380,14 @@ class AudioStreamService : Service() {
         internalStreamer?.stop()
         internalStreamer = null
         internalAudioStreamerInstance = null
+
+        try {
+            if (currentMediaProjection != null && mediaProjectionCallback != null) {
+                currentMediaProjection?.unregisterCallback(mediaProjectionCallback!!)
+            }
+        } catch (_: Exception) {}
+        currentMediaProjection = null
+        mediaProjectionCallback = null
 
         if (!isStreaming) {
             releaseLocks()

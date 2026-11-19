@@ -55,16 +55,7 @@ try {
     Pop-Location
 }
 
-$builtApk = Join-Path $PSScriptRoot "AirSpeakerAndroid\app\build\outputs\apk\debug\app-debug.apk"
-$apkPath = Join-Path $PSScriptRoot "AirSpeaker-v1.apk"
-if (Test-Path $builtApk) {
-    Copy-Item -Path $builtApk -Destination $apkPath -Force
-    Write-Host "Fresh APK copied to: $apkPath" -ForegroundColor Green
-} else {
-    Write-Error "Built APK not found at $builtApk"
-}
-
-# 3. Locate adb
+# 3. Locate adb and select appropriate APK variant
 $adb = "adb"
 try {
     Get-Command $adb -ErrorAction Stop | Out-Null
@@ -73,9 +64,42 @@ try {
     if (Test-Path $sdkAdb) {
         $adb = $sdkAdb
     } else {
-        Write-Warning "Could not locate adb.exe. APK built successfully at $apkPath."
-        exit 0
+        $adb = $null
     }
+}
+
+$deviceAbi = $null
+if ($adb) {
+    try {
+        $abiOut = & $adb shell getprop ro.product.cpu.abi 2>$null
+        if ($abiOut) {
+            $deviceAbi = $abiOut.Trim()
+        }
+    } catch {}
+}
+
+$apkDir = Join-Path $PSScriptRoot "AirSpeakerAndroid\app\build\outputs\apk\debug"
+$selectedApk = $null
+if ($deviceAbi -and (Test-Path (Join-Path $apkDir "app-$deviceAbi-debug.apk"))) {
+    $selectedApk = Join-Path $apkDir "app-$deviceAbi-debug.apk"
+    Write-Host "Matched connected device architecture ($deviceAbi): $selectedApk" -ForegroundColor Green
+} elseif (Test-Path (Join-Path $apkDir "app-universal-debug.apk")) {
+    $selectedApk = Join-Path $apkDir "app-universal-debug.apk"
+} elseif (Test-Path (Join-Path $apkDir "app-debug.apk")) {
+    $selectedApk = Join-Path $apkDir "app-debug.apk"
+}
+
+$apkPath = Join-Path $PSScriptRoot "AirSpeaker-v1.apk"
+if ($selectedApk -and (Test-Path $selectedApk)) {
+    Copy-Item -Path $selectedApk -Destination $apkPath -Force
+    Write-Host "Fresh APK copied to: $apkPath" -ForegroundColor Green
+} else {
+    Write-Error "Built APK not found in $apkDir"
+}
+
+if (-not $adb) {
+    Write-Warning "Could not locate adb.exe. APK built successfully at $apkPath."
+    exit 0
 }
 
 Write-Host "`n[2/3] Checking for connected Android devices via ADB..." -ForegroundColor Cyan
@@ -98,7 +122,6 @@ if (-not $devices) {
 Write-Host "`n[3/3] Device detected! Stopping old instance, installing fresh APK, and launching..." -ForegroundColor Green
 & $adb shell am force-stop com.hasan.airspeaker
 & $adb shell am force-stop com.hasan.airspeaker.v2
-& $adb shell am force-stop com.hasan.airspeaker
 & $adb shell am force-stop com.hasan.phonespeaker.v2
 & $adb shell am force-stop com.hasan.phonespeaker
 
@@ -110,8 +133,5 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`nLaunching Air Speaker MainActivity on device..." -ForegroundColor Green
 & $adb shell am start -n com.hasan.airspeaker/.MainActivity
-if ($LASTEXITCODE -ne 0) {
-    & $adb shell am start -n com.hasan.airspeaker/.MainActivity
-}
 
 Write-Host "`nSuccess! Air Speaker v1 is compiled and running on your phone." -ForegroundColor Cyan

@@ -375,6 +375,7 @@ class AudioCapture:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._dsp_lock = threading.Lock()
         self._in_rate = TARGET_RATE
         self._in_channels = TARGET_CHANNELS
         self._in_format: Optional[int] = (
@@ -446,15 +447,21 @@ class AudioCapture:
 
     def _linux_parec_loop(self) -> None:
         while self._running and getattr(self, "_parec_proc", None):
-            chunk_bytes = ((TARGET_RATE * self._frame_ms) // 1000) * TARGET_CHANNELS * 2
+            with self._dsp_lock:
+                frame_ms = self._frame_ms
+            chunk_bytes = ((TARGET_RATE * frame_ms) // 1000) * TARGET_CHANNELS * 2
             try:
                 raw = self._parec_proc.stdout.read(chunk_bytes)
                 if not raw:
                     break
-                self._remainder.extend(raw)
-                while len(self._remainder) >= chunk_bytes:
-                    frame = bytes(self._remainder[:chunk_bytes])
-                    del self._remainder[:chunk_bytes]
+                frames_to_send = []
+                with self._dsp_lock:
+                    self._remainder.extend(raw)
+                    while len(self._remainder) >= chunk_bytes:
+                        frame = bytes(self._remainder[:chunk_bytes])
+                        del self._remainder[:chunk_bytes]
+                        frames_to_send.append(frame)
+                for frame in frames_to_send:
                     int16_arr = np.frombuffer(frame, dtype=np.int16)
                     if len(int16_arr) > 0:
                         self.peak_level = float(np.max(np.abs(int16_arr))) / 32768.0
@@ -573,33 +580,38 @@ class AudioCapture:
     ) -> Tuple[None, int]:
         """PyAudio stream callback — called from audio thread."""
         try:
-            converted = convert_to_target(
-                in_data, self._in_rate, self._in_channels, self._in_format, resampler=self._resampler
-            )
-            
-            # Compute peak audio level for UI level meter
-            if converted:
-                int16_arr = np.frombuffer(converted, dtype=np.int16)
-                if len(int16_arr) > 0:
-                    self.peak_level = float(np.max(np.abs(int16_arr))) / 32768.0
+            chunks_to_send = []
+            with self._dsp_lock:
+                converted = convert_to_target(
+                    in_data, self._in_rate, self._in_channels, self._in_format, resampler=self._resampler
+                )
 
-            # Accumulate converted bytes to prevent boundary sample drops
-            self._remainder.extend(converted)
+                # Compute peak audio level for UI level meter
+                if converted:
+                    int16_arr = np.frombuffer(converted, dtype=np.int16)
+                    if len(int16_arr) > 0:
+                        self.peak_level = float(np.max(np.abs(int16_arr))) / 32768.0
 
-            chunk_bytes = ((TARGET_RATE * self._frame_ms) // 1000) * TARGET_CHANNELS * 2
-            expected_bytes = chunk_bytes
-            while len(self._remainder) >= chunk_bytes:
-                chunk = bytes(self._remainder[:chunk_bytes])
-                del self._remainder[:chunk_bytes]
+                # Accumulate converted bytes to prevent boundary sample drops
+                self._remainder.extend(converted)
 
-                if len(chunk) != expected_bytes:
-                    logger.error(
-                        "Dropping malformed PCM frame: expected=%d actual=%d",
-                        expected_bytes,
-                        len(chunk),
-                    )
-                    continue
+                chunk_bytes = ((TARGET_RATE * self._frame_ms) // 1000) * TARGET_CHANNELS * 2
+                expected_bytes = chunk_bytes
+                while len(self._remainder) >= chunk_bytes:
+                    chunk = bytes(self._remainder[:chunk_bytes])
+                    del self._remainder[:chunk_bytes]
 
+                    if len(chunk) != expected_bytes:
+                        logger.error(
+                            "Dropping malformed PCM frame: expected=%d actual=%d",
+                            expected_bytes,
+                            len(chunk),
+                        )
+                        continue
+
+                    chunks_to_send.append(chunk)
+
+            for chunk in chunks_to_send:
                 self._enqueue_frame(chunk)
 
             # Periodic diagnostic log (every ~2s)
@@ -622,7 +634,7 @@ class AudioCapture:
 
     def set_frame_ms(self, frame_ms: int) -> None:
         if frame_ms in (5, 10, 20) and frame_ms != self._frame_ms:
-            with self._lock:
+            with self._dsp_lock:
                 self._frame_ms = frame_ms
                 self._remainder.clear()
                 if _SOXR_AVAILABLE and self._in_rate != TARGET_RATE:
@@ -638,7 +650,9 @@ class AudioCapture:
         """Stop the capture stream and clean up."""
         with self._lock:
             self._running = False
-            self._resampler = None
+            with self._dsp_lock:
+                self._resampler = None
+                self._remainder.clear()
             if getattr(self, "_parec_proc", None) is not None:
                 try:
                     self._parec_proc.terminate()

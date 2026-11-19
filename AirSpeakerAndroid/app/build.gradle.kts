@@ -12,9 +12,9 @@ android {
 
     defaultConfig {
         applicationId = "com.hasan.airspeaker"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 34
-        versionCode = 1
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName = "1.0.0"
 
         buildConfigField("String", "BUILD_SHA", "\"${System.getenv("GITHUB_SHA")?.take(7) ?: "dev"}\"")
@@ -26,8 +26,20 @@ android {
                 arguments += "-DANDROID_STL=c++_shared"
             }
         }
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 
@@ -68,6 +80,8 @@ android {
             val releaseSign = signingConfigs.getByName("release")
             if (releaseSign.storeFile != null && releaseSign.storeFile!!.exists()) {
                 signingConfig = releaseSign
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
         debug {
@@ -93,6 +107,25 @@ android {
         viewBinding = true
         buildConfig = true
     }
+
+    val abiCodes = mapOf(
+        "armeabi-v7a" to 1,
+        "arm64-v8a" to 2,
+        "x86" to 3,
+        "x86_64" to 4
+    )
+
+    applicationVariants.all {
+        val baseCode = versionCode
+        outputs.forEach { output ->
+            val apkOutput = output as? com.android.build.gradle.internal.api.ApkVariantOutputImpl
+            if (apkOutput != null) {
+                val abiFilter = apkOutput.getFilter(com.android.build.VariantOutput.FilterType.ABI)
+                val offset = if (abiFilter != null) (abiCodes[abiFilter] ?: 0) else 0
+                apkOutput.versionCodeOverride = (baseCode * 10) + offset
+            }
+        }
+    }
 }
 
 dependencies {
@@ -107,11 +140,18 @@ dependencies {
 
 tasks.register("copyDebugApkToRoot") {
     doLast {
-        val srcApk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
-        val destApkV21 = rootProject.projectDir.parentFile.resolve("AirSpeaker-v1.apk")
+        val buildDir = layout.buildDirectory.asFile.get()
+        val apkDir = File(buildDir, "outputs/apk/debug")
+        val universalApk = File(apkDir, "app-universal-debug.apk")
+        val fallbackApk = File(apkDir, "app-debug.apk")
+        val srcApk = if (universalApk.exists()) universalApk else fallbackApk
+        val rootDir = rootProject.projectDir.parentFile
+        val destUniversal = rootDir.resolve("AirSpeaker-v1-universal.apk")
+        val destCompat = rootDir.resolve("AirSpeaker-v1.apk")
         if (srcApk.exists()) {
-            srcApk.copyTo(destApkV21, overwrite = true)
-            println("Copied ${srcApk.absolutePath} to ${destApkV21.absolutePath}")
+            srcApk.copyTo(destUniversal, overwrite = true)
+            srcApk.copyTo(destCompat, overwrite = true)
+            println("Copied ${srcApk.name} to ${destUniversal.name} and ${destCompat.name}")
         }
     }
 }

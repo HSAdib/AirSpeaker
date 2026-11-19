@@ -256,13 +256,19 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
     if (mMuted.load(std::memory_order_relaxed)) {
         std::memset(output, 0, numFrames * 2 * sizeof(int16_t));
     } else {
+        if (mEqResetStatePending.exchange(false, std::memory_order_acq_rel)) {
+            std::memset(mEqZ1, 0, sizeof(mEqZ1));
+            std::memset(mEqZ2, 0, sizeof(mEqZ2));
+        }
+
         if (mEqEnabled.load(std::memory_order_acquire)) {
+            int slot = mActiveEqSlot.load(std::memory_order_acquire);
             const double knee = 0.85;
             for (int n = 0; n < numFrames; ++n) {
                 for (int ch = 0; ch < 2; ++ch) {
                     double x = output[n * 2 + ch] / 32768.0;
                     for (int b = 0; b < 5; ++b) {
-                        const auto& c = mEqCoeffs[b];
+                        const auto& c = mEqCoeffs[slot][b];
                         if (!c.active) continue;
                         double y = c.b0 * x + mEqZ1[b][ch];
                         mEqZ1[b][ch] = c.b1 * x - c.a1 * y + mEqZ2[b][ch];
@@ -283,9 +289,23 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
         float gain = mVolumeGain.load(std::memory_order_relaxed);
         if (std::abs(gain - 1.0f) > 0.001f) {
             int total_samples = numFrames * 2;
-            for (int i = 0; i < total_samples; ++i) {
-                int32_t val = static_cast<int32_t>(output[i] * gain);
-                output[i] = static_cast<int16_t>(std::clamp(val, -32768, 32767));
+            if (gain > 1.0f) {
+                const double knee = 0.85;
+                for (int i = 0; i < total_samples; ++i) {
+                    double s = (output[i] / 32768.0) * gain;
+                    if (s > knee) {
+                        s = knee + (1.0 - knee) * std::tanh((s - knee) / (1.0 - knee));
+                    } else if (s < -knee) {
+                        s = -knee - (1.0 - knee) * std::tanh((-s - knee) / (1.0 - knee));
+                    }
+                    int32_t clamped = static_cast<int32_t>(std::round(std::clamp(s, -1.0, 1.0) * 32767.0));
+                    output[i] = static_cast<int16_t>(std::clamp(clamped, -32768, 32767));
+                }
+            } else {
+                for (int i = 0; i < total_samples; ++i) {
+                    int32_t val = static_cast<int32_t>(output[i] * gain);
+                    output[i] = static_cast<int16_t>(std::clamp(val, -32768, 32767));
+                }
             }
         }
     }
@@ -439,10 +459,11 @@ void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, floa
     const double q = 1.15;
     bool any_active = false;
 
+    int nextSlot = 1 - mActiveEqSlot.load(std::memory_order_relaxed);
     for (int i = 0; i < 5; ++i) {
         double gainDb = bands[i];
         if (std::abs(gainDb) <= 0.05) {
-            mEqCoeffs[i] = {1.0, 0.0, 0.0, 0.0, 0.0, false};
+            mEqCoeffs[nextSlot][i] = {1.0, 0.0, 0.0, 0.0, 0.0, false};
             continue;
         }
         any_active = true;
@@ -458,7 +479,7 @@ void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, floa
         double a_1 = -2.0 * cos_w0;
         double a_2 = 1.0 - alpha / A;
 
-        mEqCoeffs[i] = {
+        mEqCoeffs[nextSlot][i] = {
             b_0 / a_0,
             b_1 / a_0,
             b_2 / a_0,
@@ -470,14 +491,14 @@ void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, floa
 
     bool active = enabled && any_active;
     if (!active) {
-        std::memset(mEqZ1, 0, sizeof(mEqZ1));
-        std::memset(mEqZ2, 0, sizeof(mEqZ2));
+        mEqResetStatePending.store(true, std::memory_order_release);
     }
+    mActiveEqSlot.store(nextSlot, std::memory_order_release);
     mEqEnabled.store(active, std::memory_order_release);
 }
 
 int32_t NativeAudioEngine::getAudioSessionId() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mStreamMutex));
+    std::lock_guard<std::mutex> lock(mStreamMutex);
     if (mAudioStream) {
         return mAudioStream->getSessionId();
     }

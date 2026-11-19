@@ -119,6 +119,16 @@ class MainActivity : AppCompatActivity() {
     private var lastDiscoveredHostsKey: String = ""
     private var lastJoinKeepAliveMs: Long = 0L
 
+    private val cameraPermissionLauncher =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                val intent = Intent(this, QrScannerActivity::class.java)
+                qrScannerLauncher.launch(intent)
+            } else {
+                Toast.makeText(this, "Camera permission is required to scan QR code", Toast.LENGTH_SHORT).show()
+            }
+        }
+
     private val qrScannerLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
             val raw = result.data?.getStringExtra("SCAN_RESULT")?.trim().orEmpty()
@@ -142,8 +152,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchQrScanner() {
-        val intent = Intent(this, QrScannerActivity::class.java)
-        qrScannerLauncher.launch(intent)
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            val intent = Intent(this, QrScannerActivity::class.java)
+            qrScannerLauncher.launch(intent)
+        } else {
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
     }
 
     private var localRev = 1
@@ -1284,8 +1299,13 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
         binding.sliderGain.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
-                // PC UDPSender applies the stream gain relative to phone's hardware volume
-                AudioNative.nativeSetVolumeGain(1.0f)
+                val isPartyJoin = (partyModeScreen == "JOIN") || binding.rbPartyJoin.isChecked || isPartyJoinedActive
+                if (isPartyJoin) {
+                    AudioNative.nativeSetVolumeGain(value)
+                } else {
+                    // PC UDPSender applies the stream gain relative to phone's hardware volume
+                    AudioNative.nativeSetVolumeGain(1.0f)
+                }
                 binding.tvGainValue.text = "${(value * 100).toInt()}%"
                 onLocalSettingChanged()
             }
@@ -1765,7 +1785,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnRefreshIps.setOnClickListener { refreshLocalIps() }
 
         val shaStr = if (BuildConfig.BUILD_SHA != "dev") " (${BuildConfig.BUILD_SHA})" else ""
-        binding.tvAppVersion.text = "Air Speaker v1.0.0$shaStr"
+        binding.tvAppVersion.text = "Air Speaker v${BuildConfig.VERSION_NAME}$shaStr"
         binding.btnCheckForUpdates.setOnClickListener {
             performUpdateCheck(isManual = true)
         }
@@ -1796,7 +1816,7 @@ class MainActivity : AppCompatActivity() {
                 binding.tvUpdateStatus.text = "Air Speaker is up to date."
                 androidx.appcompat.app.AlertDialog.Builder(this, com.google.android.material.R.style.ThemeOverlay_MaterialComponents_Dialog_Alert)
                     .setTitle("Up to Date")
-                    .setMessage("Air Speaker v1.0.0 is currently up to date.")
+                    .setMessage("Air Speaker v${BuildConfig.VERSION_NAME} is currently up to date.")
                     .setPositiveButton("OK", null)
                     .show()
             }
@@ -1953,7 +1973,12 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     Log.w("AirSpeaker", "Could not set sliderGain value: ${e.message}")
                 }
-                AudioNative.nativeSetVolumeGain(1.0f)
+                val isPartyJoin = (partyModeScreen == "JOIN") || binding.rbPartyJoin.isChecked || isPartyJoinedActive
+                if (isPartyJoin) {
+                    AudioNative.nativeSetVolumeGain(g)
+                } else {
+                    AudioNative.nativeSetVolumeGain(1.0f)
+                }
             }
             if (json.has("muted")) {
                 val m = json.getBoolean("muted")

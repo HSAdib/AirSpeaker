@@ -51,6 +51,8 @@ void JitterBuffer::reset() {
     {
         std::lock_guard<std::mutex> lock(mPacketMutex);
         mPacketMap.clear();
+        mFirstPacket = true;
+        mHighestSeq64 = 0;
         mQueuedPacketCount.store(0, std::memory_order_relaxed);
     }
     mPcmRingBuffer.reset();
@@ -94,8 +96,10 @@ void JitterBuffer::pushPacket(const AudioPacket& packet) {
         uint32_t expected = mWorkerExpectedSeq.load(std::memory_order_relaxed);
 
         // Detect sender restart (seq reset to 1..15) or stream pause > 600ms
-        if (gapSinceLastPacketMs > 600 || (expected > 30 && packet.header.seq < 15)) {
+        if (gapSinceLastPacketMs > 600 || (expected > 30 && expected < 0xFFFE0000U && packet.header.seq < 15)) {
             mPacketMap.clear();
+            mFirstPacket = true;
+            mHighestSeq64 = 0;
             mWorkerExpectedSeq.store(packet.header.seq, std::memory_order_relaxed);
             mStreamResetPending.store(true, std::memory_order_release);
             expected = packet.header.seq;
@@ -109,12 +113,26 @@ void JitterBuffer::pushPacket(const AudioPacket& packet) {
             }
         }
 
-        if (mPacketMap.find(packet.header.seq) != mPacketMap.end()) {
+        uint32_t seq32 = packet.header.seq;
+        uint64_t seq64;
+        if (mFirstPacket) {
+            mHighestSeq64 = seq32;
+            seq64 = seq32;
+            mFirstPacket = false;
+        } else {
+            int32_t diff = seqDiff(seq32, static_cast<uint32_t>(mHighestSeq64));
+            seq64 = static_cast<uint64_t>(static_cast<int64_t>(mHighestSeq64) + diff);
+            if (diff > 0) {
+                mHighestSeq64 = seq64;
+            }
+        }
+
+        if (mPacketMap.find(seq64) != mPacketMap.end()) {
             mDuplicatePackets.fetch_add(1, std::memory_order_relaxed);
             return;
         }
 
-        mPacketMap[packet.header.seq] = packet;
+        mPacketMap[seq64] = packet;
 
         // Section 4: Hard capacity bound (256 packets = ~1.28s at 5ms/frame)
         while (mPacketMap.size() > MAX_PACKET_QUEUE_SIZE) {
@@ -171,7 +189,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         // Initialize from first available packet
         auto first = mPacketMap.begin();
         mExpectedSeq = first->first;
-        mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+        mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
         mCurrentCodec = first->second.header.codec;
         mActiveCodec.store(mCurrentCodec, std::memory_order_relaxed);
         if (first->second.header.sample_rate_div100 > 0) {
@@ -201,7 +219,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (!mPacketMap.empty()) {
             mExpectedSeq = mPacketMap.begin()->first;
-            mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+            mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
         }
     }
 
@@ -214,7 +232,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             if (currentQueuedMs > (mLocalTargetBufferMs + 15.0f) && mPacketMap.size() > 4) {
                 auto oldest = mPacketMap.begin();
                 mExpectedSeq = oldest->first + 1;
-                mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+                mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
                 mPacketMap.erase(oldest);
                 mQueuedPacketCount.store(mPacketMap.size(), std::memory_order_relaxed);
                 mIntentionalDriftDrops.fetch_add(1, std::memory_order_relaxed);
@@ -236,11 +254,11 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             }
 
             // If sequence is far behind, catch up to prevent stale playout
-            uint32_t earliestSeq = mPacketMap.begin()->first;
-            int32_t gap = seqDiff(earliestSeq, mExpectedSeq);
+            uint64_t earliestSeq = mPacketMap.begin()->first;
+            int64_t gap = static_cast<int64_t>(earliestSeq) - static_cast<int64_t>(mExpectedSeq);
             if (gap > 4 || gap < -20 || (mConsecutiveLosses >= 2 && gap != 0)) {
                 mExpectedSeq = earliestSeq;
-                mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+                mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
             }
 
             auto it = mPacketMap.find(mExpectedSeq);
@@ -327,7 +345,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
 
             mConsecutiveLosses = 0;
             mExpectedSeq++;
-            mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+            mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
         } else {
             // Gap detected: frame mExpectedSeq is missing
             mLostCount.fetch_add(1, std::memory_order_relaxed);
@@ -379,7 +397,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
 
             mConsecutiveLosses++;
             mExpectedSeq++;
-            mWorkerExpectedSeq.store(mExpectedSeq, std::memory_order_relaxed);
+            mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
 
             if (mConsecutiveLosses >= 8) {
                 mIsPrebuffering = true;

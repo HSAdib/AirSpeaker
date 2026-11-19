@@ -282,6 +282,7 @@ class AirSpeakerApp:
         self._party_joined_active = False
         self._party_extend_active = False
         self._party_devices: Dict[str, Dict[str, Any]] = {}  # ip -> {"name": str, "last_seen": float, "port": int}
+        self._party_lock = threading.Lock()
         self.party_status_var = tk.StringVar(value="🎉 Party Mode: Waiting for devices to join...")
         self.party_role_var = tk.StringVar(value="HOST")
         self.party_join_host_ip_var = tk.StringVar(value="")
@@ -1728,7 +1729,8 @@ class AirSpeakerApp:
         fwd_pkt = bytearray(raw_data)
         fwd_pkt[8] = new_codec
         fwd_bytes = bytes(fwd_pkt)
-        peers = [ip for ip in self._party_devices.keys() if ip != sender_ip]
+        with self._party_lock:
+            peers = [ip for ip in self._party_devices.keys() if ip != sender_ip]
         if not peers:
             return
         if not hasattr(self, "_party_relay_sock") or self._party_relay_sock is None:
@@ -3199,8 +3201,6 @@ class AirSpeakerApp:
                     logger.warning("Error processing UI queue item %s: %s", item[0] if item else "?", exc)
         except queue.Empty:
             pass
-        except queue.Empty:
-            pass
 
     def _status_set(self, text: str, color: str = FG) -> None:
         self.status_var.set(text)
@@ -3483,7 +3483,11 @@ TABS:
             self.update_now_btn.config(state="disabled")
 
             def _on_done(installer_path):
-                self.root.after(0, lambda: self.update_bar_label.config(text="Launching installer..."))
+                def _launch_and_exit():
+                    self.update_bar_label.config(text="Launching installer and exiting Air Speaker...")
+                    # Quit app after short delay so Inno Setup can overwrite files without lock errors
+                    self.root.after(800, self._quit_app)
+                self.root.after(0, _launch_and_exit)
 
             def _on_err(err):
                 self.root.after(0, lambda: [

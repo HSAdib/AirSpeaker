@@ -260,9 +260,11 @@ struct MockOpusDecodeCall {
 
 class MockOpusTimelineEngine {
 public:
-    std::map<uint32_t, AudioPacket> mPacketMap;
+    std::map<uint64_t, AudioPacket> mPacketMap;
     std::vector<MockOpusDecodeCall> mDecodeLog;
-    uint32_t mExpectedSeq{0};
+    uint64_t mExpectedSeq{0};
+    uint64_t mHighestSeq64{0};
+    bool mFirstPacket{true};
     uint64_t mLostPackets{0};
     uint64_t mConcealedPackets{0};
     uint64_t mLatePackets{0};
@@ -270,11 +272,25 @@ public:
     bool mHasStarted{false};
 
     void pushPacket(uint32_t seq, const std::string& data = "audio") {
-        if (mHasStarted && testSeqDiff(seq, mExpectedSeq) < 0) {
+        if (mHasStarted && testSeqDiff(seq, static_cast<uint32_t>(mExpectedSeq)) < 0) {
             mLatePackets++;
             return;
         }
-        if (mPacketMap.find(seq) != mPacketMap.end()) {
+
+        uint64_t seq64;
+        if (mFirstPacket) {
+            mHighestSeq64 = seq;
+            seq64 = seq;
+            mFirstPacket = false;
+        } else {
+            int32_t diff = testSeqDiff(seq, static_cast<uint32_t>(mHighestSeq64));
+            seq64 = static_cast<uint64_t>(static_cast<int64_t>(mHighestSeq64) + diff);
+            if (diff > 0) {
+                mHighestSeq64 = seq64;
+            }
+        }
+
+        if (mPacketMap.find(seq64) != mPacketMap.end()) {
             mDuplicatePackets++;
             return;
         }
@@ -283,10 +299,10 @@ public:
         pkt.header.seq = seq;
         pkt.header.codec = CODEC_OPUS;
         pkt.payload.assign(data.begin(), data.end());
-        mPacketMap[seq] = pkt;
+        mPacketMap[seq64] = pkt;
 
         if (!mHasStarted) {
-            mExpectedSeq = seq;
+            mExpectedSeq = seq64;
             mHasStarted = true;
         }
     }
@@ -299,7 +315,7 @@ public:
         if (it != mPacketMap.end()) {
             // Normal decode
             MockOpusDecodeCall call;
-            call.seq = mExpectedSeq;
+            call.seq = static_cast<uint32_t>(mExpectedSeq);
             call.decodeFec = false;
             call.isPlc = false;
             call.returnedSamples = 240;
@@ -317,7 +333,7 @@ public:
             // Checkpoint 4: Decode N+1 with decode_fec=true for frame N.
             // Packet N+1 remains in map to be decoded normally next!
             MockOpusDecodeCall call;
-            call.seq = mExpectedSeq; // Reconstructed missing N
+            call.seq = static_cast<uint32_t>(mExpectedSeq); // Reconstructed missing N
             call.decodeFec = true;
             call.isPlc = false;
             call.returnedSamples = 240;
@@ -330,7 +346,7 @@ public:
 
         // Fallback PLC: neither N nor N+1 present
         MockOpusDecodeCall call;
-        call.seq = mExpectedSeq;
+        call.seq = static_cast<uint32_t>(mExpectedSeq);
         call.decodeFec = false;
         call.isPlc = true;
         call.returnedSamples = 240;

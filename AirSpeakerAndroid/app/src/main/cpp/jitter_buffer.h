@@ -98,7 +98,9 @@ private:
     // Receiver Thread & Packet Map State (Guarded by mPacketMutex)
     // ---------------------------------------------------------
     mutable std::mutex mPacketMutex;
-    std::map<uint32_t, AudioPacket> mPacketMap; // Bounded to MAX_PACKET_QUEUE_SIZE
+    std::map<uint64_t, AudioPacket> mPacketMap; // Bounded to MAX_PACKET_QUEUE_SIZE
+    bool mFirstPacket{true};
+    uint64_t mHighestSeq64{0};
     std::atomic<size_t> mQueuedPacketCount{0};
 
     // ---------------------------------------------------------
@@ -134,7 +136,7 @@ private:
     // ---------------------------------------------------------
     bool mHasStarted{false};
     bool mIsPrebuffering{true};
-    uint32_t mExpectedSeq{0};
+    uint64_t mExpectedSeq{0};
     float mLocalTargetBufferMs{30.0f};
     uint8_t mCurrentCodec{0};
     int mChannels{2};

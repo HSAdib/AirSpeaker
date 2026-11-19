@@ -65,7 +65,7 @@ object UpdateChecker {
                 conn.connectTimeout = 5000
                 conn.readTimeout = 5000
                 conn.requestMethod = "GET"
-                conn.setRequestProperty("User-Agent", "AirSpeaker-Android/1.0.0")
+                conn.setRequestProperty("User-Agent", "AirSpeaker-Android/${BuildConfig.VERSION_NAME}")
                 conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
 
                 if (conn.responseCode != HttpURLConnection.HTTP_OK) {
@@ -100,7 +100,7 @@ object UpdateChecker {
                     remoteSha = matcher.group(1)?.trim()
                 }
 
-                val localVersionName = "1.0.0"
+                val localVersionName = BuildConfig.VERSION_NAME
                 val localBuildSha = BuildConfig.BUILD_SHA
 
                 val remoteSem = parseSemver(tagName)
@@ -127,17 +127,47 @@ object UpdateChecker {
                     return@Thread
                 }
 
-                // Locate APK asset in assets array
-                var apkDownloadUrl = htmlUrl
+                // Locate APK asset in assets array matching device supported ABI
+                var apkDownloadUrl: String = htmlUrl
                 val assets = json.optJSONArray("assets")
                 if (assets != null) {
+                    val assetMap = mutableMapOf<String, String>()
                     for (i in 0 until assets.length()) {
                         val asset = assets.optJSONObject(i) ?: continue
                         val name = asset.optString("name", "")
-                        if (name.endsWith(".apk", ignoreCase = true)) {
-                            apkDownloadUrl = asset.optString("browser_download_url", apkDownloadUrl)
+                        val dlUrl = asset.optString("browser_download_url", "")
+                        if (name.endsWith(".apk", ignoreCase = true) && dlUrl.isNotEmpty()) {
+                            assetMap[name.lowercase()] = dlUrl
+                        }
+                    }
+
+                    var foundUrl: String? = null
+                    // 1. Match device supported ABIs in priority order
+                    val supportedAbis = android.os.Build.SUPPORTED_ABIS ?: emptyArray()
+                    for (abi in supportedAbis) {
+                        val normalizedAbi = abi.lowercase()
+                        val matched = assetMap.entries.firstOrNull { it.key.contains(normalizedAbi) }
+                        if (matched != null) {
+                            foundUrl = matched.value
                             break
                         }
+                    }
+
+                    // 2. Fall back to universal APK
+                    if (foundUrl == null) {
+                        val universal = assetMap.entries.firstOrNull { it.key.contains("universal") }
+                        if (universal != null) {
+                            foundUrl = universal.value
+                        }
+                    }
+
+                    // 3. Fall back to any .apk
+                    if (foundUrl == null && assetMap.isNotEmpty()) {
+                        foundUrl = assetMap.values.first()
+                    }
+
+                    if (foundUrl != null) {
+                        apkDownloadUrl = foundUrl
                     }
                 }
 

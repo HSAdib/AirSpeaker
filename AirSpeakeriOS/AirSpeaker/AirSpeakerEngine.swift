@@ -491,6 +491,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         guard isAudioPlaying else { return }
         isRunningAudio = false
         playerNode.stop()
+        if audioEngine.isRunning {
+            audioEngine.pause()
+        }
 
         if !isInternalAudioServing {
             stopStatsTimer()
@@ -697,11 +700,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     playerNode.pause()
                 }
                 audioBufferQueueCount.increment()
+                guard isRunningAudio else { return }
                 playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
                     self?.audioBufferQueueCount.decrement()
                 }
                 if isPrebufferingAudio && audioBufferQueueCount.value >= minPrebuffer {
                     isPrebufferingAudio = false
+                    guard isRunningAudio else { return }
                     if !audioEngine.isRunning {
                         try? audioEngine.start()
                     }
@@ -866,7 +871,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 }
 
                 seq &+= 1
+                self.stateLock.lock()
                 self.servePacketsSent += 1
+                self.stateLock.unlock()
 
                 self.sendServePacket(packet, toIp: ip)
             }
@@ -941,11 +948,12 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         guard isInternalAudioServing else { return }
         RPScreenRecorder.shared().stopCapture { [weak self] error in
             DispatchQueue.main.async {
-                self?.isInternalAudioServing = false
-                self?.statusMessage = "Internal Audio Sender Stopped"
-                self?.closeSocket(&self!.serveTxSocket)
-                if let playing = self?.isAudioPlaying, !playing {
-                    self?.stopStatsTimer()
+                guard let self = self else { return }
+                self.isInternalAudioServing = false
+                self.statusMessage = "Internal Audio Sender Stopped"
+                self.closeSocket(&self.serveTxSocket)
+                if !self.isAudioPlaying {
+                    self.stopStatsTimer()
                 }
             }
         }

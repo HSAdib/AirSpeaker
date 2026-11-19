@@ -438,8 +438,13 @@ class UDPSender:
             except Exception:
                 pass
 
-        if codec == CODEC_OPUS and self._opus_encoder and self._opus_encoder.available:
-            encoded = self._opus_encoder.encode(pcm_frame)
+        encoder = None
+        with self._lock:
+            if codec == CODEC_OPUS and self._opus_encoder and self._opus_encoder.available:
+                encoder = self._opus_encoder
+
+        if encoder is not None:
+            encoded = encoder.encode(pcm_frame)
             if encoded is not None:
                 header = build_header(seq, ts, CODEC_OPUS)
                 return header + encoded
@@ -719,8 +724,11 @@ class ControlListener:
 
     def _run(self) -> None:
         while self._running:
+            sock = self._sock
+            if sock is None:
+                break
             try:
-                data, addr = self._sock.recvfrom(4096)
+                data, addr = sock.recvfrom(4096)
                 try:
                     msg = json.loads(data.decode("utf-8"))
                     msg["_sender_ip"] = addr[0]
@@ -735,7 +743,7 @@ class ControlListener:
                                 "party_mode": bool(self._party_mode_enabled),
                                 "is_party_host": bool(self._party_mode_enabled),
                             }).encode("utf-8")
-                            self._sock.sendto(reply, (addr[0], self._bind_port))
+                            sock.sendto(reply, (addr[0], self._bind_port))
                         except Exception:
                             pass
                     if msg_type == "BEACON" and self._on_beacon:
@@ -749,7 +757,7 @@ class ControlListener:
             except socket.timeout:
                 continue
             except Exception as exc:
-                if self._running:
+                if self._running and self._sock is not None:
                     logger.error("ControlListener error: %s", exc)
 
 
