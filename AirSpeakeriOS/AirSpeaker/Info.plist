@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.1</string>
+	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIBackgroundModes</key>
@@ -28,6 +28,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Air Speaker uses the camera to scan Party Host QR codes for instant connection.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Air Speaker needs photo library access to scan saved QR code images.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Air Speaker uses your local network (UDP 5004, 5005) for ultra-low-latency audio streaming and device discovery.</string>
 	<key>UILaunchScreen</key>

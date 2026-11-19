@@ -593,9 +593,47 @@ class ControlListener:
 
     def set_party_mode(self, enabled: bool) -> None:
         self._party_mode_enabled = bool(enabled)
+        self.broadcast_announce()
 
     def set_target_ip(self, ip: str) -> None:
         self._target_ip = (ip or "").strip()
+
+    def broadcast_announce(self) -> None:
+        """Broadcast PC_ANNOUNCE immediately to all adapters and broadcast addresses."""
+        try:
+            msg = json.dumps({
+                "type": "PC_ANNOUNCE",
+                "app": "AirSpeakerPC",
+                "version": 1,
+                "pc_name": socket.gethostname(),
+                "party_mode": bool(self._party_mode_enabled),
+                "is_party_host": bool(self._party_mode_enabled),
+            }).encode("utf-8")
+            sock = self._sock
+            if sock is not None:
+                if self._target_ip and not self._target_ip.startswith("127."):
+                    try:
+                        sock.sendto(msg, (self._target_ip, self._bind_port))
+                    except Exception:
+                        pass
+                try:
+                    sock.sendto(msg, ("255.255.255.255", self._bind_port))
+                except Exception:
+                    pass
+                for a in list_real_adapters():
+                    bcast = a.get("broadcast")
+                    if not bcast:
+                        ip = a.get("ip", "")
+                        parts = ip.split(".")
+                        if len(parts) == 4 and not parts[0].startswith("127"):
+                            bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                    if bcast:
+                        try:
+                            sock.sendto(msg, (bcast, self._bind_port))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
     def start(self) -> None:
         if self._running:

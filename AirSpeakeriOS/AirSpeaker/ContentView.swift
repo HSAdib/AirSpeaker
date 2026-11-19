@@ -613,6 +613,27 @@ struct PartyStudioTab: View {
                                 .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
                         }
 
+                        // Primary Broadcast Button
+                        Button(action: {
+                            if engine.isPartyHostBroadcasting {
+                                engine.stopPartyHostBroadcast()
+                            } else {
+                                engine.startPartyHostBroadcast()
+                            }
+                        }) {
+                            Text(engine.isPartyHostBroadcasting ? "[ ■ STOP PARTY BROADCAST (HOST) ]" : "[ 👑 START PARTY BROADCAST (HOST) ]")
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundColor(engine.isPartyHostBroadcasting ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .frame(maxWidth: .infinity, minHeight: 46)
+                                .background(engine.isPartyHostBroadcasting ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.17, blue: 0.0))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isPartyHostBroadcasting ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
+                        }
+
+                        Text(engine.isPartyHostBroadcasting ? "PARTY STATUS: BROADCASTING (\(engine.partyMembers.count) joiner(s) active)" : "PARTY STATUS: STANDBY — Tap Start Party Broadcast")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(engine.isPartyHostBroadcasting ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+
+                        // Host QR & IP Card
                         let hostQrUri = engine.makePartyQrUri(isExtended: false)
                         VStack(spacing: 6) {
                             Text("👑 HOST IP: \(engine.localIpAddress)")
@@ -648,97 +669,93 @@ struct PartyStudioTab: View {
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
-                        Button(action: {
-                            if engine.isAudioPlaying {
-                                engine.stopSpeakerPlayer()
-                            } else {
-                                engine.startSpeakerPlayer()
-                                engine.broadcastBeacon()
-                            }
-                        }) {
-                            Text(engine.isAudioPlaying ? "[ ■ STOP PARTY BROADCAST (HOST) ]" : "[ 👑 START PARTY BROADCAST (HOST) ]")
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundColor(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
-                                .frame(maxWidth: .infinity, minHeight: 46)
-                                .background(engine.isAudioPlaying ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.17, blue: 0.0))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
-                        }
-
-                        Text(engine.isAudioPlaying ? "PARTY STATUS: HOSTING / RELAYING (\(engine.partyMembers.count) peer(s) connected)" : "PARTY STATUS: STANDBY — Tap Start Party Broadcast")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(engine.isAudioPlaying ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
-
-                        // Target Buffer Control & Host Equalizer
-                        TargetBufferControlSection(engine: engine)
-
-                        Button(action: {
-                            showHostEQSheet = true
-                        }) {
-                            Text("[ 🎛️ HOST EQUALIZER: \(engine.partyHostEQ.enabled ? engine.partyHostEQ.presetName : "OFF") ]")
+                        // Stream Quality Card (Host Broadcast)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("STREAM QUALITY (HOST BROADCAST):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                                .frame(maxWidth: .infinity, minHeight: 34)
-                                .background(engine.partyHostEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                        }
-                        .sheet(isPresented: $showHostEQSheet) {
-                            StudioEqualizerSheetView(title: "PARTY HOST EQUALIZER", config: $engine.partyHostEQ, engine: engine)
-                        }
+                                .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("LIVE DELAY GRAPH")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
+                            HStack(spacing: 8) {
+                                Button(action: {
+                                    engine.activeCodecName = "PCM16"
+                                    engine.sendConfigSync(forcePcm: true)
+                                }) {
+                                    Text("PCM16 (Lossless)")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(engine.activeCodecName == "PCM16" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.6))
+                                        .frame(maxWidth: .infinity, minHeight: 32)
+                                        .background(engine.activeCodecName == "PCM16" ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.07))
+                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.activeCodecName == "PCM16" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                                }
 
-                            LiveDelayGraphView(
-                                history: engine.delayHistory,
-                                targetMs: Double(engine.bufferTargetMs),
-                                currentBufMs: engine.latencyMs
-                            )
-                        }
-
-                        // Manual Add Peer
-                        HStack(spacing: 6) {
-                            TextField("Peer IP (e.g. 192.168.1.55)", text: $manualPeerInput)
-                                .font(.system(size: 11, design: .monospaced))
-                                .padding(6)
-                                .background(Color(red: 0.07, green: 0.07, blue: 0.07))
-                                .foregroundColor(.white)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
-
-                            Button("ADD IP") {
-                                if !manualPeerInput.isEmpty {
-                                    engine.addManualPeer(ip: manualPeerInput)
-                                    manualPeerInput = ""
+                                Button(action: {
+                                    engine.activeCodecName = "Opus"
+                                    engine.sendConfigSync()
+                                }) {
+                                    Text("Opus (Compressed)")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(engine.activeCodecName == "Opus" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.6))
+                                        .frame(maxWidth: .infinity, minHeight: 32)
+                                        .background(engine.activeCodecName == "Opus" ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.07))
+                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.activeCodecName == "Opus" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
                                 }
                             }
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
 
-                            Button("CLEAR") {
-                                engine.partyMembers.removeAll()
-                                engine.partyPeerIps.removeAll()
+                            if engine.activeCodecName == "Opus" {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("MUSIC BITRATE: \(engine.opusBitrateKbps) kbps")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+
+                                    HStack(spacing: 4) {
+                                        ForEach(["64", "96", "128", "192", "256", "320"], id: \.self) { rate in
+                                            Button(action: {
+                                                engine.opusBitrateKbps = rate
+                                                engine.sendConfigSync()
+                                            }) {
+                                                Text("\(rate)k")
+                                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(engine.opusBitrateKbps == rate ? Color(red: 0.22, green: 0.71, blue: 1.0) : Color(white: 0.5))
+                                                    .frame(maxWidth: .infinity, minHeight: 28)
+                                                    .background(engine.opusBitrateKbps == rate ? Color(red: 0.05, green: 0.12, blue: 0.20) : Color(white: 0.07))
+                                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.opusBitrateKbps == rate ? Color(red: 0.22, green: 0.71, blue: 1.0) : Color(white: 0.2), lineWidth: 1))
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
-                        }
 
-                        // Connected Members
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("CONNECTED JOINERS (\(engine.partyMembers.count)):")
+                            TargetBufferControlSection(engine: engine)
+
+                            Button(action: {
+                                showHostEQSheet = true
+                            }) {
+                                Text("[ 🎛️ HOST EQUALIZER: \(engine.partyHostEQ.enabled ? engine.partyHostEQ.presetName : "OFF") ]")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                                    .frame(maxWidth: .infinity, minHeight: 34)
+                                    .background(engine.partyHostEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                            }
+                            .sheet(isPresented: $showHostEQSheet) {
+                                StudioEqualizerSheetView(title: "PARTY HOST EQUALIZER", config: $engine.partyHostEQ, engine: engine)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.07))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        // Connected Members Card
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("👑 CONNECTED JOINERS (\(engine.partyMembers.count) active):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
+                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
 
                             if engine.partyMembers.isEmpty {
                                 Text("No phones joined yet. Friends can scan the QR code to connect.")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(Color(white: 0.5))
+                                    .padding(.vertical, 4)
                             } else {
                                 ForEach(engine.partyMembers) { member in
                                     HStack {
@@ -751,11 +768,52 @@ struct PartyStudioTab: View {
                                         }
                                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                                         .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
                                     }
-                                    .padding(4)
+                                    .padding(6)
+                                    .background(Color(red: 0.07, green: 0.07, blue: 0.07))
+                                    .cornerRadius(3)
                                 }
                             }
+
+                            // Compact Manual Add Peer
+                            HStack(spacing: 6) {
+                                TextField("Peer IP (e.g. 192.168.1.55)", text: $manualPeerInput)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .padding(6)
+                                    .background(Color(red: 0.07, green: 0.07, blue: 0.07))
+                                    .foregroundColor(.white)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                                Button("+ ADD IP") {
+                                    if !manualPeerInput.isEmpty {
+                                        engine.addManualPeer(ip: manualPeerInput)
+                                        manualPeerInput = ""
+                                    }
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+
+                                Button("CLEAR") {
+                                    engine.partyMembers.removeAll()
+                                    engine.partyPeerIps.removeAll()
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
+                            }
+                            .padding(.top, 4)
                         }
+                        .padding(10)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
                     }
 
                 } else if engine.partyScreen == "JOIN" {
@@ -779,31 +837,65 @@ struct PartyStudioTab: View {
                             .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
                         }
 
+                        // Prominent QR Camera Scan Button
+                        Button(action: {
+                            showScanner = true
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.system(size: 18, weight: .bold))
+                                Text("[ 📷 SCAN PARTY QR CODE ]")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                            .background(Color(red: 0.0, green: 0.12, blue: 0.16))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1.5))
+                        }
+
                         // Discovered Hosts List
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("DISCOVERED PARTY HOSTS:")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("DISCOVERED PARTY HOSTS (\(engine.discoveredPartyHosts.count)):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
+                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
 
                             if engine.discoveredPartyHosts.isEmpty {
-                                Text("Scanning local network for Party Hosts...")
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundColor(Color(white: 0.5))
+                                VStack(spacing: 4) {
+                                    Text("Scanning local network for active Party Hosts...")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(Color(white: 0.6))
+                                    Text("Ask the host to start broadcast, or tap Scan QR Code above.")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(Color(white: 0.4))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Color(red: 0.06, green: 0.06, blue: 0.08))
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
                             } else {
                                 ForEach(engine.discoveredPartyHosts) { host in
                                     Button(action: {
                                         engine.joinParty(hostIp: host.ip, port: host.port)
                                     }) {
                                         HStack {
-                                            Text("👑 \(host.name) (\(host.ip):\(host.port))")
-                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                .foregroundColor(host.isExtended ? Color(red: 1.0, green: 0.85, blue: 0.0) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("👑 \(host.name)")
+                                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(host.isExtended ? Color(red: 1.0, green: 0.85, blue: 0.0) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                                Text("\(host.ip):\(host.port)\(host.isExtended ? " (Repeater)" : "")")
+                                                    .font(.system(size: 10, design: .monospaced))
+                                                    .foregroundColor(Color(white: 0.6))
+                                            }
                                             Spacer()
-                                            Text("TAP TO JOIN")
+                                            Text("[ TAP TO JOIN ]")
                                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                                 .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color(red: 0.0, green: 0.15, blue: 0.18))
+                                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
                                         }
-                                        .padding(6)
+                                        .padding(8)
                                         .background(Color(red: 0.08, green: 0.08, blue: 0.08))
                                         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
                                     }
@@ -811,97 +903,37 @@ struct PartyStudioTab: View {
                             }
                         }
 
-                        // Host IP & Port Manual input
-                        HStack(spacing: 6) {
-                            TextField("Host IP", text: $manualJoinIp)
-                                .font(.system(size: 11, design: .monospaced))
-                                .padding(6)
-                                .background(Color(red: 0.07, green: 0.07, blue: 0.07))
-                                .foregroundColor(.white)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
-
-                            Button("📷 SCAN QR") {
-                                showScanner = true
-                            }
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 6)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
-
-                            Button("📋 PASTE") {
-                                if let pasted = UIPasteboard.general.string {
-                                    let (ip, _) = AirSpeakerEngine.parseHostIpFromUri(pasted)
-                                    if !ip.isEmpty { manualJoinIp = ip }
-                                }
-                            }
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 6)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.4), lineWidth: 1))
-                        }
-
-                        Button(action: {
-                            if engine.isAudioPlaying && engine.isPartyJoined {
-                                engine.leaveParty()
-                            } else {
-                                let target = manualJoinIp.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if !target.isEmpty {
-                                    let (ip, port) = AirSpeakerEngine.parseHostIpFromUri(target)
-                                    engine.joinParty(hostIp: ip, port: port)
-                                } else if let firstHost = engine.discoveredPartyHosts.first {
-                                    manualJoinIp = firstHost.ip
-                                    engine.joinParty(hostIp: firstHost.ip, port: firstHost.port)
-                                }
-                            }
-                        }) {
-                            Text(engine.isAudioPlaying && engine.isPartyJoined ? (engine.isPartyExtending ? "[ ■ STOP EXTENDING & LEAVE PARTY ]" : "[ ■ LEAVE PARTY STREAM ]") : "[ 🎧 JOIN PARTY STREAM ]")
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundColor(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
-                                .frame(maxWidth: .infinity, minHeight: 46)
-                                .background(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.17, blue: 0.0))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
-                        }
-
-                        Text(engine.isAudioPlaying && engine.isPartyJoined ? "PARTY JOINER: Connected to \(engine.currentPartyHostIp):5004 • Playing host sound in sync" : "PARTY JOINER: Standby — Select a host above or enter Host IP")
-                            .font(.system(size: 11, design: .monospaced))
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(red: 0.07, green: 0.07, blue: 0.07))
-                            .foregroundColor(engine.isAudioPlaying && engine.isPartyJoined ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
-
-                        // Target Buffer Control & Join Equalizer
-                        TargetBufferControlSection(engine: engine)
-
-                        Button(action: {
-                            showJoinEQSheet = true
-                        }) {
-                            Text("[ 🎛️ JOIN EQUALIZER: \(engine.partyJoinEQ.enabled ? engine.partyJoinEQ.presetName : "OFF") ]")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                                .frame(maxWidth: .infinity, minHeight: 34)
-                                .background(engine.partyJoinEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                        }
-                        .sheet(isPresented: $showJoinEQSheet) {
-                            StudioEqualizerSheetView(title: "PARTY JOIN EQUALIZER", config: $engine.partyJoinEQ, engine: engine)
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("LIVE DELAY GRAPH")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-
-                            LiveDelayGraphView(
-                                history: engine.delayHistory,
-                                targetMs: Double(engine.bufferTargetMs),
-                                currentBufMs: engine.latencyMs
-                            )
-                        }
-
-                        // Post-Join: Extend This Party (Hotspot Repeater)
+                        // Active Connection / Joined Card
                         if engine.isPartyJoined {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("PARTY JOINER ACTIVE")
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                        Text("Connected to \(engine.currentPartyHostIp):5004 • In sync")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(Color(white: 0.7))
+                                    }
+                                    Spacer()
+                                    Button(action: {
+                                        engine.leaveParty()
+                                    }) {
+                                        Text("[ ■ LEAVE PARTY ]")
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(Color(red: 0.20, green: 0.0, blue: 0.0))
+                                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(Color(red: 0.06, green: 0.12, blue: 0.06))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1))
+
+                            // Post-Join: Extend This Party (Hotspot Repeater)
                             VStack(alignment: .leading, spacing: 8) {
                                 Toggle(isOn: Binding(
                                     get: { engine.isPartyExtending },

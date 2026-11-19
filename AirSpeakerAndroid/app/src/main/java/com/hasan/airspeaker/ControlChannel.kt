@@ -195,18 +195,35 @@ class ControlChannel(
                             val aPort = json.optInt("audio_port", 5004)
                             val isExt = json.optBoolean("is_extended_host", false)
                             val isHost = json.optBoolean("is_party_host", false)
+                            val hasPartyJoin = json.has("party_join")
                             val isPartyJoin = json.optBoolean("party_join", false)
                             val labelName = if (isExt) "$devName (Extended Host)" else if (isHost) "$devName (Party Host)" else devName
                             if (!isOwnLocalIp(senderIp)) {
                                 if (isHost || isExt) {
                                     discoveredPartyHosts[senderIp] = DiscoveredPartyHost(senderIp, labelName, aPort, android.os.SystemClock.elapsedRealtime(), isExt)
                                     onPartyHostDiscovered?.invoke()
+                                } else if (json.has("is_party_host") || json.has("is_extended_host")) {
+                                    if (discoveredPartyHosts.remove(senderIp) != null) {
+                                        onPartyHostDiscovered?.invoke()
+                                    }
                                 }
-                                // Only register as a downstream peer if it is a Joiner (NOT another Host)
-                                if ((isHostingOrExtendingParty || AudioNative.nativeIsPartyRelay()) && isPartyJoin && !isHost) {
-                                    if (partyPeerIps.add(senderIp)) {
-                                        AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
-                                        Log.i(TAG, "Party Mode: registered downstream peer $senderIp (total=${partyPeerIps.size})")
+
+                                // Rule 4: Handle downstream peers
+                                if (isHostingOrExtendingParty || AudioNative.nativeIsPartyRelay()) {
+                                    if (hasPartyJoin && isPartyJoin && !isHost) {
+                                        partyPeerLastSeen[senderIp] = android.os.SystemClock.elapsedRealtime()
+                                        if (partyPeerIps.add(senderIp)) {
+                                            AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
+                                            onPartyHostDiscovered?.invoke()
+                                            Log.i(TAG, "Party Mode: registered downstream peer $senderIp (total=${partyPeerIps.size})")
+                                        }
+                                    } else if (hasPartyJoin && !isPartyJoin) {
+                                        partyPeerLastSeen.remove(senderIp)
+                                        if (partyPeerIps.remove(senderIp)) {
+                                            AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
+                                            onPartyHostDiscovered?.invoke()
+                                            Log.i(TAG, "Party Mode: removed downstream peer $senderIp (total=${partyPeerIps.size})")
+                                        }
                                     }
                                 }
                             }
@@ -236,10 +253,14 @@ class ControlChannel(
                                 activePcName = pcName
                                 lastKnownPcName = pcName
                             }
-                            val isPcPartyHost = json.optBoolean("is_party_host", false) || json.optBoolean("party_host", false) || (json.optBoolean("party_mode", false) && json.has("is_party_host"))
+                            val isPcPartyHost = json.optBoolean("is_party_host", false) || json.optBoolean("is_extended_host", false)
                             if (isPcPartyHost) {
                                 discoveredPartyHosts[senderIp] = DiscoveredPartyHost(senderIp, if (pcName.isNotBlank()) pcName else "PC Studio", 5004, android.os.SystemClock.elapsedRealtime())
                                 onPartyHostDiscovered?.invoke()
+                            } else if (json.has("is_party_host") || json.has("party_mode")) {
+                                if (discoveredPartyHosts.remove(senderIp) != null) {
+                                    onPartyHostDiscovered?.invoke()
+                                }
                             }
                             Log.i(TAG, "Discovered active PC IP via PC_ANNOUNCE: $senderIp ($activePcName)")
                         } else if (msgType == "CONFIG_SYNC") {
@@ -407,8 +428,40 @@ class ControlChannel(
         @Volatile var lastKnownPcIp: String? = null
         @Volatile var lastKnownPcName: String = "PC"
         val partyPeerIps = java.util.concurrent.CopyOnWriteArraySet<String>()
+        val partyPeerLastSeen = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val discoveredPartyHosts = java.util.concurrent.ConcurrentHashMap<String, DiscoveredPartyHost>()
         var onPartyHostDiscovered: (() -> Unit)? = null
+
+        fun prunePartyHostsAndPeers() {
+            val now = android.os.SystemClock.elapsedRealtime()
+            var changed = false
+
+            // Prune hosts older than 6.0 seconds
+            val hostIt = discoveredPartyHosts.entries.iterator()
+            while (hostIt.hasNext()) {
+                val entry = hostIt.next()
+                if (now - entry.value.lastSeenMs > 6000L) {
+                    hostIt.remove()
+                    changed = true
+                }
+            }
+
+            // Prune joiners older than 10.0 seconds
+            val peerIt = partyPeerLastSeen.entries.iterator()
+            while (peerIt.hasNext()) {
+                val entry = peerIt.next()
+                if (now - entry.value > 10000L) {
+                    peerIt.remove()
+                    partyPeerIps.remove(entry.key)
+                    changed = true
+                }
+            }
+
+            if (changed) {
+                AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
+                onPartyHostDiscovered?.invoke()
+            }
+        }
 
         fun getPreferredHostIp(): String {
             try {
@@ -463,6 +516,51 @@ class ControlChannel(
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to send party join announcement: ${e.message}")
                 }
+            }
+        }
+
+        fun sendPartyLeaveAnnouncement(hostIp: String) {
+            if (hostIp.isBlank()) return
+            kotlin.concurrent.thread(name = "PartyLeaveAnnouncer", isDaemon = true) {
+                try {
+                    val sock = DatagramSocket()
+                    val json = JSONObject().apply {
+                        put("type", "BEACON")
+                        put("app", "AirSpeaker")
+                        put("version", 1)
+                        put("device", getPhoneModelName())
+                        put("party_join", false)
+                        put("is_party_host", false)
+                        put("is_extended_host", false)
+                        put("audio_port", 5004)
+                    }
+                    val data = json.toString().toByteArray(Charsets.UTF_8)
+                    val addr = InetAddress.getByName(hostIp)
+                    val p = DatagramPacket(data, data.size, addr, 5005)
+                    sock.send(p)
+                    sock.close()
+                } catch (_: Exception) {}
+            }
+        }
+
+        fun sendPartyHostStopAnnouncement() {
+            kotlin.concurrent.thread(name = "PartyHostStopAnnouncer", isDaemon = true) {
+                try {
+                    val sock = DatagramSocket().apply { broadcast = true }
+                    val json = JSONObject().apply {
+                        put("type", "BEACON")
+                        put("app", "AirSpeaker")
+                        put("version", 1)
+                        put("device", getPhoneModelName())
+                        put("is_party_host", false)
+                        put("is_extended_host", false)
+                        put("party_mode", false)
+                        put("audio_port", 5004)
+                    }
+                    val data = json.toString().toByteArray(Charsets.UTF_8)
+                    sock.send(DatagramPacket(data, data.size, InetAddress.getByName("255.255.255.255"), 5005))
+                    sock.close()
+                } catch (_: Exception) {}
             }
         }
 

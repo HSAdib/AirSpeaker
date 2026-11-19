@@ -31,6 +31,7 @@ targets:
         UIBackgroundModes:
           - audio
         NSCameraUsageDescription: "Air Speaker uses the camera to scan Party Host QR codes for instant connection."
+        NSPhotoLibraryUsageDescription: "Air Speaker needs photo library access to scan saved QR code images."
         NSLocalNetworkUsageDescription: "Air Speaker uses your local network (UDP 5004, 5005) for ultra-low-latency audio streaming and device discovery."
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -42,5 +43,6 @@ targets:
       - framework: ReplayKit.framework
       - framework: Network.framework
       - framework: CoreImage.framework
+      - framework: PhotosUI.framework
       - framework: SwiftUI.framework
       - framework: UIKit.framework

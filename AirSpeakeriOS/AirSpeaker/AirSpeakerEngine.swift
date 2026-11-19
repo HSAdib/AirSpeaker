@@ -267,6 +267,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var isPartyHost: Bool = false {
         didSet { syncRelayFlags() }
     }
+    @Published public var isPartyHostBroadcasting: Bool = false {
+        didSet { syncRelayFlags() }
+    }
     @Published public var isPartyJoined: Bool = false
     @Published public var isPartyExtending: Bool = false {
         didSet { syncRelayFlags() }
@@ -416,7 +419,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func syncRelayFlags() {
-        let active = isPartyHost || isPartyExtending
+        let active = (isPartyHost && isPartyHostBroadcasting) || isPartyExtending
         stateLock.lock()
         atomicRelayActive = active
         stateLock.unlock()
@@ -1019,24 +1022,35 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             let isHost = payload["is_party_host"] as? Bool ?? (payload["party_mode"] as? Bool ?? false)
             if isHost {
                 updateDiscoveredPartyHost(name: connectedServerName, ip: senderIp, port: 5004, isExtended: false)
+            } else {
+                discoveredPartyHosts.removeAll { $0.ip == senderIp }
             }
 
         case "BEACON":
             let dev = payload["device"] as? String ?? (payload["device_name"] as? String ?? "Device")
             let isHost = payload["is_party_host"] as? Bool ?? false
             let isExt = payload["is_extended_host"] as? Bool ?? false
-            let isPartyJoin = payload["party_join"] as? Bool ?? false
+            let isPartyJoin = payload["party_join"] as? Bool
 
             if isHost || isExt {
                 updateDiscoveredPartyHost(name: dev, ip: senderIp, port: 5004, isExtended: isExt)
+            } else if payload["is_party_host"] != nil || payload["is_extended_host"] != nil {
+                discoveredPartyHosts.removeAll { $0.ip == senderIp }
             }
 
             // Downstream peer discovery
-            if (isPartyHost || isPartyExtending) && isPartyJoin && !isHost {
-                peersLock.lock()
-                partyPeerIps.insert(senderIp)
-                peersLock.unlock()
-                updatePartyMember(name: dev, ip: senderIp)
+            if (isPartyHost || isPartyExtending) {
+                if isPartyJoin == true && !isHost {
+                    peersLock.lock()
+                    partyPeerIps.insert(senderIp)
+                    peersLock.unlock()
+                    updatePartyMember(name: dev, ip: senderIp)
+                } else if isPartyJoin == false {
+                    peersLock.lock()
+                    partyPeerIps.remove(senderIp)
+                    peersLock.unlock()
+                    partyMembers.removeAll { $0.ip == senderIp }
+                }
             }
 
         case "CONFIG_SYNC":
@@ -1182,7 +1196,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     // MARK: - Party Mode Lifecycle & QR Code URIs
     public func hostParty() {
         partyScreen = "HOST"
-        isPartyHost = true
+        isPartyHost = false
+        isPartyHostBroadcasting = false
         isPartyJoined = false
         isPartyExtending = false
         updateEffectiveEQ()
@@ -1190,8 +1205,40 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         peersLock.lock()
         partyPeerIps.removeAll()
         peersLock.unlock()
+    }
+
+    public func startPartyHostBroadcast() {
+        isPartyHost = true
+        isPartyHostBroadcasting = true
+        syncRelayFlags()
         startSpeakerPlayer()
         broadcastBeacon()
+    }
+
+    public func stopPartyHostBroadcast() {
+        isPartyHost = false
+        isPartyHostBroadcasting = false
+        syncRelayFlags()
+        sendPartyHostStopAnnouncement()
+        stopSpeakerPlayer()
+    }
+
+    public func sendPartyHostStopAnnouncement() {
+        let stopBeacon: [String: Any] = [
+            "type": "BEACON",
+            "app": "AirSpeaker",
+            "version": 1,
+            "ips": AirSpeakerEngine.getLocalIpv4Addresses(),
+            "audio_port": 5004,
+            "device": self.deviceName,
+            "party_join": false,
+            "is_party_host": false,
+            "is_extended_host": false,
+            "serving": self.isInternalAudioServing,
+            "playing": false,
+            "platform": "ios"
+        ]
+        broadcastControlMessage(stopBeacon)
     }
 
     public func joinParty(hostIp: String, port: Int = 5004) {
@@ -1201,6 +1248,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
         partyScreen = "JOIN"
         isPartyHost = false
+        isPartyHostBroadcasting = false
         isPartyJoined = true
         currentPartyHostIp = actualIp
         updateServerIp(actualIp)
@@ -1228,6 +1276,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     public func leaveParty() {
+        if isPartyHostBroadcasting {
+            stopPartyHostBroadcast()
+        }
         if isPartyJoined && !currentPartyHostIp.isEmpty {
             sendControlMessage([
                 "type": "BEACON",
@@ -1235,6 +1286,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 "version": 1,
                 "device": deviceName,
                 "party_join": false,
+                "is_party_host": false,
+                "is_extended_host": false,
                 "audio_port": 5004
             ], toIp: currentPartyHostIp)
         }
@@ -1243,6 +1296,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         closeSocket(&relayTxSocket)
         partyScreen = "CHOOSER"
         isPartyHost = false
+        isPartyHostBroadcasting = false
         isPartyJoined = false
         isPartyExtending = false
         currentPartyHostIp = ""
@@ -1299,11 +1353,25 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     // MARK: - Periodic Beacons & Stats
     private func startBeaconTimer() {
         beaconTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.broadcastBeacon()
+            guard let self = self else { return }
+            self.broadcastBeacon()
+            let now = Date()
+            self.discoveredPartyHosts.removeAll { now.timeIntervalSince($0.lastSeen) > 6.0 }
+            self.partyMembers.removeAll { member in
+                if now.timeIntervalSince(member.lastSeen) > 10.0 {
+                    self.peersLock.lock()
+                    self.partyPeerIps.remove(member.ip)
+                    self.peersLock.unlock()
+                    return true
+                }
+                return false
+            }
         }
     }
 
     public func broadcastBeacon() {
+        let isHostActive = self.isPartyHost && self.isPartyHostBroadcasting && !self.isPartyExtending
+        let isExtActive = self.isPartyExtending && self.isPartyJoined
         let beacon: [String: Any] = [
             "type": "BEACON",
             "app": "AirSpeaker",
@@ -1312,8 +1380,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             "audio_port": 5004,
             "device": self.deviceName,
             "party_join": false,
-            "is_party_host": self.isPartyHost && !self.isPartyExtending,
-            "is_extended_host": self.isPartyExtending,
+            "is_party_host": isHostActive,
+            "is_extended_host": isExtActive,
             "serving": self.isInternalAudioServing,
             "playing": self.isAudioPlaying,
             "platform": "ios",

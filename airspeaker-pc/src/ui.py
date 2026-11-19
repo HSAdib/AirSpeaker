@@ -1541,10 +1541,10 @@ class AirSpeakerApp:
 
     def _enter_party_host_mode(self) -> None:
         self._party_view_state = "HOST"
-        self.party_mode_var.set(True)
+        self.party_mode_var.set(False)
         self.party_role_var.set("HOST")
         if self._control_listener:
-            self._control_listener.set_party_mode(True)
+            self._control_listener.set_party_mode(False)
         if hasattr(self, "party_chooser_frame"):
             self.party_chooser_frame.pack_forget()
         if hasattr(self, "party_join_frame"):
@@ -1780,21 +1780,25 @@ class AirSpeakerApp:
         except Exception:
             raw = ""
         if not raw:
-            messagebox.showinfo("Party Mode", "Clipboard is empty. Copy a party host QR link or IP address first.")
+            import tkinter.simpledialog as sd
+            raw = sd.askstring("Join Party", "Enter Party Host IP or airspeaker:// join link:")
+            if raw:
+                raw = raw.strip()
+        if not raw:
             return
         ip, port = self._parse_join_uri(raw)
         if ip:
             self.party_join_host_ip_var.set(ip)
             self.party_join_port_var.set(str(port))
-            messagebox.showinfo("Party Mode", f"Successfully imported Host: {ip}:{port}")
+            self._start_party_join()
         else:
-            messagebox.showwarning("Party Mode", f"Could not recognize a valid host IP or QR link in clipboard:\n{raw[:100]}")
+            messagebox.showwarning("Party Mode", f"Could not recognize a valid host IP or QR link:\n{raw[:100]}")
 
     def _refresh_discovered_hosts_ui(self) -> None:
         if not hasattr(self, "party_join_discovered_listbox"):
             return
         now = time.monotonic()
-        to_del = [ip for ip, data in self._discovered_party_hosts.items() if (now - data.get("last_seen", 0)) > 15.0]
+        to_del = [ip for ip, data in self._discovered_party_hosts.items() if (now - data.get("last_seen", 0)) > 6.0]
         for ip in to_del:
             self._discovered_party_hosts.pop(ip, None)
 
@@ -1809,7 +1813,7 @@ class AirSpeakerApp:
 
         self.party_join_discovered_listbox.delete(0, tk.END)
         if not self._discovered_party_hosts:
-            self.party_join_discovered_listbox.insert(tk.END, "  (No party hosts detected yet — waiting for beacons...)")
+            self.party_join_discovered_listbox.insert(tk.END, "  (No party hosts broadcasting yet — waiting for active hosts...)")
         else:
             idx_to_reselect = -1
             for i, (ip, data) in enumerate(self._discovered_party_hosts.items()):
@@ -1834,6 +1838,22 @@ class AirSpeakerApp:
                 self.party_join_port_var.set(str(data.get("port", AUDIO_PORT)))
                 break
 
+    def _on_join_selected_host(self) -> None:
+        if self._party_joined_active:
+            self._stop_party_join()
+            return
+        self._on_select_discovered_host()
+        if not self.party_join_host_ip_var.get().strip():
+            # If no selection in listbox, try the first discovered host if available
+            if self._discovered_party_hosts:
+                first_ip = next(iter(self._discovered_party_hosts))
+                self.party_join_host_ip_var.set(first_ip)
+                self.party_join_port_var.set(str(self._discovered_party_hosts[first_ip].get("port", AUDIO_PORT)))
+        if not self.party_join_host_ip_var.get().strip():
+            self._on_paste_party_join_link()
+            return
+        self._start_party_join()
+
     def _toggle_party_join(self) -> None:
         if self._party_join_receiver and self._party_join_receiver.is_running:
             self._stop_party_join()
@@ -1851,7 +1871,7 @@ class AirSpeakerApp:
             host_ip = self.party_join_host_ip_var.get().strip()
 
         if not host_ip:
-            messagebox.showwarning("Party Mode", "Please enter or select a Party Host IP address first.")
+            messagebox.showwarning("Party Mode", "Please select an active Party Host from the list or paste a link/IP.")
             return
 
         try:
@@ -1911,6 +1931,25 @@ class AirSpeakerApp:
         logger.info("Joined party at %s:%d", host_ip, port)
 
     def _stop_party_join(self) -> None:
+        host_ip = self.party_join_host_ip_var.get().strip()
+        if host_ip:
+            try:
+                send_control_message(
+                    host_ip,
+                    {
+                        "type": "BEACON",
+                        "app": "AirSpeaker",
+                        "version": 1,
+                        "party_join": False,
+                        "is_party_host": False,
+                        "is_extended_host": False,
+                        "device": socket.gethostname(),
+                        "audio_port": AUDIO_PORT,
+                    },
+                    CONTROL_PORT,
+                )
+            except Exception:
+                pass
         if self._party_join_receiver:
             self._party_join_receiver.stop()
             self._party_join_receiver = None
@@ -1922,7 +1961,7 @@ class AirSpeakerApp:
             self._party_relay_sock = None
         if hasattr(self, "party_join_btn"):
             self.party_join_btn.config(
-                text="🎧  JOIN PARTY STREAM (LISTEN TO HOST)", bg="#002B00", fg=ACCENT,
+                text="🎧  JOIN SELECTED HOST", bg="#002B00", fg=ACCENT,
                 activebackground="#004400", activeforeground=ACCENT
             )
         self._party_joined_active = False
@@ -1937,7 +1976,7 @@ class AirSpeakerApp:
                 bg="#002B00", fg="#00EEEE",
                 activebackground="#004400", activeforeground="#00EEEE"
             )
-        self.party_join_status_var.set("🎧 Joiner Standby: Select a discovered host or enter Host IP")
+        self.party_join_status_var.set("🎧 Joiner Standby: Select an active host above or paste a party link")
         logger.info("Left party stream")
 
     def _on_party_join_stats(self, pps: int) -> None:
@@ -2119,6 +2158,8 @@ class AirSpeakerApp:
             self.bitrate_combo_tab1.config(state=state)
         if hasattr(self, "bitrate_combo_tab2"):
             self.bitrate_combo_tab2.config(state=state)
+        if hasattr(self, "bitrate_combo_tab_host"):
+            self.bitrate_combo_tab_host.config(state=state)
         if hasattr(self, "frame_combo_tab2"):
             self.frame_combo_tab2.config(state=state)
         if not is_opus and self.frame_ms_var.get() != "5":
@@ -2506,6 +2547,9 @@ class AirSpeakerApp:
         self._streaming = True
         if as_party:
             self._party_streaming = True
+            self.party_mode_var.set(True)
+            if self._control_listener:
+                self._control_listener.set_party_mode(True)
             if hasattr(self, "party_start_btn"):
                 self.party_start_btn.config(
                     text="■  STOP PARTY BROADCAST", bg="#330000", fg=ERROR_COLOR,
@@ -2532,6 +2576,9 @@ class AirSpeakerApp:
     def _stop_stream(self, from_party: bool = False) -> None:
         if from_party:
             self._party_streaming = False
+            self.party_mode_var.set(False)
+            if self._control_listener:
+                self._control_listener.set_party_mode(False)
             if hasattr(self, "party_start_btn"):
                 self.party_start_btn.config(
                     text="👑  START PARTY BROADCAST (HOST)",
@@ -2891,14 +2938,24 @@ class AirSpeakerApp:
                                     self._control_listener.set_target_ip(sender_ip)
                                 if self._streaming and self._udp_sender:
                                     self._udp_sender.update_target(sender_ip, int(self.ip_port_var.get() or AUDIO_PORT))
-                            if data.get("party_join") or (self._party_view_state == "HOST" and self.party_mode_var.get()):
-                                self._register_party_device(sender_ip, data.get("device", "Android Phone"), data.get("audio_port", AUDIO_PORT), force=True)
-                            if data.get("party_mode") or data.get("party_host") or data.get("role") == "HOST":
+                            if data.get("party_join") is True:
+                                self._register_party_device(sender_ip, data.get("device", "Phone Joiner"), data.get("audio_port", AUDIO_PORT), force=True)
+                            elif data.get("party_join") is False:
+                                self._party_devices.pop(sender_ip, None)
+                                if self._udp_sender:
+                                    self._udp_sender.remove_party_target(sender_ip)
+                                self._refresh_party_ui()
+
+                            is_host = bool(data.get("is_party_host") or data.get("is_extended_host"))
+                            if is_host:
                                 self._discovered_party_hosts[sender_ip] = {
                                     "name": data.get("device", "Phone Host"),
                                     "last_seen": time.monotonic(),
                                     "port": data.get("audio_port", AUDIO_PORT),
                                 }
+                            elif "is_party_host" in data or "is_extended_host" in data:
+                                self._discovered_party_hosts.pop(sender_ip, None)
+                                self._refresh_discovered_hosts_ui()
                         self._apply_incoming_config(data)
                     elif kind == "beacon":
                         msg = data
@@ -2969,15 +3026,24 @@ class AirSpeakerApp:
                             self.codec_var.set(CODEC_PCM16)
                             self._update_codec_ui_state()
                             self._on_local_setting_changed()
-                        if (self._party_view_state == "HOST" and self.party_mode_var.get()) or msg.get("party_join"):
-                            if self._party_view_state == "HOST" or getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get():
-                                self._register_party_device(best_ip, dev_name or "Android Phone", msg.get("audio_port", AUDIO_PORT), force=True)
-                        if msg.get("party_mode") or msg.get("party_host") or msg.get("is_party_host") or msg.get("is_extended_host") or msg.get("role") == "HOST":
+                        if msg.get("party_join") is True:
+                            self._register_party_device(best_ip, dev_name or "Phone Joiner", msg.get("audio_port", AUDIO_PORT), force=True)
+                        elif msg.get("party_join") is False:
+                            self._party_devices.pop(best_ip, None)
+                            if self._udp_sender:
+                                self._udp_sender.remove_party_target(best_ip)
+                            self._refresh_party_ui()
+
+                        is_host = bool(msg.get("is_party_host") or msg.get("is_extended_host"))
+                        if is_host:
                             self._discovered_party_hosts[best_ip] = {
                                 "name": dev_name or "Phone Host",
                                 "last_seen": time.monotonic(),
                                 "port": msg.get("audio_port", AUDIO_PORT),
                             }
+                        elif "is_party_host" in msg or "is_extended_host" in msg:
+                            self._discovered_party_hosts.pop(best_ip, None)
+                            self._refresh_discovered_hosts_ui()
 
                         if matching_adapter_idx is not None and matching_adapter_idx != adapter_sel:
                             self.adapter_combo.current(matching_adapter_idx)
@@ -3046,8 +3112,13 @@ class AirSpeakerApp:
                                 self.conn_device_ip_var.set(f"{cur_ip}  •  CONNECTED (SERVING AUDIO)")
                             else:
                                 self.conn_device_ip_var.set(f"{cur_ip}  •  DETECTED (PLAYER OFF — Tap Start on Phone)")
-                        if sender_ip and self._party_view_state == "HOST" and self.party_mode_var.get():
-                            self._register_party_device(sender_ip, dev_name or "Android Phone", s.get("audio_port", AUDIO_PORT))
+                        if sender_ip and s.get("party_join") is True:
+                            self._register_party_device(sender_ip, dev_name or "Phone Joiner", s.get("audio_port", AUDIO_PORT))
+                        elif sender_ip and s.get("party_join") is False:
+                            self._party_devices.pop(sender_ip, None)
+                            if self._udp_sender:
+                                self._udp_sender.remove_party_target(sender_ip)
+                            self._refresh_party_ui()
 
                         if hasattr(self, "play_buf_level_var"):
                             buf_ms = s.get("buffer_ms", "--")
@@ -3178,7 +3249,9 @@ class AirSpeakerApp:
         self.direction_var.set(self.cfg.get("direction", "PC_TO_PHONE"))
         self.audio_profile_var.set(self.cfg.get("audio_profile", "BALANCED"))
         self.tray_var.set(bool(self.cfg.get("minimize_to_tray", True)))
-        self.party_mode_var.set(bool(self.cfg.get("party_mode", False)))
+        self.party_mode_var.set(False)
+        if self._control_listener:
+            self._control_listener.set_party_mode(False)
         self._update_codec_ui_state()
         self._update_expected_delay_label()
 

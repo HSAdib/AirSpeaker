@@ -1148,6 +1148,79 @@
                     app:strokeWidth="1dp"
                     app:cornerRadius="0dp" />
 
+                <!-- Host Stream Quality & Bandwidth Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="#101820"
+                    android:orientation="vertical"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="STREAM QUALITY &amp; BANDWIDTH:"
+                        android:textColor="#00EEEE"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:fontFamily="monospace" />
+
+                    <!-- Codec Radio Group -->
+                    <RadioGroup
+                        android:id="@+id/rgPartyHostCodec"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/rbPartyHostCodecPcm"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Lossless PCM16"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace"
+                            android:checked="true" />
+
+                        <RadioButton
+                            android:id="@+id/rbPartyHostCodecOpus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:text="Opus"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace" />
+                    </RadioGroup>
+
+                    <!-- Bitrate Row -->
+                    <LinearLayout
+                        android:id="@+id/layoutPartyHostBitrate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="MUSIC BITRATE: "
+                            android:textColor="#888888"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace" />
+
+                        <Spinner
+                            android:id="@+id/spinnerPartyHostBitrate"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:minWidth="120dp"
+                            android:background="#1A1A1A" />
+                    </LinearLayout>
+                </LinearLayout>
+
                 <LinearLayout android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_width="match_parent" android:orientation="horizontal">
                     <TextView android:fontFamily="monospace" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="PARTY HOST TARGET BUFFER:" android:textColor="#888888" android:textSize="11sp"/>
                     <TextView android:fontFamily="monospace" android:id="@+id/tvPartyHostTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
@@ -1237,18 +1310,12 @@
                     android:fontFamily="monospace"
                     android:textSize="11sp" />
 
-                <com.hasan.airspeaker.LatencyGraphView
-                    android:id="@+id/latencyGraphPartyHost"
-                    android:layout_width="match_parent"
-                    android:layout_height="90dp"
-                    android:layout_marginTop="10dp" />
-
                 <!-- Connected Party Members -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="CONNECTED JOINERS / PEERS:"
+                    android:text="CONNECTED JOINERS (ONLY ACTIVE MEMBERS):"
                     android:textColor="#888888"
                     android:textSize="12sp"
                     android:fontFamily="monospace" />
@@ -1313,22 +1380,10 @@
                         android:fontFamily="monospace"
                         android:textSize="11sp" />
                 </LinearLayout>
-
-                <!-- Hotspot Setup Tip -->
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="#0A1118"
-                    android:padding="8dp"
-                    android:text="💡 HOST TIP:&#10;• Mobile Hotspot: Turn on Hotspot on this phone -> other phones &amp; PC connect to it -> tap Start Party Broadcast!&#10;• The host plays sound through its speaker AND forwards to all joiners in real-time sync!"
-                    android:textColor="#38B6FF"
-                    android:textSize="11sp"
-                    android:fontFamily="monospace" />
             </LinearLayout>
 
             <!-- ========================================================= -->
-            <!-- 3. JOIN SECTION (Shown ONLY when user taps JOIN)          -->
+            <!-- 3. JOIN SECTION (Ultra-Clean Joiner UI)                   -->
             <!-- ========================================================= -->
             <LinearLayout
                 android:id="@+id/layoutPartyJoinSection"
@@ -1344,7 +1399,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="6dp">
+                    android:layout_marginBottom="8dp">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnPartyJoinBack"
@@ -1363,12 +1418,40 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:layout_marginStart="8dp"
-                        android:text="🎧 JOIN PARTY MODE"
+                        android:text="🎧 JOIN PARTY"
                         android:textColor="#00EEEE"
                         android:textSize="12sp"
                         android:textStyle="bold"
                         android:fontFamily="monospace" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnScanPartyQrCamera"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="📷 SCAN"
+                        android:textColor="#00FF00"
+                        app:strokeColor="#00FF00"
+                        app:strokeWidth="1dp"
+                        android:fontFamily="monospace"
+                        android:textSize="11sp" />
                 </LinearLayout>
+
+                <!-- Prominent Scan QR Code Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnScanPartyQrCameraLarge"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="📷  SCAN PARTY QR CODE"
+                    android:textColor="#00EEEE"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace"
+                    app:backgroundTint="#002233"
+                    app:strokeColor="#00EEEE"
+                    app:strokeWidth="1dp"
+                    app:cornerRadius="0dp" />
 
                 <!-- Discovered Hosts Section -->
                 <LinearLayout
@@ -1381,7 +1464,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="📡 SCANNING FOR PARTY HOSTS:"
+                        android:text="📡 ACTIVE PARTY HOSTS ON NETWORK:"
                         android:textColor="#888888"
                         android:textSize="11sp"
                         android:textStyle="bold"
@@ -1407,7 +1490,7 @@
                     android:layout_marginTop="4dp"
                     android:background="#101820"
                     android:padding="8dp"
-                    android:text="Scanning Wi-Fi / Hotspot for Party Hosts... (Tap host to connect)"
+                    android:text="Waiting for party hosts... Tap a host below to connect:"
                     android:textColor="#00EEEE"
                     android:textSize="11sp"
                     android:fontFamily="monospace" />
@@ -1420,200 +1503,35 @@
                     android:orientation="vertical"
                     android:layout_marginTop="4dp" />
 
-                <!-- Manual Address or QR Scan Section -->
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="HOST ADDRESS (SCAN OR ENTER):"
-                    android:textColor="#888888"
-                    android:textSize="11sp"
-                    android:fontFamily="monospace" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="4dp">
-
-                    <EditText
-                        android:id="@+id/etJoinPartyHostIp"
-                        android:layout_width="0dp"
-                        android:layout_height="44dp"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="4dp"
-                        android:background="#1A1A1A"
-                        android:hint="Host IP (e.g. 192.168.43.1)"
-                        android:textColorHint="#555555"
-                        android:textColor="#FFFFFF"
-                        android:textSize="12sp"
-                        android:fontFamily="monospace"
-                        android:inputType="textUri"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp" />
-
-                    <EditText
-                        android:id="@+id/etJoinPartyPort"
-                        android:layout_width="55dp"
-                        android:layout_height="44dp"
-                        android:layout_marginEnd="4dp"
-                        android:background="#1A1A1A"
-                        android:text="5004"
-                        android:textColor="#FFFFFF"
-                        android:textSize="12sp"
-                        android:fontFamily="monospace"
-                        android:gravity="center"
-                        android:inputType="number" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnScanPartyQrCamera"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="44dp"
-                        android:layout_marginEnd="4dp"
-                        android:text="📷 SCAN QR"
-                        android:textColor="#00FF00"
-                        app:strokeColor="#00FF00"
-                        app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
-                        android:textSize="11sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnScanPartyQr"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="44dp"
-                        android:text="📋 PASTE"
-                        android:textColor="#38B6FF"
-                        app:strokeColor="#38B6FF"
-                        app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
-                        android:textSize="11sp" />
-                </LinearLayout>
-
-                <!-- Join Action Button -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnTogglePartyJoin"
-                    android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:layout_marginTop="10dp"
-                    android:text="[ 🎧 JOIN PARTY STREAM ]"
-                    android:textColor="#00FF00"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:fontFamily="monospace"
-                    app:backgroundTint="#002B00"
-                    app:strokeColor="#00FF00"
-                    app:strokeWidth="1dp"
-                    app:cornerRadius="0dp" />
-
                 <!-- Party Join Status Banner -->
                 <TextView
                     android:id="@+id/tvPartyJoinStatus"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="10dp"
                     android:background="#111111"
-                    android:padding="8dp"
-                    android:text="PARTY JOINER: Standby"
+                    android:padding="10dp"
+                    android:text="PARTY JOINER: Standby (Scan QR or tap an active host above)"
                     android:textColor="#00FF00"
                     android:textSize="12sp"
                     android:fontFamily="monospace" />
 
-                <LinearLayout android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_width="match_parent" android:orientation="horizontal">
-                    <TextView android:fontFamily="monospace" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="PARTY JOIN TARGET BUFFER:" android:textColor="#888888" android:textSize="11sp"/>
-                    <TextView android:fontFamily="monospace" android:id="@+id/tvPartyJoinTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
-                </LinearLayout>
-
-                <RadioGroup
-                    android:id="@+id/rgPartyJoinBufferMode"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:orientation="horizontal">
-
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinBufLow"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="monospace"
-                        android:text="20ms"
-                        android:textColor="#FFFFFF"
-                        android:textSize="11sp" />
-
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinBufMed"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="monospace"
-                        android:text="40ms"
-                        android:textColor="#FFFFFF"
-                        android:textSize="11sp" />
-
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinBufHigh"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="monospace"
-                        android:text="80ms"
-                        android:textColor="#FFFFFF"
-                        android:textSize="11sp" />
-
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinBufAuto"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:checked="true"
-                        android:fontFamily="monospace"
-                        android:text="Auto"
-                        android:textColor="#FFFFFF"
-                        android:textSize="11sp" />
-
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinBufCustom"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1.2"
-                        android:fontFamily="monospace"
-                        android:text="Custom"
-                        android:textColor="#FFFFFF"
-                        android:textSize="11sp" />
-                </RadioGroup>
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderPartyJoinTargetBuffer"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:valueFrom="10.0"
-                    android:valueTo="200.0"
-                    android:stepSize="2.5"
-                    android:value="30.0"
-                    app:thumbColor="#FFFFFF"
-                    app:trackColorActive="#00EEEE"
-                    app:trackColorInactive="#444444" />
-
+                <!-- Join / Leave Action Button -->
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnEqualizerPartyJoin"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:id="@+id/btnTogglePartyJoin"
                     android:layout_width="match_parent"
-                    android:layout_height="42dp"
-                    android:layout_marginTop="4dp"
-                    android:text="[ 🎛️ PARTY JOINER EQUALIZER: OFF (TAP TO OPEN) ]"
-                    android:textColor="#00EEEE"
-                    app:strokeColor="#00EEEE"
-                    app:strokeWidth="1dp"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="6dp"
+                    android:text="[ ■ LEAVE PARTY ]"
+                    android:textColor="#FF4444"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
                     android:fontFamily="monospace"
-                    android:textSize="11sp" />
-
-                <com.hasan.airspeaker.LatencyGraphView
-                    android:id="@+id/latencyGraphPartyJoin"
-                    android:layout_width="match_parent"
-                    android:layout_height="90dp"
-                    android:layout_marginTop="10dp" />
+                    android:visibility="gone"
+                    app:backgroundTint="#330000"
+                    app:strokeColor="#FF4444"
+                    app:strokeWidth="1dp"
+                    app:cornerRadius="0dp" />
 
                 <!-- ===================================================== -->
                 <!-- 4. POST-JOIN EXTEND PARTY CARD                        -->
