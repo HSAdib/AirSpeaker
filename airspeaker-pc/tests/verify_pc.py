@@ -1,5 +1,5 @@
 r"""
-tests/verify_pc.py — Self-contained verification tests for Air Speaker PC.
+tests/verify_pc.py - Self-contained verification tests for Air Speaker PC.
 
 Run with: .venv\Scripts\python tests\verify_pc.py
 """
@@ -10,6 +10,11 @@ import struct
 import sys
 import time
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import numpy as np
 
@@ -25,13 +30,13 @@ results = []
 
 def check(name: str, condition: bool, detail: str = "") -> None:
     status = PASS if condition else FAIL
-    suffix = f" — {detail}" if detail else ""
+    suffix = f" - {detail}" if detail else ""
     print(f"[{status}] {name}{suffix}")
     results.append((name, status))
 
 
 # ---------------------------------------------------------------------------
-# Test 1: Adapter filter — 192.168.56.1 is excluded
+# Test 1: Adapter filter - 192.168.56.1 is excluded
 # ---------------------------------------------------------------------------
 def test_adapter_filter() -> None:
     name = "Adapter filter excludes 192.168.56.1"
@@ -81,7 +86,7 @@ def test_opus_encoder() -> None:
             frame_ms=5,
         )
         if not enc.available:
-            check(name, False, "opus.dll not found — encoder unavailable (PCM fallback mode)")
+            check(name, False, "opus.dll not found - encoder unavailable (PCM fallback mode)")
             return
 
         # 5ms @ 48kHz stereo int16 = 240 samples/ch * 2 ch * 2 bytes = 960 bytes
@@ -97,10 +102,10 @@ def test_opus_encoder() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 4: Silence frame generator at ≥180 pps (5ms intervals)
+# Test 4: Silence frame generator at >=180 pps (5ms intervals)
 # ---------------------------------------------------------------------------
 def test_silence_pacing() -> None:
-    name = "Silence frame pacing ≥180 pps (targeting 200 pps / 5ms)"
+    name = "Silence frame pacing >=180 pps (targeting 200 pps / 5ms)"
     try:
         import ctypes
         try:
@@ -684,7 +689,7 @@ def test_equalizer_manager() -> None:
 
 def main() -> None:
     print("=" * 60)
-    print("Air Speaker PC — Verification Tests")
+    print("Air Speaker PC - Verification Tests")
     print("=" * 60)
     print()
 

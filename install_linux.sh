@@ -7,7 +7,7 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "  Air Speaker v1 Studio — Uninstalling..."
     echo "=========================================================="
     pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
-    pkill -f "AirSpeaker-v1"
+    pkill -f "AirSpeaker-v1" 2>/dev/null || true
     pkill -f "AirSpeaker-v2" 2>/dev/null || true
     pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
     pkill -f "PhoneSpeaker-v2" 2>/dev/null || true

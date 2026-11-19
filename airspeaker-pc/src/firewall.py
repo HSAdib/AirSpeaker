@@ -28,7 +28,7 @@ def _netsh_add_cmd(port: int) -> list:
 
 def get_firewall_commands() -> list:
     if sys.platform == "darwin":
-        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/Air\\ Speaker\\ v2.app/Contents/MacOS/airspeaker"]
+        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/Air\\ Speaker\\ v1.app/Contents/MacOS/airspeaker"]
     if sys.platform.startswith("linux"):
         if shutil.which("ufw"):
             return [f"sudo ufw allow {p}/udp" for p in PORTS]
