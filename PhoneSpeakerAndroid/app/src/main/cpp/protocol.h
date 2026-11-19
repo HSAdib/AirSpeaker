@@ -28,6 +28,7 @@ struct AudioPacket {
     bool deserialize(const uint8_t* data, size_t size) {
         if (!data || size < sizeof(AudioHeader)) return false;
         std::memcpy(&header, data, sizeof(AudioHeader));
+        header.codec &= 0x0F;
         payload.assign(data + sizeof(AudioHeader), data + size);
         return true;
     }

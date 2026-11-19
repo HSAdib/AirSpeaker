@@ -190,8 +190,8 @@ def list_output_devices() -> List[Dict]:
                     "alt_indices": norm_indices[key],
                 })
 
-            # Sort virtual devices (CABLE Input / Mic Sink) first for easy selection for Mic routing
-            devices.sort(key=lambda d: (not d.get("is_virtual", False), not d.get("is_default", False), d.get("name", "")))
+            # Sort real default speakers/headphones first, followed by other physical outputs, then virtual cables
+            devices.sort(key=lambda d: (not d.get("is_default", False), d.get("is_virtual", False), d.get("name", "")))
         finally:
             pa.terminate()
     except Exception as exc:
@@ -321,6 +321,7 @@ class AudioReceiver:
         self._last_channels = CHANNELS
         self._queue_event = threading.Event()
         self._lock = threading.Lock()
+        self._volume_gain: float = 1.0
         self._pps_count = 0
         self._last_pps_time = 0.0
         self.peak_level: float = 0.0
@@ -330,6 +331,9 @@ class AudioReceiver:
 
     def set_eq_gains(self, enabled: bool, gains_db: List[float]) -> None:
         self._rx_eq_dsp.set_gains(gains_db, enabled=enabled)
+
+    def set_volume_gain(self, gain: float) -> None:
+        self._volume_gain = max(0.0, min(2.0, float(gain)))
 
     @property
     def is_running(self) -> bool:
@@ -505,6 +509,9 @@ class AudioReceiver:
                 if header:
                     seq = header["seq"]
                     sender_ip = addr[0]
+                    now_rx = time.monotonic()
+                    if (now_rx - self._last_rx_time) > 0.6 or (self._last_seq is not None and self._last_seq > 30 and seq < 15):
+                        self._last_seq = None
                     if sender_ip == self._last_sender_ip and self._last_seq is not None:
                         diff = (self._last_seq - seq) & 0xFFFFFFFF
                         if seq == self._last_seq or (0 < diff < 500):
@@ -554,6 +561,16 @@ class AudioReceiver:
     def _render_and_write(self, pcm_data: bytes, channels: int) -> None:
         try:
             pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, channels)
+            gain = self._volume_gain
+            if abs(gain - 1.0) > 0.01:
+                norm = (np.frombuffer(pcm_data, dtype="<i2").astype(np.float32) * gain) / 32767.0
+                if gain > 1.0:
+                    knee = 0.85
+                    norm = np.where(norm > knee, knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)), norm)
+                    norm = np.where(norm < -knee, -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)), norm)
+                else:
+                    norm = np.clip(norm, -1.0, 1.0)
+                pcm_data = np.rint(norm * 32767.0).astype("<i2").tobytes()
             out_pcm = pcm_data
             if self._dev_rate != SAMPLE_RATE or self._dev_channels != channels:
                 pcm_arr = np.frombuffer(pcm_data, dtype="<i2")

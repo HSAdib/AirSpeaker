@@ -53,23 +53,25 @@ jobs:
           chmod +x gradlew
           ./gradlew testDebugUnitTest
 
-      - name: Build Android Release APK
+      - name: Build Android APK
         run: |
           cd PhoneSpeakerAndroid
-          ./gradlew assembleRelease || ./gradlew assembleDebug
+          if [ -n "$PHONESPEAKER_KEYSTORE_PATH" ] && [ -f "$PHONESPEAKER_KEYSTORE_PATH" ]; then
+            ./gradlew assembleRelease
+          else
+            echo "No release keystore configured — building signed debug APK so it installs cleanly on devices."
+            ./gradlew assembleDebug
+          fi
           rm -f /tmp/release.keystore
 
       - name: Locate and Package Android Artifact
         run: |
-          APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -n 1)
-          if [ -z "$APK_PATH" ]; then
-            echo "Release APK not found, checking debug build..."
-            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
+          APK_PATH=""
+          if [ -n "$PHONESPEAKER_KEYSTORE_PATH" ]; then
+            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
           fi
           if [ -z "$APK_PATH" ]; then
-            echo "Build APK not found, checking repository root..."
-            [ -f "PhoneSpeaker.v2.1.apk" ] && APK_PATH="PhoneSpeaker.v2.1.apk"
-            [ -f "PhoneSpeaker v2.apk" ] && [ -z "$APK_PATH" ] && APK_PATH="PhoneSpeaker v2.apk"
+            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
           fi
           echo "Selected APK: $APK_PATH"
           cp "$APK_PATH" PhoneSpeaker.v2.1.apk

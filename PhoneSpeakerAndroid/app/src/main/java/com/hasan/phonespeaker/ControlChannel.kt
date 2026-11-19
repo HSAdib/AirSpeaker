@@ -285,6 +285,7 @@ class ControlChannel(
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
                         put("serving", AudioStreamService.isServing)
+                        put("playing", AudioStreamService.isStreaming)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     try {
@@ -362,6 +363,7 @@ class ControlChannel(
                         put("active_codec", stats.codec)
                         put("device", getPhoneModelName())
                         put("serving", AudioStreamService.isServing)
+                        put("playing", AudioStreamService.isStreaming)
                         put("serve_pps", AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0)
                         if (pingTs > 0L) {
                             put("echo_pc_ts", pingTs)
@@ -487,6 +489,7 @@ class ControlChannel(
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
                         put("serving", AudioStreamService.isServing)
+                        put("playing", AudioStreamService.isStreaming)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     try {

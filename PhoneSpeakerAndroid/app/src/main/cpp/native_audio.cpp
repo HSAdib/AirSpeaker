@@ -37,12 +37,16 @@ bool NativeAudioEngine::start(int audio_port) {
         return false;
     }
 
-    // Set receive buffer to 1MB
     int rcvbuf = 1024 * 1024;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
     int reuse = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    struct timeval tv{};
+    tv.tv_sec = 0;
+    tv.tv_usec = 200000; // 200ms timeout for clean shutdown
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in servaddr{};
     servaddr.sin_family = AF_INET;
@@ -67,7 +71,10 @@ bool NativeAudioEngine::start(int audio_port) {
     // 3. Start JitterBuffer decode worker thread
     mJitterBuffer.start();
 
-    // 4. Start UDP receiver thread
+    // 4. Mark running TRUE BEFORE spawning receiver thread so socketReceiverLoop stays alive!
+    mIsRunning.store(true, std::memory_order_release);
+
+    // 5. Start UDP receiver thread
     try {
         mReceiverThread = std::thread(&NativeAudioEngine::socketReceiverLoop, this);
     } catch (const std::exception& e) {
@@ -76,19 +83,19 @@ bool NativeAudioEngine::start(int audio_port) {
         return false;
     }
 
-    // 5. Request Oboe stream playback start
+    // 6. Request Oboe stream playback start
     if (!startOboeStream()) {
         LOGE("Failed to start Oboe stream playback");
         cleanupAfterFailedStart();
         return false;
     }
 
-    mIsRunning.store(true, std::memory_order_release);
     LOGI("NativeAudioEngine started successfully on port %d", mAudioPort);
     return true;
 }
 
 void NativeAudioEngine::cleanupAfterFailedStart() noexcept {
+    mIsRunning.store(false, std::memory_order_release);
     stopAndCloseOboeStream();
 
     int fd = mSocketFd.exchange(-1, std::memory_order_acq_rel);
@@ -102,7 +109,6 @@ void NativeAudioEngine::cleanupAfterFailedStart() noexcept {
     }
 
     mJitterBuffer.stop();
-    mIsRunning.store(false, std::memory_order_release);
 }
 
 void NativeAudioEngine::stop() {
@@ -327,13 +333,20 @@ void NativeAudioEngine::socketReceiverLoop() {
             mLastSenderIp = ip_str;
         }
 
-        // Optional Party Mode mesh relay
-        if (mPartyRelayEnabled.load(std::memory_order_relaxed)) {
-            std::lock_guard<std::mutex> pLock(mPartyPeersMutex);
-            for (const auto& peerAddr : mPartyPeerAddrs) {
-                if (peerAddr.sin_addr.s_addr != client_addr.sin_addr.s_addr) {
-                    sendto(fd, buffer, bytes_read, 0,
-                           (const struct sockaddr*)&peerAddr, sizeof(peerAddr));
+        // Optional Party Mode mesh relay with 4-hop TTL loop prevention
+        if (mPartyRelayEnabled.load(std::memory_order_relaxed) && bytes_read >= 12) {
+            uint8_t rawCodec = buffer[8];
+            uint8_t hopCount = (rawCodec >> 4) & 0x07;
+            if (hopCount < 4) {
+                uint8_t relayBuf[2048];
+                std::memcpy(relayBuf, buffer, static_cast<size_t>(bytes_read));
+                relayBuf[8] = (rawCodec & 0x8F) | static_cast<uint8_t>(((hopCount + 1) & 0x07) << 4);
+                std::lock_guard<std::mutex> pLock(mPartyPeersMutex);
+                for (const auto& peerAddr : mPartyPeerAddrs) {
+                    if (peerAddr.sin_addr.s_addr != client_addr.sin_addr.s_addr) {
+                        sendto(fd, relayBuf, static_cast<size_t>(bytes_read), 0,
+                               (const struct sockaddr*)&peerAddr, sizeof(peerAddr));
+                    }
                 }
             }
         }

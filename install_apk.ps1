@@ -1,8 +1,8 @@
-# install_apk.ps1 — Helper to build, install, and launch PhoneSpeaker APK on Android
+# install_apk.ps1 - Helper to build, install, and launch PhoneSpeaker APK on Android
 $ErrorActionPreference = "Stop"
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "PhoneSpeaker v2.1 — Android Rebuild & Install Script" -ForegroundColor Cyan
+Write-Host "PhoneSpeaker v2.1 - Android Rebuild and Install Script" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # 1. Locate / Detect JAVA_HOME (prefer standard LTS JDK 17/21)
@@ -89,8 +89,8 @@ if (-not $devices) {
     Write-Host "  1. On your phone: Settings -> Developer options -> Wireless debugging -> ON" -ForegroundColor Gray
     Write-Host "  2. Tap 'Pair device with pairing code'" -ForegroundColor Gray
     Write-Host "  3. In PowerShell run:" -ForegroundColor Gray
-    Write-Host "     & `"$adb`" pair <phone_ip>:<pairing_port>" -ForegroundColor White
-    Write-Host "     & `"$adb`" connect <phone_ip>:<connect_port>" -ForegroundColor White
+    Write-Host "     $adb pair [phone_ip]:[pairing_port]" -ForegroundColor White
+    Write-Host "     $adb connect [phone_ip]:[connect_port]" -ForegroundColor White
     Write-Host "  4. Then re-run this script: .\install_apk.ps1`n" -ForegroundColor White
     exit 0
 }

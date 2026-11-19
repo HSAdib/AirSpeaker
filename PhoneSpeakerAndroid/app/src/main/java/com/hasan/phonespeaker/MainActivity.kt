@@ -81,6 +81,35 @@ class MainActivity : AppCompatActivity() {
         handler.postDelayed({ refreshServiceButtonState() }, 200L)
     }
 
+    private val recordAudioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchMediaProjectionCapture()
+        } else {
+            Toast.makeText(this, "Audio permission is required by Android to capture internal system audio", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun launchMediaProjectionCapture() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (mediaProjectionManager == null) {
+                mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            }
+            val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                mediaProjectionManager!!.createScreenCaptureIntent(
+                    android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
+                )
+            } else {
+                mediaProjectionManager!!.createScreenCaptureIntent()
+            }
+            Toast.makeText(this, "Android requires Screen Capture for internal audio (audio only — select Entire Screen)", Toast.LENGTH_LONG).show()
+            screenCaptureLauncher.launch(captureIntent)
+        } else {
+            Toast.makeText(this, "Internal system audio capture requires Android 10+", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private var partyModeScreen: String = "CHOOSER" // "CHOOSER", "HOST", "JOIN"
     private var isPartyJoinedActive: Boolean = false
     private var isPartyExtendedActive: Boolean = false
@@ -115,6 +144,7 @@ class MainActivity : AppCompatActivity() {
     private var lastAppliedDiscoveredPcIp: String? = null
     private var lastAdvLogTime: Long = 0L
     private var userManuallyStoppedPlayer = false
+    private var pcStreamingHintActive = false
 
     private val bitrateValues = listOf("10", "24", "32", "64", "96", "128", "160", "192", "256", "320")
 
@@ -1861,9 +1891,8 @@ class MainActivity : AppCompatActivity() {
             val lowLatency = binding.rbEngineOboe.isChecked && !binding.switchAudioFx.isChecked
             AudioNative.nativeSetLowLatencyMode(lowLatency)
 
-            if (json.optBoolean("pc_streaming", false) && !AudioStreamService.isStreaming && !AudioStreamService.isServing && !userManuallyStoppedPlayer) {
-                Log.i(TAG, "PC started streaming; auto-starting speaker player")
-                binding.btnToggleStream.performClick()
+            if (json.has("pc_streaming")) {
+                pcStreamingHintActive = json.optBoolean("pc_streaming", false)
             }
         } finally {
             suppressSync = false
@@ -1887,13 +1916,10 @@ class MainActivity : AppCompatActivity() {
                 refreshServiceButtonState()
             }, 500L)
         } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                if (mediaProjectionManager == null) {
-                    mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                }
-                screenCaptureLauncher.launch(mediaProjectionManager!!.createScreenCaptureIntent())
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                launchMediaProjectionCapture()
             } else {
-                Toast.makeText(this, "Internal system audio capture requires Android 10+", Toast.LENGTH_LONG).show()
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
         handler.postDelayed({ refreshServiceButtonState() }, 200L)
@@ -1960,8 +1986,13 @@ class MainActivity : AppCompatActivity() {
         if (AudioStreamService.isStreaming) statusParts.add("PLAY: ON (5004)")
         if (AudioStreamService.isServing) statusParts.add("SERVE: ON (5004)")
         if (statusParts.isEmpty()) {
-            binding.tvStatus.text = "STATUS: STOPPED"
-            binding.tvStatus.setTextColor(0xFF888888.toInt())
+            if (pcStreamingHintActive) {
+                binding.tvStatus.text = "PC IS STREAMING — TAP START SPEAKER PLAYER"
+                binding.tvStatus.setTextColor(0xFF00EEEE.toInt())
+            } else {
+                binding.tvStatus.text = "STATUS: STOPPED"
+                binding.tvStatus.setTextColor(0xFF888888.toInt())
+            }
         } else {
             binding.tvStatus.text = "ACTIVE: " + statusParts.joinToString(" | ")
             binding.tvStatus.setTextColor(0xFF00FF00.toInt())
@@ -2022,6 +2053,9 @@ class MainActivity : AppCompatActivity() {
                     lastAppliedDiscoveredPcIp = discoveredPcIp
                     binding.etPcIp.setText(discoveredPcIp)
                 }
+            }
+            if (discoveredPcIp != null && !binding.etServeTargetIp.hasFocus() && binding.etServeTargetIp.text.isNullOrBlank()) {
+                binding.etServeTargetIp.setText(discoveredPcIp)
             }
             val displayIp = discoveredPcIp ?: userEditedPcIp
             val pcName = AudioStreamService.activeControlChannel?.getActivePcName()

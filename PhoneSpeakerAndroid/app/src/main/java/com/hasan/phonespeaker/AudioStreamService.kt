@@ -323,6 +323,13 @@ class AudioStreamService : Service() {
         val ok = internalStreamer!!.start(projection, ip)
         if (!ok) {
             Log.e(TAG, "InternalAudioStreamer failed to start")
+            serviceHandler.post {
+                android.widget.Toast.makeText(
+                    this,
+                    "Failed to capture internal audio. Grant audio permission and choose 'Entire screen'.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
             isServing = false
             internalStreamer = null
             internalAudioStreamerInstance = null
@@ -381,7 +388,7 @@ class AudioStreamService : Service() {
             }
             if (json.has("volume_gain")) {
                 savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                AudioNative.nativeSetVolumeGain(if (savedVolumeGain > 0.01f) savedVolumeGain else 1.0f)
+                AudioNative.nativeSetVolumeGain(1.0f)
             }
             if (json.has("muted")) {
                 userMuted = json.getBoolean("muted")

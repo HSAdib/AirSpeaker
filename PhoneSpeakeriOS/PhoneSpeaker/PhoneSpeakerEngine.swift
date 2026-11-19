@@ -722,11 +722,11 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
     }
 
     // MARK: - Option A: Internal System Audio Capture & Streamer (UDP 5004)
-    public func toggleServingInternalAudio() {
+    public func toggleServingInternalAudio(targetIp: String = "") {
         if isInternalAudioServing {
             stopServingInternalAudio()
         } else {
-            startServingInternalAudio()
+            startServingInternalAudio(targetIp: targetIp)
         }
     }
 
@@ -762,14 +762,66 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             guard CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: &lengthAtOffset, totalLengthOut: &totalLength, dataPointerOut: &dataPointer) == noErr,
                   let rawPtr = dataPointer else { return }
 
-            let sampleCount = totalLength / 2
-            let shortPtr = rawPtr.withMemoryRebound(to: Int16.self, capacity: sampleCount) { $0 }
+            var isFloat = false
+            var isBigEndian = false
+            var inChannels = 2
+            var inSampleRate: Double = 48000.0
+            if let fmtDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(fmtDesc) {
+                let asbd = asbdPtr.pointee
+                isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+                isBigEndian = (asbd.mFormatFlags & kAudioFormatFlagIsBigEndian) != 0
+                inChannels = max(1, Int(asbd.mChannelsPerFrame))
+                if asbd.mSampleRate > 8000.0 {
+                    inSampleRate = asbd.mSampleRate
+                }
+            }
+
+            var decodedStereo: [Int16] = []
+            if isFloat {
+                let floatCount = totalLength / 4
+                decodedStereo.reserveCapacity(inChannels == 1 ? floatCount * 2 : floatCount)
+                let floatPtr = rawPtr.withMemoryRebound(to: Float32.self, capacity: floatCount) { $0 }
+                for i in 0..<floatCount {
+                    var f = floatPtr[i]
+                    if isBigEndian { f = Float32(bitPattern: UInt32(bigEndian: f.bitPattern)) }
+                    let s = Int16(max(-32768.0, min(32767.0, f * 32767.0)))
+                    decodedStereo.append(s)
+                    if inChannels == 1 { decodedStereo.append(s) }
+                }
+            } else {
+                let sampleCount = totalLength / 2
+                decodedStereo.reserveCapacity(inChannels == 1 ? sampleCount * 2 : sampleCount)
+                let shortPtr = rawPtr.withMemoryRebound(to: Int16.self, capacity: sampleCount) { $0 }
+                for i in 0..<sampleCount {
+                    let s = isBigEndian ? Int16(bigEndian: shortPtr[i]) : shortPtr[i]
+                    decodedStereo.append(s)
+                    if inChannels == 1 { decodedStereo.append(s) }
+                }
+            }
+
+            // Resample to 48 kHz stereo if iOS ReplayKit delivers 44.1 kHz
+            if abs(inSampleRate - 48000.0) > 100.0 && decodedStereo.count >= 4 {
+                let inFrames = decodedStereo.count / 2
+                let outFrames = max(1, Int(round(Double(inFrames) * 48000.0 / inSampleRate)))
+                var resampled = [Int16](repeating: 0, count: outFrames * 2)
+                let ratio = Double(inFrames - 1) / Double(max(1, outFrames - 1))
+                for f in 0..<outFrames {
+                    let srcPos = Double(f) * ratio
+                    let idx0 = min(inFrames - 1, Int(srcPos))
+                    let idx1 = min(inFrames - 1, idx0 + 1)
+                    let frac = Float(srcPos - Double(idx0))
+                    let l = Float(decodedStereo[idx0 * 2]) * (1.0 - frac) + Float(decodedStereo[idx1 * 2]) * frac
+                    let r = Float(decodedStereo[idx0 * 2 + 1]) * (1.0 - frac) + Float(decodedStereo[idx1 * 2 + 1]) * frac
+                    resampled[f * 2] = Int16(max(-32768.0, min(32767.0, l)))
+                    resampled[f * 2 + 1] = Int16(max(-32768.0, min(32767.0, r)))
+                }
+                decodedStereo = resampled
+            }
 
             var maxSample: Int16 = 0
             serveLock.lock()
-            for i in 0..<sampleCount {
-                sampleAccumulator.append(shortPtr[i])
-            }
+            sampleAccumulator.append(contentsOf: decodedStereo)
 
             while sampleAccumulator.count >= 480 {
                 var slice = Array(sampleAccumulator.prefix(480))
@@ -838,6 +890,22 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
         withUnsafePointer(to: &destAddr) { addrPtr in
             _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
                 sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        if toIp == "255.255.255.255" {
+            let parts = self.localIpAddress.split(separator: ".")
+            if parts.count == 4 {
+                let subnetBcast = "\(parts[0]).\(parts[1]).\(parts[2]).255"
+                var bcastAddr = sockaddr_in()
+                bcastAddr.sin_family = sa_family_t(AF_INET)
+                bcastAddr.sin_port = in_port_t(5004).bigEndian
+                inet_pton(AF_INET, subnetBcast, &bcastAddr.sin_addr)
+                withUnsafePointer(to: &bcastAddr) { addrPtr in
+                    _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                        sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+                }
             }
         }
 
@@ -1020,6 +1088,9 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             }
             if let disc = payload["stop_on_headset_disconnect"] as? Bool {
                 stopOnHeadsetDisconnect = disc
+            }
+            if let pcStreaming = payload["pc_streaming"] as? Bool, pcStreaming && !isAudioPlaying {
+                statusMessage = "PC is streaming — Tap Start Speaker Player"
             }
 
         case "PARTY_KICK":
@@ -1243,6 +1314,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
             "is_party_host": self.isPartyHost && !self.isPartyExtending,
             "is_extended_host": self.isPartyExtending,
             "serving": self.isInternalAudioServing,
+            "playing": self.isAudioPlaying,
             "platform": "ios",
             "force_pcm": true
         ]
@@ -1326,6 +1398,7 @@ public final class PhoneSpeakerEngine: NSObject, ObservableObject {
                     "active_codec": 0,
                     "device": self.deviceName,
                     "serving": self.isInternalAudioServing,
+                    "playing": self.isAudioPlaying,
                     "serve_pps": self.serveTxPps,
                     "platform": "ios",
                     "force_pcm": true

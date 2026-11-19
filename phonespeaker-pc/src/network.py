@@ -530,6 +530,7 @@ class UDPSender:
                                         pass
                                 self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                                 self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                                 sock = self._sock
                             sock.sendto(packet, (t_ip, t_port))
                             sent_any = True

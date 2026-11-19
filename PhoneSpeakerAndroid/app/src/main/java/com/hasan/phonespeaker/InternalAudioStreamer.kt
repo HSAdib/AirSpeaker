@@ -268,6 +268,18 @@ class InternalAudioStreamer {
                     // Ignore transient network errors
                 }
 
+                if (targetIpStr == "255.255.255.255") {
+                    for (localIp in ControlChannel.getLocalIpv4Addresses()) {
+                        val parts = localIp.split(".")
+                        if (parts.size == 4 && !parts[0].startsWith("127")) {
+                            val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
+                            try {
+                                sock.send(DatagramPacket(packetBytes, PACKET_SIZE, InetAddress.getByName("$prefix.255"), targetPort))
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+
                 if (ControlChannel.isHostingOrExtendingParty && ControlChannel.partyPeerIps.isNotEmpty()) {
                     for (peerIp in ControlChannel.partyPeerIps) {
                         if (peerIp != targetIpStr) {

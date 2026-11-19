@@ -37,6 +37,7 @@ from protocol import (
 from opus_codec import OpusEncoder
 from audio_capture import AudioCapture, list_loopback_devices
 from audio_output import (
+    AudioReceiver,
     PhoneAudioReceiver,
     list_output_devices,
     normalize_device_name,
@@ -258,7 +259,7 @@ class PhoneSpeakerApp:
         self._phone_headset_disc = bool(self.cfg.get("stop_on_headset_disconnect", False))
 
         # Core StringVars & IntVars initialized early so all tabs can share them
-        self.codec_var = tk.IntVar(value=int(self.cfg.get("codec", CODEC_OPUS)))
+        self.codec_var = tk.IntVar(value=int(self.cfg.get("codec", CODEC_PCM16)))
         self.bitrate_var = tk.StringVar(value=str(self.cfg.get("opus_bitrate_kbps", 192)))
         self.frame_ms_var = tk.StringVar(value=str(self.cfg.get("frame_ms", 5)))
         self.buffer_mode_var = tk.StringVar(value=self.cfg.get("buffer_mode", "AUTO"))
@@ -1872,6 +1873,8 @@ class PhoneSpeakerApp:
                 on_stats=self._on_party_join_stats,
                 on_packet=self._relay_party_packet,
             )
+            self._party_join_receiver.set_volume_gain(self.volume_gain_var.get())
+            self._party_join_receiver.set_muted(self.muted_var.get())
             self._party_join_receiver.start()
             self._on_eq_changed()
         except Exception as exc:
@@ -2198,6 +2201,10 @@ class PhoneSpeakerApp:
         muted = self.muted_var.get()
         if self._udp_sender:
             self._udp_sender.set_routing_and_gain(True, gain, muted)
+        if self._phone_receiver:
+            self._phone_receiver.set_volume_gain(gain)
+        if self._party_join_receiver:
+            self._party_join_receiver.set_volume_gain(gain)
 
         if getattr(self, "sync_os_vol_var", None) and self.sync_os_vol_var.get():
             os_target = min(1.0, max(0.0, gain))
@@ -2217,6 +2224,12 @@ class PhoneSpeakerApp:
         self.mute_btn.config(bg="#990000" if m else "#333333", text="MUTED" if m else "MUTE")
         if hasattr(self, "conn_mute_icon_btn"):
             self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
+        if self._udp_sender:
+            self._udp_sender.set_routing_and_gain(True, self.volume_gain_var.get(), m)
+        if self._phone_receiver:
+            self._phone_receiver.set_muted(m)
+        if self._party_join_receiver:
+            self._party_join_receiver.set_muted(m)
         if getattr(self, "sync_os_vol_var", None) and self.sync_os_vol_var.get():
             set_system_volume_and_mute(self.volume_gain_var.get(), m)
             self._last_os_mute = m
@@ -2588,6 +2601,8 @@ class PhoneSpeakerApp:
             target_buffer_ms=self.custom_buffer_var.get(),
             on_stats=self._on_rx_pps_update,
         )
+        self._phone_receiver.set_volume_gain(self.volume_gain_var.get())
+        self._phone_receiver.set_muted(self.muted_var.get())
         self._phone_receiver.start()
         self._on_eq_changed()
         self._play_active = True
@@ -2937,7 +2952,16 @@ class PhoneSpeakerApp:
                             self.conn_device_name_var.set(dev_name)
                         elif self._connected_phone_name == "Waiting for phone...":
                             self.conn_device_name_var.set("Android Phone")
-                        self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED")
+                        is_playing = bool(msg.get("playing", False))
+                        is_serving = bool(msg.get("serving", False))
+                        if is_playing and is_serving:
+                            self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED (PLAYING + SERVING)")
+                        elif is_playing:
+                            self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED (PLAYER ON)")
+                        elif is_serving:
+                            self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED (SERVING AUDIO)")
+                        else:
+                            self.conn_device_ip_var.set(f"{best_ip}  •  DETECTED (PLAYER OFF — Tap Start on Phone)")
 
                         is_ios = (msg.get("platform") == "ios" or msg.get("force_pcm") is True or
                                   "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
@@ -3010,8 +3034,18 @@ class PhoneSpeakerApp:
                             self._on_local_setting_changed()
                         cur_ip = self.ip_var.get().strip()
                         sender_ip = s.get("_sender_ip") or cur_ip
+                        rx_pps_phone = int(s.get("rx_pps", 0) or 0)
+                        is_playing = bool(s.get("playing", False)) or rx_pps_phone > 0
+                        is_serving = bool(s.get("serving", False)) or int(s.get("serve_pps", 0) or 0) > 0
                         if cur_ip:
-                            self.conn_device_ip_var.set(f"{cur_ip}  •  CONNECTED")
+                            if is_playing and rx_pps_phone > 0:
+                                self.conn_device_ip_var.set(f"{cur_ip}  •  STREAMING LIVE ({rx_pps_phone} pps)")
+                            elif is_playing:
+                                self.conn_device_ip_var.set(f"{cur_ip}  •  CONNECTED (PLAYER ON)")
+                            elif is_serving:
+                                self.conn_device_ip_var.set(f"{cur_ip}  •  CONNECTED (SERVING AUDIO)")
+                            else:
+                                self.conn_device_ip_var.set(f"{cur_ip}  •  DETECTED (PLAYER OFF — Tap Start on Phone)")
                         if sender_ip and self._party_view_state == "HOST" and self.party_mode_var.get():
                             self._register_party_device(sender_ip, dev_name or "Android Phone", s.get("audio_port", AUDIO_PORT))
 
@@ -3116,7 +3150,7 @@ class PhoneSpeakerApp:
         if phone_ip:
             self.ip_var.set(phone_ip)
         self.ip_port_var.set(str(self.cfg.get("phone_port", self.cfg.get("target_port", AUDIO_PORT))))
-        self.codec_var.set(int(self.cfg.get("codec", CODEC_OPUS)))
+        self.codec_var.set(int(self.cfg.get("codec", CODEC_PCM16)))
         self.bitrate_var.set(str(self.cfg.get("opus_bitrate_kbps", 192)))
         self.frame_ms_var.set(str(self.cfg.get("frame_ms", 5)))
         self.buffer_mode_var.set(self.cfg.get("buffer_mode", "AUTO"))

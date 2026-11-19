@@ -396,7 +396,7 @@ struct ServeStudioTab: View {
                 // Big Action Button
                 Button(action: {
                     let target = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    engine.toggleServingInternalAudio()
+                    engine.toggleServingInternalAudio(targetIp: target)
                 }) {
                     Text(engine.isInternalAudioServing ? "[ ■ STOP SERVING AUDIO ]" : "[ 📡 START SERVING AUDIO (PORT 5004) ]")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
