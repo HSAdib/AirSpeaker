@@ -1,8 +1,8 @@
-# install_apk.ps1 - Helper to build, install, and launch PhoneSpeaker APK on Android
+# install_apk.ps1 - Helper to build, install, and launch Air Speaker APK on Android
 $ErrorActionPreference = "Stop"
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "PhoneSpeaker v2.1 - Android Rebuild and Install Script" -ForegroundColor Cyan
+Write-Host "Air Speaker v2.1 - Android Rebuild and Install Script" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # 1. Locate / Detect JAVA_HOME (prefer standard LTS JDK 17/21)
@@ -43,8 +43,8 @@ if (-not $env:JAVA_HOME) {
 }
 
 # 2. Compile fresh APK with gradlew.bat assembleDebug
-$androidDir = Join-Path $PSScriptRoot "PhoneSpeakerAndroid"
-Write-Host "`n[1/3] Building fresh PhoneSpeaker v2.1 APK..." -ForegroundColor Cyan
+$androidDir = Join-Path $PSScriptRoot "AirSpeakerAndroid"
+Write-Host "`n[1/3] Building fresh Air Speaker v2.1 APK..." -ForegroundColor Cyan
 Push-Location $androidDir
 try {
     & .\gradlew.bat assembleDebug
@@ -55,8 +55,8 @@ try {
     Pop-Location
 }
 
-$builtApk = Join-Path $PSScriptRoot "PhoneSpeakerAndroid\app\build\outputs\apk\debug\app-debug.apk"
-$apkPath = Join-Path $PSScriptRoot "PhoneSpeaker.v2.1.apk"
+$builtApk = Join-Path $PSScriptRoot "AirSpeakerAndroid\app\build\outputs\apk\debug\app-debug.apk"
+$apkPath = Join-Path $PSScriptRoot "AirSpeaker.v2.1.apk"
 if (Test-Path $builtApk) {
     Copy-Item -Path $builtApk -Destination $apkPath -Force
     Write-Host "Fresh APK copied to: $apkPath" -ForegroundColor Green
@@ -96,6 +96,8 @@ if (-not $devices) {
 }
 
 Write-Host "`n[3/3] Device detected! Stopping old instance, installing fresh APK, and launching..." -ForegroundColor Green
+& $adb shell am force-stop com.hasan.airspeaker.v2
+& $adb shell am force-stop com.hasan.airspeaker
 & $adb shell am force-stop com.hasan.phonespeaker.v2
 & $adb shell am force-stop com.hasan.phonespeaker
 
@@ -105,10 +107,10 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "adb install failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "`nLaunching PhoneSpeaker MainActivity on device..." -ForegroundColor Green
-& $adb shell am start -n com.hasan.phonespeaker.v2/com.hasan.phonespeaker.MainActivity
+Write-Host "`nLaunching Air Speaker MainActivity on device..." -ForegroundColor Green
+& $adb shell am start -n com.hasan.airspeaker.v2/com.hasan.airspeaker.MainActivity
 if ($LASTEXITCODE -ne 0) {
-    & $adb shell am start -n com.hasan.phonespeaker/.MainActivity
+    & $adb shell am start -n com.hasan.airspeaker/.MainActivity
 }
 
-Write-Host "`nSuccess! PhoneSpeaker v2.1 is compiled and running on your phone." -ForegroundColor Cyan
+Write-Host "`nSuccess! Air Speaker v2.1 is compiled and running on your phone." -ForegroundColor Cyan

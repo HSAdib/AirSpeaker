@@ -1,4 +1,4 @@
-name: PhoneSpeaker CI & Release Pipeline
+name: Air Speaker CI & Release Pipeline
 
 on:
   push:
@@ -39,6 +39,10 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+            echo "AIRSPEAKER_KEYSTORE_PATH=/tmp/release.keystore" >> $GITHUB_ENV
+            echo "AIRSPEAKER_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "AIRSPEAKER_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "AIRSPEAKER_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
             echo "PHONESPEAKER_KEYSTORE_PATH=/tmp/release.keystore" >> $GITHUB_ENV
             echo "PHONESPEAKER_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "PHONESPEAKER_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
@@ -49,13 +53,13 @@ jobs:
 
       - name: Run Android Unit Tests
         run: |
-          cd PhoneSpeakerAndroid
+          cd AirSpeakerAndroid
           chmod +x gradlew
           ./gradlew testDebugUnitTest
 
       - name: Build Android APK
         run: |
-          cd PhoneSpeakerAndroid
+          cd AirSpeakerAndroid
           if [ -n "$PHONESPEAKER_KEYSTORE_PATH" ] && [ -f "$PHONESPEAKER_KEYSTORE_PATH" ]; then
             ./gradlew assembleRelease
           else
@@ -68,21 +72,21 @@ jobs:
         run: |
           APK_PATH=""
           if [ -n "$PHONESPEAKER_KEYSTORE_PATH" ]; then
-            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
+            APK_PATH=$(find AirSpeakerAndroid/app/build/outputs/apk/release -name "*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
           fi
           if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find PhoneSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
+            APK_PATH=$(find AirSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
           fi
           echo "Selected APK: $APK_PATH"
-          cp "$APK_PATH" PhoneSpeaker.v2.1.apk
-          sha256sum PhoneSpeaker.v2.1.apk | tee PhoneSpeaker.v2.1.apk.sha256
+          cp "$APK_PATH" AirSpeaker.v2.1.apk
+          sha256sum AirSpeaker.v2.1.apk | tee AirSpeaker.v2.1.apk.sha256
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneSpeaker-v2.1-APK
+          name: AirSpeaker-v2.1-APK
           path: |
-            PhoneSpeaker.v2.1.apk
+            AirSpeaker.v2.1.apk
 
   # ====================================================
   # 2. WINDOWS BUILD JOB (Python 3.11, Tests & PyInstaller)
@@ -102,34 +106,34 @@ jobs:
 
       - name: Install Dependencies & Run Verification Tests
         run: |
-          cd phonespeaker-pc
+          cd airspeaker-pc
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python tests/verify_pc.py
 
       - name: Compile Windows Standalone Executable
         run: |
-          cd phonespeaker-pc
+          cd airspeaker-pc
           python build_exe.py
 
       - name: Verify Windows Artifact & Generate SHA256
         shell: pwsh
         run: |
-          if (-not (Test-Path "PhoneSpeaker.v2.1.exe")) {
-            Copy-Item "phonespeaker-pc/dist/PhoneSpeaker v2.exe" "PhoneSpeaker.v2.1.exe" -Force
+          if (-not (Test-Path "AirSpeaker.v2.1.exe")) {
+            Copy-Item "airspeaker-pc/dist/Air Speaker v2.exe" "AirSpeaker.v2.1.exe" -Force
           }
-          Get-FileHash -Algorithm SHA256 "PhoneSpeaker.v2.1.exe" | Out-File "PhoneSpeaker.v2.1.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "AirSpeaker.v2.1.exe" | Out-File "AirSpeaker.v2.1.exe.sha256"
           Write-Host "Windows EXE SHA256:"
-          Get-Content "PhoneSpeaker.v2.1.exe.sha256"
+          Get-Content "AirSpeaker.v2.1.exe.sha256"
 
       - name: Upload Windows Executable Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneSpeaker-v2.1-EXE
+          name: AirSpeaker-v2.1-EXE
           path: |
-            PhoneSpeaker.v2.1.exe
-            PhoneSpeaker-v2-Linux-Installer.run
-            PhoneSpeaker-v2-macOS-Installer.command
+            AirSpeaker.v2.1.exe
+            AirSpeaker-v2-Linux-Installer.run
+            AirSpeaker-v2-macOS-Installer.command
 
   # ====================================================
   # 3. MACOS & IOS BUILD JOB (Xcode & DMG / IPA Packaging)
@@ -152,7 +156,7 @@ jobs:
 
       - name: Build macOS Application Bundle & DMG
         run: |
-          cd phonespeaker-pc
+          cd airspeaker-pc
           /opt/homebrew/bin/python3.11 build_macos.py || python3 build_macos.py
 
       - name: Select Xcode Version
@@ -161,38 +165,38 @@ jobs:
 
       - name: Generate Xcode Project with XcodeGen
         run: |
-          cd PhoneSpeakeriOS
+          cd AirSpeakeriOS
           xcodegen generate
 
       - name: Build iOS Archive (Unsigned for Sideloading)
         run: |
-          cd PhoneSpeakeriOS
+          cd AirSpeakeriOS
           xcodebuild archive \
-            -project PhoneSpeaker.xcodeproj \
-            -scheme PhoneSpeaker \
+            -project AirSpeaker.xcodeproj \
+            -scheme AirSpeaker \
             -configuration Release \
             -destination "generic/platform=iOS" \
-            -archivePath "build/PhoneSpeaker.xcarchive" \
+            -archivePath "build/AirSpeaker.xcarchive" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Package IPA
         run: |
-          cd PhoneSpeakeriOS
+          cd AirSpeakeriOS
           rm -rf Payload
           mkdir -p Payload
-          cp -R "build/PhoneSpeaker.xcarchive/Products/Applications/PhoneSpeaker.app" Payload/
-          zip -r -q ../PhoneSpeaker-v2-iOS.ipa Payload
+          cp -R "build/AirSpeaker.xcarchive/Products/Applications/AirSpeaker.app" Payload/
+          zip -r -q ../AirSpeaker-v2-iOS.ipa Payload
           cd ..
 
       - name: Upload Apple Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneSpeaker-v2-Apple-Deliverables
+          name: AirSpeaker-v2-Apple-Deliverables
           path: |
-            PhoneSpeaker-v2-macOS.dmg
-            PhoneSpeaker-v2-iOS.ipa
+            AirSpeaker-v2-macOS.dmg
+            AirSpeaker-v2-iOS.ipa
 
   # ====================================================
   # 4. OFFICIAL RELEASE PUBLICATION (On v2.1 Tag or v2.0 Tag)
@@ -213,29 +217,29 @@ jobs:
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: PhoneSpeaker-v2.1-APK
+          name: AirSpeaker-v2.1-APK
           path: release-artifacts/
 
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: PhoneSpeaker-v2.1-EXE
+          name: AirSpeaker-v2.1-EXE
           path: release-artifacts/
 
       - name: Download Apple Artifacts
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: PhoneSpeaker-v2-Apple-Deliverables
+          name: AirSpeaker-v2-Apple-Deliverables
           path: release-artifacts/
 
       - name: Populate Release Artifacts from Repository
         run: |
           mkdir -p release-artifacts
-          for f in "PhoneSpeaker.v2.1.exe" "PhoneSpeaker.v2.1.apk" \
-                   "PhoneSpeaker-v2-Linux-Installer.run" "PhoneSpeaker-v2-macOS-Installer.command" \
-                   "PhoneSpeaker-v2-macOS.dmg" "PhoneSpeaker-v2-iOS.ipa" "install_linux.sh"; do
+          for f in "AirSpeaker.v2.1.exe" "AirSpeaker.v2.1.apk" \
+                   "AirSpeaker-v2-Linux-Installer.run" "AirSpeaker-v2-macOS-Installer.command" \
+                   "AirSpeaker-v2-macOS.dmg" "AirSpeaker-v2-iOS.ipa" "install_linux.sh"; do
             if [ -f "$f" ] && [ ! -f "release-artifacts/$f" ]; then
               echo "Populating $f from repository..."
               cp "$f" release-artifacts/
@@ -258,7 +262,7 @@ jobs:
           fi
 
           cat << 'EOF' > RELEASE_NOTES.md
-          ### PhoneSpeaker v2.1 Studio — Complete Cross-Platform Overhaul
+          ### Air Speaker v2.1 Studio — Complete Cross-Platform Overhaul
 
           Low-latency wireless audio streaming & internal system audio studio for Windows 11, macOS, Linux, Android, and iOS.
 
@@ -273,17 +277,17 @@ jobs:
           - **Multi-Device Party Mode:** Synchronized multi-device broadcasting and daisy-chain personal hotspot extension.
 
           #### Deliverables for All 5 Operating Systems:
-          - **Windows 11 / 10:** `PhoneSpeaker.v2.1.exe` (Standalone 64-bit executable with WASAPI loopback)
-          - **Android:** `PhoneSpeaker.v2.1.apk` (C++ Oboe AAudio player & MediaProjection internal audio streamer)
-          - **macOS:** `PhoneSpeaker-v2-macOS.dmg` & `PhoneSpeaker-v2-macOS-Installer.command` (Apple Silicon & Intel DMG)
-          - **iOS:** `PhoneSpeaker-v2-iOS.ipa` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
-          - **Linux:** `PhoneSpeaker-v2-Linux-Installer.run` (PipeWire & PulseAudio one-click self-extracting installer)
+          - **Windows 11 / 10:** `AirSpeaker.v2.1.exe` (Standalone 64-bit executable with WASAPI loopback)
+          - **Android:** `AirSpeaker.v2.1.apk` (C++ Oboe AAudio player & MediaProjection internal audio streamer)
+          - **macOS:** `AirSpeaker-v2-macOS.dmg` & `AirSpeaker-v2-macOS-Installer.command` (Apple Silicon & Intel DMG)
+          - **iOS:** `AirSpeaker-v2-iOS.ipa` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
+          - **Linux:** `AirSpeaker-v2-Linux-Installer.run` (PipeWire & PulseAudio one-click self-extracting installer)
           EOF
 
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
-            gh release create "$TAG_NAME" --title "PhoneSpeaker v2.1 Studio" --notes-file RELEASE_NOTES.md
+            gh release create "$TAG_NAME" --title "Air Speaker v2.1 Studio" --notes-file RELEASE_NOTES.md
 
-          gh release edit "$TAG_NAME" --title "PhoneSpeaker v2.1 Studio" --notes-file RELEASE_NOTES.md || true
+          gh release edit "$TAG_NAME" --title "Air Speaker v2.1 Studio" --notes-file RELEASE_NOTES.md || true
 
           for f in release-artifacts/*; do
             if [ -f "$f" ]; then
@@ -293,7 +297,7 @@ jobs:
           done
 
       # ----------------------------------------------------
-      # 5. PUBLISH TO GITHUB PACKAGES SECTION (ghcr.io/hsadib/phonespeaker)
+      # 5. PUBLISH TO GITHUB PACKAGES SECTION (ghcr.io/hsadib/airspeaker)
       # ----------------------------------------------------
       - name: Set up ORAS CLI
         if: github.event_name != 'pull_request'
@@ -306,7 +310,7 @@ jobs:
         run: |
           echo "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          PKG_REF="ghcr.io/${OWNER_LC}/phonespeaker"
+          PKG_REF="ghcr.io/${OWNER_LC}/airspeaker"
 
           cd release-artifacts
           ORAS_FILES=()
@@ -318,7 +322,7 @@ jobs:
             echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF..."
             oras push --disable-path-validation "${PKG_REF}:latest" \
               --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-              --annotation "org.opencontainers.image.description=PhoneSpeaker v2.1 Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
+              --annotation "org.opencontainers.image.description=Air Speaker v2.1 Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
               --annotation "org.opencontainers.image.version=2.1.0" \
               "${ORAS_FILES[@]}"
 

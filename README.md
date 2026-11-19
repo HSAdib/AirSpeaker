@@ -1,4 +1,4 @@
-# PhoneSpeaker v2.1 Studio
+# Air Speaker v2.1 Studio
 
 Use your **phone as a wireless speaker for your PC** or stream **internal mobile device audio to your PC/Mac/Linux**, over a plain local network. Low-latency UDP audio, a native Android player built on Oboe and internal system audio capture built on `MediaProjection`, a native iOS app built on AVAudioEngine, ReplayKit & SwiftUI, and desktop studio apps for **Windows 11/10**, **Linux** (PipeWire / PulseAudio), and **macOS** (CoreAudio / BlackHole).
 
@@ -32,18 +32,18 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 
 ## GitHub Packages & Release Downloads
 
-> **Official Releases & Packages:** All prebuilt PhoneSpeaker deliverables are hosted on [**GitHub Releases (`releases/latest`)**](https://github.com/HSAdib/PhoneSpeaker/releases) and mirrored to [**GitHub Packages (`ghcr.io/hsadib/phonespeaker`)**](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker).
+> **Official Releases & Packages:** All prebuilt Air Speaker deliverables are hosted on [**GitHub Releases (`releases/latest`)**](https://github.com/HSAdib/AirSpeaker/releases) and mirrored to [**GitHub Packages (`ghcr.io/hsadib/airspeaker`)**](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker).
 
 | Platform | Package / Installer | Description | Direct 1-Click Download | Package Registry |
 |---|---|---|---|---|
-| **Windows 11 / 10** | `PhoneSpeaker.v2.1.exe` | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **Android (8.0–15+)** | `PhoneSpeaker.v2.1.apk` | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **Linux (All Distros)** | `PhoneSpeaker-v2-Linux-Installer.run` | Self-extracting bundle for PipeWire & PulseAudio | [**Download `.run`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-Linux-Installer.run) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **macOS (Apple Silicon & Intel)** | `PhoneSpeaker-v2-macOS.dmg` | Drag-and-drop macOS Disk Image (.app bundle) | [**Download DMG**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS.dmg) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **macOS (One-Click Script)** | `PhoneSpeaker-v2-macOS-Installer.command` | Interactive terminal installer & dependency manager | [**Download `.command`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS-Installer.command) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
-| **iOS (iPhone & iPad)** | `PhoneSpeaker-v2-iOS.ipa` | Sideloadable IPA (AltStore, SideStore, Sideloadly) | [**Download IPA**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-iOS.ipa) | [GitHub Packages](https://github.com/HSAdib/PhoneSpeaker/pkgs/container/phonespeaker) |
+| **Windows 11 / 10** | `AirSpeaker.v2.1.exe` | Standalone Windows 64-bit executable (PyInstaller) | [**Download EXE**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker.v2.1.exe) | [GitHub Packages](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker) |
+| **Android (8.0–15+)** | `AirSpeaker.v2.1.apk` | Universal Android APK (ARM64, ARMv7, x86_64, x86) | [**Download APK**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker.v2.1.apk) | [GitHub Packages](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker) |
+| **Linux (All Distros)** | `AirSpeaker-v2-Linux-Installer.run` | Self-extracting bundle for PipeWire & PulseAudio | [**Download `.run`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-Linux-Installer.run) | [GitHub Packages](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker) |
+| **macOS (Apple Silicon & Intel)** | `AirSpeaker-v2-macOS.dmg` | Drag-and-drop macOS Disk Image (.app bundle) | [**Download DMG**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-macOS.dmg) | [GitHub Packages](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker) |
+| **macOS (One-Click Script)** | `AirSpeaker-v2-macOS-Installer.command` | Interactive terminal installer & dependency manager | [**Download `.command`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-macOS-Installer.command) | [GitHub Packages](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker) |
+| **iOS (iPhone & iPad)** | `AirSpeaker-v2-iOS.ipa` | Sideloadable IPA (AltStore, SideStore, Sideloadly) | [**Download IPA**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-iOS.ipa) | [GitHub Packages](https://github.com/HSAdib/AirSpeaker/pkgs/container/airspeaker) |
 
-> **Linux One-Line Install:** `curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_linux.sh | bash`
+> **Linux One-Line Install:** `curl -sSL https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/install_linux.sh | bash`
 
 ## Install and build
 
@@ -58,11 +58,11 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
 - **Supported Architectures:** Compatible with all **ARM64** (`arm64-v8a`), **ARMv7** (`armeabi-v7a`), **x86_64**, and **x86** devices (smartphones, tablets, Android TV, and emulators).
 
 **Download APK:**
-- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.apk`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.apk)
-- 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/PhoneSpeaker/releases)
+- 📦 **Direct Download:** [**`AirSpeaker.v2.1.apk`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker.v2.1.apk)
+- 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/AirSpeaker/releases)
 
 **How to Install on Phone:**
-- **Direct File Transfer (Simplest):** Send `PhoneSpeaker.v2.1.apk` to your phone via Google Drive, Quick Share, Telegram, or USB cable. Tap the downloaded file and select *Install* (allow *Install unknown apps* for your browser/file manager if prompted).
+- **Direct File Transfer (Simplest):** Send `AirSpeaker.v2.1.apk` to your phone via Google Drive, Quick Share, Telegram, or USB cable. Tap the downloaded file and select *Install* (allow *Install unknown apps* for your browser/file manager if prompted).
 - **Windows Helper Script:** Run the included PowerShell helper:
   ```powershell
   .\install_apk.ps1
@@ -72,18 +72,18 @@ It started as a fix for a laptop with a dead speaker and a dead headphone jack, 
   ```powershell
   adb pair <phone_ip>:<pairing_port>
   adb connect <phone_ip>:<connect_port>
-  adb install -r "PhoneSpeaker.v2.1.apk"
+  adb install -r "AirSpeaker.v2.1.apk"
   ```
 
-> **Permissions:** PhoneSpeaker requests **MediaProjection** (when streaming internal mobile audio in SERVE mode), **Notifications** (to keep foreground streaming active), and a **Battery Optimization Exemption** (strongly recommended so Android doesn't throttle audio playback when the screen is locked).
+> **Permissions:** Air Speaker requests **MediaProjection** (when streaming internal mobile audio in SERVE mode), **Notifications** (to keep foreground streaming active), and a **Battery Optimization Exemption** (strongly recommended so Android doesn't throttle audio playback when the screen is locked).
 
 **Build Android APK from Source:**
 Requires Android Studio / SDK 34, NDK, CMake 3.22.1, and JDK 17 (CMake automatically clones libopus v1.5.2):
 ```powershell
-cd PhoneSpeakerAndroid
+cd AirSpeakerAndroid
 .\gradlew.bat assembleDebug
 ```
-The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-debug.apk` and copied to the root as `PhoneSpeaker.v2.1.apk`.
+The APK is generated at `AirSpeakerAndroid/app/build/outputs/apk/debug/app-debug.apk` and copied to the root as `AirSpeaker.v2.1.apk`.
 
 ---
 
@@ -93,27 +93,27 @@ The APK is generated at `PhoneSpeakerAndroid/app/build/outputs/apk/debug/app-deb
 - **Windows 11** & **Windows 10** (64-bit).
 
 **Download Windows Binary:**
-- 📦 **Direct Download:** [**`PhoneSpeaker.v2.1.exe`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker.v2.1.exe)
-- 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/PhoneSpeaker/releases)
+- 📦 **Direct Download:** [**`AirSpeaker.v2.1.exe`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker.v2.1.exe)
+- 🏷️ **GitHub Releases:** [View All Releases](https://github.com/HSAdib/AirSpeaker/releases)
 
 **How to Run:**
-- **No installation required!** `PhoneSpeaker.v2.1.exe` is a standalone, single-file executable with bundled 64-bit `opus.dll` and zero external dependencies.
-- Simply double-click `PhoneSpeaker.v2.1.exe` to run.
+- **No installation required!** `AirSpeaker.v2.1.exe` is a standalone, single-file executable with bundled 64-bit `opus.dll` and zero external dependencies.
+- Simply double-click `AirSpeaker.v2.1.exe` to run.
 - **Windows Firewall:** Click **Add Firewall Rules** in the app's *Virtual Device* tab, or run in Administrator PowerShell:
   ```powershell
   foreach ($p in 5004,5005) {
-    netsh advfirewall firewall add rule name="PhoneSpeaker UDP $p" protocol=UDP localport=$p dir=in action=allow enable=yes profile=any
+    netsh advfirewall firewall add rule name="Air Speaker UDP $p" protocol=UDP localport=$p dir=in action=allow enable=yes profile=any
   }
   ```
 
 **Build Windows EXE from Source:**
 ```powershell
-cd phonespeaker-pc
+cd airspeaker-pc
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 .\.venv\Scripts\python build_exe.py
 ```
-*(Automatically fetches `opus.dll`, builds `PhoneSpeaker.v2.1.exe`, and packages the self-extracting Linux installer)*.
+*(Automatically fetches `opus.dll`, builds `AirSpeaker.v2.1.exe`, and packages the self-extracting Linux installer)*.
 
 ---
 
@@ -133,64 +133,64 @@ Compatible with both **PipeWire** (`pipewire-pulse`) and **PulseAudio**.
 Open any terminal on your distro and run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_linux.sh | bash
+curl -sSL https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/install_linux.sh | bash
 ```
 
 > **What this one-liner does automatically:**
 > 1. Detects your package manager (`apt`, `pacman`, or `dnf`) and ensures dependencies (`python3-tk`, `libopus0`, `pulseaudio-utils`, `portaudio`) are present.
-> 2. Downloads the pre-built `PhoneSpeaker v2.1` bundle from GitHub Releases.
-> 3. Installs the application to `~/.local/opt/phonespeaker`.
-> 4. Adds **PhoneSpeaker v2.1 Studio** with icon to your desktop application menu.
-> 5. Adds the `phonespeaker` terminal command and launches the app.
+> 2. Downloads the pre-built `Air Speaker v2.1` bundle from GitHub Releases.
+> 3. Installs the application to `~/.local/opt/airspeaker`.
+> 4. Adds **Air Speaker v2.1 Studio** with icon to your desktop application menu.
+> 5. Adds the `airspeaker` terminal command and launches the app.
 
 ---
 
 #### Method B: Using the Downloaded `.run` Installer
 
-1. Download [**`PhoneSpeaker-v2-Linux-Installer.run`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-Linux-Installer.run) from [GitHub Releases](https://github.com/HSAdib/PhoneSpeaker/releases).
+1. Download [**`AirSpeaker-v2-Linux-Installer.run`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-Linux-Installer.run) from [GitHub Releases](https://github.com/HSAdib/AirSpeaker/releases).
 2. Install per your distro:
 
 ##### • Ubuntu & Linux Mint:
 ```bash
 cd ~/Downloads
-chmod +x PhoneSpeaker-v2-Linux-Installer.run
-./PhoneSpeaker-v2-Linux-Installer.run
+chmod +x AirSpeaker-v2-Linux-Installer.run
+./AirSpeaker-v2-Linux-Installer.run
 ```
 *(Or GUI: Right-click the `.run` file $\rightarrow$ **Properties** $\rightarrow$ **Permissions** $\rightarrow$ Check **"Allow executing file as program"** $\rightarrow$ Double-click to run).*
 
 ##### • Arch Linux (Manjaro / EndeavourOS):
 ```bash
 cd ~/Downloads
-chmod +x PhoneSpeaker-v2-Linux-Installer.run
-./PhoneSpeaker-v2-Linux-Installer.run
+chmod +x AirSpeaker-v2-Linux-Installer.run
+./AirSpeaker-v2-Linux-Installer.run
 ```
 
 ##### • Debian:
 Ensure base audio tools are installed first:
 ```bash
 sudo apt update && sudo apt install -y pulseaudio-utils libopus0 python3-tk
-chmod +x PhoneSpeaker-v2-Linux-Installer.run
-./PhoneSpeaker-v2-Linux-Installer.run
+chmod +x AirSpeaker-v2-Linux-Installer.run
+./AirSpeaker-v2-Linux-Installer.run
 ```
 
 ---
 
 #### Launching on Linux:
-- **Application Menu:** Open your desktop app launcher and click **PhoneSpeaker v2.1 Studio**.
+- **Application Menu:** Open your desktop app launcher and click **Air Speaker v2.1 Studio**.
 - **Terminal:** Type:
   ```bash
-  phonespeaker
+  airspeaker
   ```
 
 #### Uninstalling on Linux:
-To completely remove **PhoneSpeaker v2.1 Studio**, its desktop icon, configuration files, and terminal command on any Linux distribution, run:
+To completely remove **Air Speaker v2.1 Studio**, its desktop icon, configuration files, and terminal command on any Linux distribution, run:
 ```bash
-pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
-rm -rf ~/.local/opt/phonespeaker ~/.local/bin/phonespeaker ~/.local/share/applications/phonespeaker.desktop ~/.local/share/icons/phonespeaker.png ~/.config/PhoneSpeaker
-sudo rm -f /usr/local/bin/phonespeaker 2>/dev/null || true
+pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
+rm -rf ~/.local/opt/airspeaker ~/.local/bin/airspeaker ~/.local/share/applications/airspeaker.desktop ~/.local/share/icons/airspeaker.png ~/.config/Air Speaker
+sudo rm -f /usr/local/bin/airspeaker 2>/dev/null || true
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 ```
-(Or run `curl -sSL https://raw.githubusercontent.com/HSAdib/PhoneSpeaker/main/install_linux.sh | bash -s -- --uninstall`).
+(Or run `curl -sSL https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/install_linux.sh | bash -s -- --uninstall`).
 
 #### Linux Firewall (If Streaming is Blocked):
 - **Ubuntu / Mint / Debian (`ufw`):**
@@ -204,8 +204,8 @@ update-desktop-database ~/.local/share/applications 2>/dev/null || true
 
 #### Build Linux App from Source:
 ```bash
-python3 phonespeaker-pc/build_linux.py     # builds dist/PhoneSpeaker-v2 and the .run installer
-python3 phonespeaker-pc/src/main.py        # run directly from source
+python3 airspeaker-pc/build_linux.py     # builds dist/Air Speaker-v2 and the .run installer
+python3 airspeaker-pc/src/main.py        # run directly from source
 ```
 
 ---
@@ -217,23 +217,23 @@ python3 phonespeaker-pc/src/main.py        # run directly from source
 - Native support for both **Apple Silicon** (`arm64`: M1, M2, M3, M4) and **Intel** (`x86_64`).
 
 **Downloads:**
-- 📦 **One-Click Installer Bundle:** [**`PhoneSpeaker-v2-macOS-Installer.command`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS-Installer.command)
-- 💿 **Standalone Disk Image (DMG):** [**`PhoneSpeaker-v2-macOS.dmg`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-macOS.dmg)
+- 📦 **One-Click Installer Bundle:** [**`AirSpeaker-v2-macOS-Installer.command`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-macOS-Installer.command)
+- 💿 **Standalone Disk Image (DMG):** [**`AirSpeaker-v2-macOS.dmg`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-macOS.dmg)
 
 #### Method A: One-Click `.command` Installer (Easiest)
-1. Download `PhoneSpeaker-v2-macOS-Installer.command`.
+1. Download `AirSpeaker-v2-macOS-Installer.command`.
 2. Double-click the file in Finder (or right-click $\rightarrow$ **Open**).
-3. The installer checks/installs dependencies via Homebrew (`opus`, `portaudio`, `python-tk`, `blackhole-2ch`), creates `~/Applications/PhoneSpeaker v2.app`, adds the `phonespeaker` CLI tool, and launches the Studio app.
+3. The installer checks/installs dependencies via Homebrew (`opus`, `portaudio`, `python-tk`, `blackhole-2ch`), creates `~/Applications/Air Speaker v2.app`, adds the `airspeaker` CLI tool, and launches the Studio app.
 
 *(Or run from Terminal)*:
 ```bash
-chmod +x PhoneSpeaker-v2-macOS-Installer.command
-./PhoneSpeaker-v2-macOS-Installer.command
+chmod +x AirSpeaker-v2-macOS-Installer.command
+./AirSpeaker-v2-macOS-Installer.command
 ```
 
 #### Method B: Drag-and-Drop Disk Image (`.dmg`)
-1. Download and open `PhoneSpeaker-v2-macOS.dmg`.
-2. Drag **PhoneSpeaker v2.app** into `/Applications`.
+1. Download and open `AirSpeaker-v2-macOS.dmg`.
+2. Drag **Air Speaker v2.app** into `/Applications`.
 3. Launch from Spotlight or Launchpad!
 
 #### Virtual Audio Routing on macOS (BlackHole):
@@ -242,13 +242,13 @@ To capture desktop audio or route virtual microphone on macOS:
 brew install --cask blackhole-2ch
 ```
 - Set **BlackHole 2ch** (or create a Multi-Output Device in *Audio MIDI Setup*) as output to capture all Mac audio.
-- The PhoneSpeaker Studio app's **Virtual Device** tab provides 1-click shortcuts to open macOS Sound Settings and Audio MIDI Setup.
+- The Air Speaker Studio app's **Virtual Device** tab provides 1-click shortcuts to open macOS Sound Settings and Audio MIDI Setup.
 
 #### Build macOS App from Source:
 ```bash
 brew install opus portaudio python-tk
-python3 phonespeaker-pc/build_macos.py     # builds dist/PhoneSpeaker v2.app and PhoneSpeaker-v2-macOS.dmg
-python3 phonespeaker-pc/src/main.py        # run directly from source
+python3 airspeaker-pc/build_macos.py     # builds dist/Air Speaker v2.app and AirSpeaker-v2-macOS.dmg
+python3 airspeaker-pc/src/main.py        # run directly from source
 ```
 
 ---
@@ -265,9 +265,9 @@ python3 phonespeaker-pc/src/main.py        # run directly from source
 - Multi-Device Party Mode with built-in Camera QR scanner, member list, and **Extend This Party (Hotspot / Daisy-Chain Repeater)**.
 
 **Downloads & Sideloading:**
-- 📦 **IPA File:** [**`PhoneSpeaker-v2-iOS.ipa`**](https://github.com/HSAdib/PhoneSpeaker/releases/latest/download/PhoneSpeaker-v2-iOS.ipa)
+- 📦 **IPA File:** [**`AirSpeaker-v2-iOS.ipa`**](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-iOS.ipa)
 - Install easily with **AltStore**, **SideStore**, **Sideloadly**, or **TrollStore**:
-  1. Download `PhoneSpeaker-v2-iOS.ipa`.
+  1. Download `AirSpeaker-v2-iOS.ipa`.
   2. Open in **AltStore** or drag into **Sideloadly**.
   3. Sign with your free Apple ID and tap Install.
   4. Enable *Settings $\rightarrow$ Privacy & Security $\rightarrow$ Developer Mode* on your device.
@@ -275,9 +275,9 @@ python3 phonespeaker-pc/src/main.py        # run directly from source
 **Build iOS App from Source with XcodeGen:**
 ```bash
 brew install xcodegen
-cd PhoneSpeakeriOS
+cd AirSpeakeriOS
 xcodegen generate
-open PhoneSpeaker.xcodeproj
+open AirSpeaker.xcodeproj
 ```
 Select your connected iPhone or iPad and press **Cmd + R** to run!
 
@@ -286,7 +286,7 @@ Select your connected iPhone or iPad and press **Cmd + R** to run!
 ### Tests (PC)
 
 ```bash
-python phonespeaker-pc/tests/verify_pc.py
+python airspeaker-pc/tests/verify_pc.py
 ```
 
 Runs fifteen checks: adapter filtering, PCM packet size, the Opus encoder, silence pacing, audio capture opening, sample-format conversion, a UDP localhost integration test, protocol v2.0 bidirectional settings sync, system-volume access, burst UDP packet reception, multi-target Party Mode fan-out, queue drop-oldest overflow policy, queue rapid producer stress, 5-band biquad DSP processing & limiting, and EqualizerManager preset/context lifecycle. Capture tests need a working audio device, so run them on a machine with sound.
@@ -299,7 +299,7 @@ Windows (administrator PowerShell). Phone hotspots are usually classed as *Publi
 
 ```powershell
 foreach ($p in 5004,5005) {
-  netsh advfirewall firewall add rule name="PhoneSpeaker UDP $p" protocol=UDP localport=$p dir=in action=allow enable=yes profile=any
+  netsh advfirewall firewall add rule name="Air Speaker UDP $p" protocol=UDP localport=$p dir=in action=allow enable=yes profile=any
 }
 ```
 
@@ -377,8 +377,8 @@ Every connection type (Wi-Fi router, phone hotspot, USB tethering, Bluetooth PAN
 
 1. Put the PC and the phone on the **same network**: same Wi-Fi, the phone's hotspot, or a USB or Bluetooth tether.
 2. Install the Android / iOS app and the desktop app (see [Install and build](#install-and-build)).
-3. On the phone, open **PhoneSpeaker** and tap **Start speaker player (port 5004)** in the **[ PLAY ]** tab.
-4. On the PC, open **PhoneSpeaker**. The phone should appear under **Connections** within a second or two. If it doesn't, type the phone's IP into **Phone IP / Port**.
+3. On the phone, open **Air Speaker** and tap **Start speaker player (port 5004)** in the **[ PLAY ]** tab.
+4. On the PC, open **Air Speaker**. The phone should appear under **Connections** within a second or two. If it doesn't, type the phone's IP into **Phone IP / Port**.
 5. Click **Start serving audio (PC → Phone :5004)** in the **[ SERVE ]** tab. Play something on the PC.
 6. Watch the **Audio Level** bar on the PC and the **RX packets / sec** counter on the phone. Both should move.
 
@@ -415,8 +415,8 @@ On Android 10+ and iOS, the phone captures and streams internal system audio (ga
 2. In the **[ PLAY ]** tab, select your preferred output device and click **Start Player (Receive Phone Audio)**.
 
 **Linux**
-1. In the **Virtual Device** tab, click **Install Virtual Audio Driver**. This uses `pactl` to create a virtual speaker (`PhoneSpeaker_Sink`).
-2. Set your output device to `PhoneSpeaker_Sink` or default desktop audio.
+1. In the **Virtual Device** tab, click **Install Virtual Audio Driver**. This uses `pactl` to create a virtual speaker (`AirSpeaker_Sink`).
+2. Set your output device to `AirSpeaker_Sink` or default desktop audio.
 
 **macOS**
 1. Install BlackHole 2ch loopback driver or use system speakers.
@@ -424,14 +424,14 @@ On Android 10+ and iOS, the phone captures and streams internal system audio (ga
 
 ### Capturing only part of your audio
 
-Set the capture source in the **Virtual Device** tab. On Windows, making a virtual device your Windows output (`Win + Ctrl + V` opens the output switcher) lets you stream everything without also playing it on the PC. The app's *Rename to PhoneSpeaker Audio* button gives the virtual device a friendlier name.
+Set the capture source in the **Virtual Device** tab. On Windows, making a virtual device your Windows output (`Win + Ctrl + V` opens the output switcher) lets you stream everything without also playing it on the PC. The app's *Rename to Air Speaker Audio* button gives the virtual device a friendlier name.
 
 ### Files and logs
 
 | | Windows | Linux | macOS |
 |---|---|---|---|
-| Config | `%APPDATA%\PhoneSpeaker\config.json` | `~/.config/PhoneSpeaker/config.json` | `~/Library/Application Support/PhoneSpeaker/config.json` |
-| Log | `%APPDATA%\PhoneSpeaker\phonespeaker.log` | `~/.config/PhoneSpeaker/phonespeaker.log` | `~/Library/Application Support/PhoneSpeaker/phonespeaker.log` |
+| Config | `%APPDATA%\Air Speaker\config.json` | `~/.config/Air Speaker/config.json` | `~/Library/Application Support/Air Speaker/config.json` |
+| Log | `%APPDATA%\Air Speaker\airspeaker.log` | `~/.config/Air Speaker/airspeaker.log` | `~/Library/Application Support/Air Speaker/airspeaker.log` |
 
 ---
 
@@ -498,7 +498,7 @@ PCM16 uses 5 ms frames: 240 samples per channel, a 960-byte payload, 972 bytes o
 }
 ```
 
-`direction` is `PC_TO_PHONE`, `PHONE_TO_PC` or `FULL_DUPLEX`. `buffer_mode` is `LOW`, `MEDIUM`, `HIGH`, `AUTO` or `CUSTOM`. The authoritative definitions are in `phonespeaker-pc/src/protocol.py` and `PhoneSpeakerAndroid/app/src/main/cpp/protocol.h`.
+`direction` is `PC_TO_PHONE`, `PHONE_TO_PC` or `FULL_DUPLEX`. `buffer_mode` is `LOW`, `MEDIUM`, `HIGH`, `AUTO` or `CUSTOM`. The authoritative definitions are in `airspeaker-pc/src/protocol.py` and `AirSpeakerAndroid/app/src/main/cpp/protocol.h`.
 
 ---
 
@@ -509,8 +509,8 @@ PCM16 uses 5 ms frames: 240 samples per channel, a 960-byte payload, 972 bytes o
 ├── .github/workflows/build_apple.yml      # GitHub Actions CI for macOS .dmg & iOS .ipa
 ├── install_linux.sh                       # Linux: system deps + build + install
 ├── install_apk.ps1                        # Windows: adb install helper for the APK
-├── PhoneSpeaker-v2-macOS-Installer.command# macOS interactive source/app installer
-├── phonespeaker-pc/
+├── AirSpeaker-v2-macOS-Installer.command# macOS interactive source/app installer
+├── airspeaker-pc/
 │   ├── build_exe.py                       # Windows .exe (PyInstaller) + Linux/macOS dispatch
 │   ├── build_linux.py                     # Linux binary + .run installer
 │   ├── build_macos.py                     # macOS .app / .dmg / .command builder
@@ -529,10 +529,10 @@ PCM16 uses 5 ms frames: 240 samples per channel, a 960-byte payload, 972 bytes o
 │   │   └── config.py                      # per-OS config and logging
 │   ├── tests/                             # verify_pc.py, capture_smoke_test.py
 │   └── vendor/get_opus.py                 # fetches opus.dll for Windows builds
-├── PhoneSpeakerAndroid/
+├── AirSpeakerAndroid/
 │   └── app/src/main/
 │       ├── cpp/                           # Oboe engine, jitter buffer, Opus wrapper, JNI, relay
-│       ├── java/com/hasan/phonespeaker/
+│       ├── java/com/hasan/airspeaker/
 │       │   ├── MainActivity.kt            # main UI, Party Mode QR host/join/extend, sync
 │       │   ├── AudioStreamService.kt      # foreground service, locks, audio focus
 │       │   ├── ControlChannel.kt          # beacon, stats, settings sync
@@ -540,12 +540,12 @@ PCM16 uses 5 ms frames: 240 samples per channel, a 960-byte payload, 972 bytes o
 │       │   ├── LatencyGraphView.kt        # live delay graph
 │       │   └── AudioNative.kt             # JNI bindings
 │       └── res/                           # black-and-white layouts and theme
-└── PhoneSpeakeriOS/
-    ├── project.yml                        # XcodeGen spec for PhoneSpeaker iOS
-    └── PhoneSpeaker/
-        ├── PhoneSpeakerApp.swift          # SwiftUI app entry point
+└── AirSpeakeriOS/
+    ├── project.yml                        # XcodeGen spec for Air Speaker iOS
+    └── Air Speaker/
+        ├── Air SpeakerApp.swift          # SwiftUI app entry point
         ├── ContentView.swift              # Stream, Party Mode, and Settings UI
-        ├── PhoneSpeakerEngine.swift       # CoreAudio engine, Opus, UDP Rx/Tx, Party relay
+        ├── Air SpeakerEngine.swift       # CoreAudio engine, Opus, UDP Rx/Tx, Party relay
         ├── QRScannerView.swift            # AVFoundation QR scanner for Party Mode
         └── Info.plist                     # microphone, camera & local network permissions
 ```
@@ -564,7 +564,7 @@ Check the IP the PC is using. If you run VirtualBox, VMware or similar, a virtua
 - If the phone receives packets and the buffer looks healthy but you hear nothing, check that the phone isn't muted in the app and that **Exclusive Audio** isn't set to pause when another app plays.
 
 **Crackling or dropouts.**
-Raise the phone's target buffer or switch to **Auto**. Prefer 5 GHz Wi-Fi, the phone hotspot, or USB tethering. Disable battery optimization for PhoneSpeaker so Android doesn't throttle it.
+Raise the phone's target buffer or switch to **Auto**. Prefer 5 GHz Wi-Fi, the phone hotspot, or USB tethering. Disable battery optimization for Air Speaker so Android doesn't throttle it.
 
 **Echo or feedback.**
 You're capturing and playing the same device. Capture a virtual device and play to a different one.
