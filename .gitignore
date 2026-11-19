@@ -12,6 +12,17 @@ env/
 # PyInstaller build outputs
 airspeaker-pc/build/
 airspeaker-pc/dist/
+airspeaker-pc/build-*/
+airspeaker-pc/src/_build_info.py
+
+# Binaries and Installers (Hosted on GitHub Releases)
+*.exe
+*.apk
+*.dmg
+*.ipa
+*.run
+*.command
+AirSpeaker-v1-Linux-x86_64.tar.gz
 
 # Android & Gradle
 .gradle/
@@ -39,4 +50,3 @@ cmdline-tools.zip
 diagnostic.wav
 app-debug.apk
 AirSpeaker_old.exe
-

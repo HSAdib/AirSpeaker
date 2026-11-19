@@ -17,6 +17,8 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
+        buildConfigField("String", "BUILD_SHA", "\"${System.getenv("GITHUB_SHA")?.take(7) ?: "dev"}\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
@@ -89,6 +91,7 @@ android {
     buildFeatures {
         prefab = true
         viewBinding = true
+        buildConfig = true
     }
 }
 
@@ -105,7 +108,7 @@ dependencies {
 tasks.register("copyDebugApkToRoot") {
     doLast {
         val srcApk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
-        val destApkV21 = rootProject.projectDir.parentFile.resolve("AirSpeaker.v1.apk")
+        val destApkV21 = rootProject.projectDir.parentFile.resolve("AirSpeaker-v1.apk")
         if (srcApk.exists()) {
             srcApk.copyTo(destApkV21, overwrite = true)
             println("Copied ${srcApk.absolutePath} to ${destApkV21.absolutePath}")

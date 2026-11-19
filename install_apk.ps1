@@ -56,7 +56,7 @@ try {
 }
 
 $builtApk = Join-Path $PSScriptRoot "AirSpeakerAndroid\app\build\outputs\apk\debug\app-debug.apk"
-$apkPath = Join-Path $PSScriptRoot "AirSpeaker.v1.apk"
+$apkPath = Join-Path $PSScriptRoot "AirSpeaker-v1.apk"
 if (Test-Path $builtApk) {
     Copy-Item -Path $builtApk -Destination $apkPath -Force
     Write-Host "Fresh APK copied to: $apkPath" -ForegroundColor Green

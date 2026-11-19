@@ -58,6 +58,8 @@ jobs:
           ./gradlew testDebugUnitTest
 
       - name: Build Android APK
+        env:
+          GITHUB_SHA: ${{ github.sha }}
         run: |
           cd AirSpeakerAndroid
           if [ -n "$PHONESPEAKER_KEYSTORE_PATH" ] && [ -f "$PHONESPEAKER_KEYSTORE_PATH" ]; then
@@ -78,28 +80,36 @@ jobs:
             APK_PATH=$(find AirSpeakerAndroid/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
           fi
           echo "Selected APK: $APK_PATH"
-          cp "$APK_PATH" AirSpeaker.v1.apk
-          sha256sum AirSpeaker.v1.apk | tee AirSpeaker.v1.apk.sha256
+          cp "$APK_PATH" AirSpeaker-v1.apk
+          sha256sum AirSpeaker-v1.apk | tee AirSpeaker-v1.apk.sha256
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AirSpeaker-v1-APK
           path: |
-            AirSpeaker.v1.apk
+            AirSpeaker-v1.apk
 
   # ====================================================
-  # 2. WINDOWS BUILD JOB (Python 3.11, Tests & PyInstaller)
+  # 2. WINDOWS BUILD JOB (Inno Setup 6 + PyInstaller)
   # ====================================================
   build-windows:
-    name: Build Windows 64-bit Executable
+    name: Build Windows Setup & Portable
     runs-on: windows-latest
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
+      GITHUB_SHA: ${{ github.sha }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Ensure Inno Setup 6 Compiler
+        shell: pwsh
+        run: |
+          if (!(Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") -and !(Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y
+          }
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -114,36 +124,79 @@ jobs:
           pip install -r requirements.txt
           python tests/verify_pc.py
 
-      - name: Compile Windows Standalone Executable
+      - name: Compile Windows Setup & Portable Executables
         run: |
           cd airspeaker-pc
           python build_exe.py
 
-      - name: Verify Windows Artifact & Generate SHA256
+      - name: Verify Windows Artifacts & Generate Checksums
         shell: pwsh
         run: |
-          if (-not (Test-Path "AirSpeaker.v1.exe")) {
-            Copy-Item "airspeaker-pc/dist/Air Speaker v1.exe" "AirSpeaker.v1.exe" -Force
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Portable.exe" | Out-File "AirSpeaker-v1-Portable.exe.sha256"
+          if (Test-Path "AirSpeaker-v1-Setup.exe") {
+            Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Setup.exe" | Out-File "AirSpeaker-v1-Setup.exe.sha256"
           }
-          Get-FileHash -Algorithm SHA256 "AirSpeaker.v1.exe" | Out-File "AirSpeaker.v1.exe.sha256"
-          Write-Host "Windows EXE SHA256:"
-          Get-Content "AirSpeaker.v1.exe.sha256"
+          Write-Host "Windows Deliverables:"
+          Get-ChildItem -Filter "AirSpeaker-v1-*"
 
-      - name: Upload Windows Executable Artifact
+      - name: Upload Windows Executable Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AirSpeaker-v1-EXE
+          name: AirSpeaker-v1-Windows
           path: |
-            AirSpeaker.v1.exe
-            AirSpeaker-v1-Linux-Installer.run
-            AirSpeaker-v1-macOS-Installer.command
+            AirSpeaker-v1-Setup.exe
+            AirSpeaker-v1-Portable.exe
 
   # ====================================================
-  # 3. MACOS & IOS BUILD JOB (Xcode & DMG / IPA Packaging)
+  # 3. LINUX BUILD JOB (Persistent Bundle & Tarball)
+  # ====================================================
+  build-linux:
+    name: Build Linux Application Bundle & Tarball
+    runs-on: ubuntu-22.04
+    env:
+      GITHUB_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopus0 libopus-dev portaudio19-dev python3-tk pulseaudio-utils
+
+      - name: Install Python Requirements & Run Verification Tests
+        run: |
+          cd airspeaker-pc
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python tests/verify_pc.py
+
+      - name: Build Linux Application Bundle & Tarball
+        run: |
+          cd airspeaker-pc
+          python build_linux.py
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSpeaker-v1-Linux
+          path: |
+            AirSpeaker-v1-Linux-x86_64.tar.gz
+
+  # ====================================================
+  # 4. MACOS & IOS BUILD JOB (Xcode & DMG / IPA Packaging)
   # ====================================================
   build-apple:
     name: Build macOS DMG & iOS IPA
     runs-on: macos-latest
+    env:
+      GITHUB_SHA: ${{ github.sha }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -166,8 +219,11 @@ jobs:
         run: |
           sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Generate Xcode Project with XcodeGen
+      - name: Inject Build SHA into iOS project.yml & Generate Xcode Project
         run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [ -z "$SHORT_SHA" ]; then SHORT_SHA="dev"; fi
+          sed -i '' "s/AirSpeakerBuildSHA: .*/AirSpeakerBuildSHA: \"$SHORT_SHA\"/" AirSpeakeriOS/project.yml || true
           cd AirSpeakeriOS
           xcodegen generate
 
@@ -202,11 +258,11 @@ jobs:
             AirSpeaker-v1-iOS.ipa
 
   # ====================================================
-  # 4. OFFICIAL RELEASE PUBLICATION (On v1.0 Tag)
+  # 5. OFFICIAL RELEASE PUBLICATION (All 5 Operating Systems)
   # ====================================================
   release-publish:
-    name: Publish Official v1.0 Release
-    needs: [build-android, build-windows, build-apple]
+    name: Publish Official Release Deliverables
+    needs: [build-android, build-windows, build-linux, build-apple]
     if: always() && (startsWith(github.ref, 'refs/tags/v1.') || github.ref_name == 'main')
     runs-on: ubuntu-latest
     permissions:
@@ -223,11 +279,18 @@ jobs:
           name: AirSpeaker-v1-APK
           path: release-artifacts/
 
-      - name: Download Windows Artifact
+      - name: Download Windows Artifacts
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: AirSpeaker-v1-EXE
+          name: AirSpeaker-v1-Windows
+          path: release-artifacts/
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: AirSpeaker-v1-Linux
           path: release-artifacts/
 
       - name: Download Apple Artifacts
@@ -237,17 +300,10 @@ jobs:
           name: AirSpeaker-v1-Apple-Deliverables
           path: release-artifacts/
 
-      - name: Populate Release Artifacts from Repository
+      - name: Copy Linux Installer Script
         run: |
           mkdir -p release-artifacts
-          for f in "AirSpeaker.v1.exe" "AirSpeaker.v1.apk" \
-                   "AirSpeaker-v1-Linux-Installer.run" "AirSpeaker-v1-macOS-Installer.command" \
-                   "AirSpeaker-v1-macOS.dmg" "AirSpeaker-v1-iOS.ipa" "install_linux.sh"; do
-            if [ -f "$f" ] && [ ! -f "release-artifacts/$f" ]; then
-              echo "Populating $f from repository..."
-              cp "$f" release-artifacts/
-            fi
-          done
+          cp -f install_linux.sh release-artifacts/
 
       - name: Generate Checksums & Build Manifest
         run: |
@@ -263,8 +319,11 @@ jobs:
           if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
             TAG_NAME="v1.0.0"
           fi
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [ -z "$SHORT_SHA" ]; then SHORT_SHA="dev"; fi
 
-          cat << 'EOF' > RELEASE_NOTES.md
+          cat << EOF > RELEASE_NOTES.md
+          <!-- build: ${SHORT_SHA} -->
           ### Air Speaker v1.0 Studio — Complete Cross-Platform Overhaul
 
           Low-latency wireless audio streaming & internal system audio studio for Windows 11, macOS, Linux, Android, and iOS.
@@ -274,17 +333,18 @@ jobs:
           - **Option A Internal System Audio Capture (SERVE):** Stream internal audio directly from Android 10+ (MediaProjection AudioPlaybackCaptureConfiguration) and iOS (ReplayKit app audio capture) on UDP port 5004.
           - **Real-Time Live Delay Graphs:** Real-time buffer latency and jitter visualization active across all PLAY, SERVE, and PARTY (Host & Join) tabs on PC, Android, and iOS.
           - **Unified Monospace UI:** Exact identical tabs across all platforms:
-            - **Phone (Android & iOS — Exactly 4 Tabs):** `[ PLAY ]` *(Default on startup)* | `[ SERVE ]` | `[ PARTY ]` | `[ SETTINGS ]`
-            - **PC (Windows, macOS, Linux — Exactly 5 Tabs):** `[ PLAY ]` | `[ SERVE ]` *(Default on startup)* | `[ PARTY ]` | `[ SETTINGS ]` | `[ VIRTUAL DEVICE ]`
-          - **Complete Port 5006 Mic Removal:** Legacy mic features and Port 5006 permanently removed in favor of bidirectional system audio streaming on UDP 5004 and Control/Sync on UDP 5005.
+            - **Phone (Android & iOS — Exactly 4 Tabs):** \`[ PLAY ]\` *(Default on startup)* | \`[ SERVE ]\` | \`[ PARTY ]\` | \`[ SETTINGS ]\`
+            - **PC (Windows, macOS, Linux — Exactly 5 Tabs):** \`[ PLAY ]\` | \`[ SERVE ]\` *(Default on startup)* | \`[ PARTY ]\` | \`[ SETTINGS ]\` | \`[ VIRTUAL DEVICE ]\`
           - **Multi-Device Party Mode:** Synchronized multi-device broadcasting and daisy-chain personal hotspot extension.
+          - **Automatic Update Checking:** Non-blocking GitHub release & rebuild notifications across all 5 operating systems.
 
           #### Deliverables for All 5 Operating Systems:
-          - **Windows 11 / 10:** `AirSpeaker.v1.exe` (Standalone 64-bit executable with WASAPI loopback)
-          - **Android:** `AirSpeaker.v1.apk` (C++ Oboe AAudio player & MediaProjection internal audio streamer)
-          - **macOS:** `AirSpeaker-v1-macOS.dmg` & `AirSpeaker-v1-macOS-Installer.command` (Apple Silicon & Intel DMG)
-          - **iOS:** `AirSpeaker-v1-iOS.ipa` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
-          - **Linux:** `AirSpeaker-v1-Linux-Installer.run` (PipeWire & PulseAudio one-click self-extracting installer)
+          - **Windows (Installed App):** \`AirSpeaker-v1-Setup.exe\` (Native Start Menu & Windows Settings setup)
+          - **Windows (Portable):** \`AirSpeaker-v1-Portable.exe\` (Standalone zero-install single-file executable)
+          - **Android:** \`AirSpeaker-v1.apk\` (C++ Oboe AAudio player & MediaProjection internal audio streamer)
+          - **macOS:** \`AirSpeaker-v1-macOS.dmg\` (Drag-and-Drop installer with Applications symlink)
+          - **Linux:** \`AirSpeaker-v1-Linux-x86_64.tar.gz\` & One-Click Installer (\`install_linux.sh\`)
+          - **iOS:** \`AirSpeaker-v1-iOS.ipa\` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
           EOF
 
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
@@ -300,7 +360,7 @@ jobs:
           done
 
       # ----------------------------------------------------
-      # 5. PUBLISH TO GITHUB PACKAGES SECTION (ghcr.io/hsadib/airspeaker)
+      # 6. PUBLISH TO GITHUB PACKAGES (GHCR OCI Registry)
       # ----------------------------------------------------
       - name: Set up ORAS CLI
         if: github.event_name != 'pull_request'

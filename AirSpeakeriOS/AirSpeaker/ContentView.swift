@@ -68,6 +68,34 @@ public struct ContentView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 6)
 
+                // Top Update Available Banner
+                if engine.showUpdateBanner {
+                    HStack(spacing: 8) {
+                        Text("⬆ Update Available (\(engine.updateAvailableVersion))")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.95))
+                        Spacer()
+                        if let url = URL(string: engine.updateDownloadUrl), !engine.updateDownloadUrl.isEmpty {
+                            Button("[ DOWNLOAD ]") {
+                                UIApplication.shared.open(url)
+                            }
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                        }
+                        Button("[ ✕ ]") {
+                            engine.dismissUpdateBanner(skip: true)
+                        }
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(white: 0.6))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(red: 0.05, green: 0.15, blue: 0.1))
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.8, blue: 0.5), lineWidth: 1))
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 4)
+                }
+
                 // 4-Button Top Outlined Tab Bar: PLAY | SERVE | PARTY | SETTINGS
                 HStack(spacing: 6) {
                     StudioTabButton(title: "PLAY", isSelected: selectedTab == 0) { selectedTab = 0 }
@@ -96,6 +124,9 @@ public struct ContentView: View {
         }
         .sheet(isPresented: $showHelpModal) {
             StudioHelpModal(isPresented: $showHelpModal)
+        }
+        .onAppear {
+            engine.checkForUpdates(manual: false)
         }
     }
 }
@@ -1135,6 +1166,35 @@ struct SettingsStudioTab: View {
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
                 }
+
+                // Application Version & Updates Section
+                VStack(alignment: .leading, spacing: 8) {
+                    let buildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let buildStr = buildSha != "dev" ? " (\(buildSha.prefix(7)))" : ""
+                    Text("Version: v1.0.0\(buildStr)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+
+                    Button(action: {
+                        engine.checkForUpdates(manual: true)
+                    }) {
+                        Text("🔄 CHECK FOR UPDATES")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .frame(maxWidth: .infinity, minHeight: 38)
+                            .background(Color(white: 0.08))
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+                    }
+
+                    if !engine.updateStatusMessage.isEmpty {
+                        Text(engine.updateStatusMessage)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Color(white: 0.7))
+                    }
+                }
+                .padding(10)
+                .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
             }
             .padding(14)
         }

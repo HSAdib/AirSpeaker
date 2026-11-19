@@ -1940,6 +1940,50 @@
                 android:textColor="#CCCCCC"
                 android:textSize="12sp"
                 android:fontFamily="monospace" />
+
+            <!-- App Version & GitHub Updates -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="16dp"
+                android:background="#0D1515"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/tvAppVersion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Air Speaker v1.0.0"
+                    android:textColor="#00EEEE"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnCheckForUpdates"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="8dp"
+                    android:text="🔄 CHECK FOR UPDATES"
+                    android:textColor="#00EEEE"
+                    app:strokeColor="#00EEEE"
+                    app:strokeWidth="1dp"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvUpdateStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text=""
+                    android:textColor="#888888"
+                    android:textSize="11sp"
+                    android:fontFamily="monospace"
+                    android:visibility="gone" />
+            </LinearLayout>
         </LinearLayout>
 
     </LinearLayout>

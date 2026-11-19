@@ -10,12 +10,17 @@ import json
 import logging
 import queue
 import socket
+import subprocess
 import sys
 import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any, Dict, List, Optional, Tuple
+import webbrowser
+
+from version import APP_VERSION, BUILD_SHA
+import updater
 
 from win_volume import get_system_volume_and_mute, set_system_volume_and_mute
 
@@ -324,6 +329,9 @@ class AirSpeakerApp:
 
         self._schedule_ui_update()
 
+        self._latest_update_info: Optional[Dict[str, Any]] = None
+        self.root.after(2500, self._check_updates_background)
+
     def _build_target_buffer_card(self, parent: tk.Misc, title: str = " Target Buffer & Stability Presets ") -> tk.LabelFrame:
         bf = tk.LabelFrame(parent, text=title, bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=2)
         buf_box = tk.Frame(bf, bg=BG)
@@ -473,6 +481,23 @@ class AirSpeakerApp:
             bg=BG, fg=FG_MUTED, font=FONT_MONO_SM
         )
         self.sync_rev_label.pack(side="right", padx=4)
+
+        # Update notification banner (packed dynamically right under title banner when update detected)
+        self.update_bar_frame = tk.Frame(self.root, bg="#0B1A14", bd=1, relief="solid")
+        self.update_bar_label = tk.Label(
+            self.update_bar_frame, text="", bg="#0B1A14", fg="#00EEEE", font=FONT_MONO_BOLD
+        )
+        self.update_bar_label.pack(side="left", padx=8, pady=3)
+        self.update_now_btn = StudioButton(
+            self.update_bar_frame, text="Update Now", bg="#004D25", fg="#00FF99",
+            font=FONT_MONO_BOLD, padx=6, pady=2, command=self._on_click_update_now
+        )
+        self.update_now_btn.pack(side="left", padx=4, pady=2)
+        self.skip_update_btn = StudioButton(
+            self.update_bar_frame, text="Skip", bg="#1A1A1A", fg=FG_MUTED,
+            font=FONT_MONO_SM, padx=6, pady=2, command=self._on_click_skip_update
+        )
+        self.skip_update_btn.pack(side="left", padx=4, pady=2)
 
         # Tab Notebook (Unified 5 Tabs: PLAY | SERVE | PARTY | SETTINGS | VIRTUAL DEVICE)
         self.notebook = ttk.Notebook(self.root)
@@ -1249,6 +1274,27 @@ class AirSpeakerApp:
             sf, text="Minimize to system tray on close", variable=self.tray_var,
             bg=BG, fg=FG, selectcolor="#333333", font=FONT_MONO_SM
         ).pack(side="right", padx=6, pady=4)
+
+        # Application Version & Updates Frame
+        up_f = tk.LabelFrame(f, text=" Application Version & Updates ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
+        up_f.pack(fill="x", **pad)
+
+        ver_row = tk.Frame(up_f, bg=BG)
+        ver_row.pack(fill="x", padx=4, pady=2)
+        build_str = f" (Build: {BUILD_SHA})" if BUILD_SHA != "dev" else ""
+        tk.Label(
+            ver_row, text=f"Version: v{APP_VERSION}{build_str}",
+            bg=BG, fg=ACCENT, font=FONT_MONO_BOLD
+        ).pack(side="left", padx=4)
+
+        self.btn_check_updates = StudioButton(
+            ver_row, text="🔄 Check for Updates", bg="#15222E", fg="#00EEEE",
+            font=FONT_MONO_BOLD, padx=8, pady=2, command=self._on_check_updates_manual
+        )
+        self.btn_check_updates.pack(side="right", padx=4)
+
+        self.update_status_label = tk.Label(up_f, text="", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, anchor="w")
+        self.update_status_label.pack(fill="x", padx=4, pady=(1, 2))
 
         self._check_virtual_device_status()
 
@@ -3399,6 +3445,113 @@ TABS:
         self._save_config()
         self.root.destroy()
         sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # GitHub Automatic & Manual Update Handlers
+    # ------------------------------------------------------------------
+
+    def _check_updates_background(self) -> None:
+        def _worker():
+            try:
+                info = updater.check_for_updates()
+                if info and info.get("available"):
+                    skipped = self.cfg.get("skipped_update_id", "")
+                    if info.get("update_id") != skipped:
+                        self.root.after(0, lambda: self._show_update_bar(info))
+            except Exception as exc:
+                logger.debug("Background update check failed: %s", exc)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_update_bar(self, info: Dict[str, Any]) -> None:
+        self._latest_update_info = info
+        v_disp = info.get("display_version", info.get("tag_name", ""))
+        self.update_bar_label.config(text=f"⬆ New Update Available ({v_disp})")
+        self.update_now_btn.config(state="normal")
+        self.update_bar_frame.pack(fill="x", padx=8, pady=(0, 4), before=self.notebook)
+
+    def _on_click_update_now(self) -> None:
+        if not self._latest_update_info:
+            return
+        info = self._latest_update_info
+        plat = info.get("platform", updater.get_platform())
+        download_url = info.get("download_url", "")
+        html_url = info.get("html_url", "")
+
+        if plat == "windows" and info.get("is_windows_installed", updater.is_windows_installed()):
+            self.update_bar_label.config(text="⏳ Downloading update installer in background...")
+            self.update_now_btn.config(state="disabled")
+
+            def _on_done(installer_path):
+                self.root.after(0, lambda: self.update_bar_label.config(text="Launching installer..."))
+
+            def _on_err(err):
+                self.root.after(0, lambda: [
+                    webbrowser.open(download_url or html_url),
+                    self.update_bar_label.config(text="Download failed; opened browser."),
+                    self.update_now_btn.config(state="normal"),
+                ])
+
+            updater.download_and_run_windows_installer(download_url, on_complete=_on_done, on_error=_on_err)
+
+        elif plat == "linux":
+            msg = (
+                f"Air Speaker {info.get('display_version')} is available!\n\n"
+                f"Would you like to run the in-place update command now?\n\n"
+                f"  {updater.LINUX_INSTALL_CMD}\n\n"
+                f"• Click [Yes] to run the update command in a terminal.\n"
+                f"• Click [No] to open GitHub Releases in your web browser."
+            )
+            ans = messagebox.askyesnocancel("Air Speaker Update", msg)
+            if ans is True:
+                try:
+                    cmd = f"{updater.LINUX_INSTALL_CMD} && echo 'Update complete! Press Enter to exit.' && read"
+                    subprocess.Popen(["x-terminal-emulator", "-e", "bash", "-c", cmd])
+                except Exception:
+                    try:
+                        subprocess.Popen(["gnome-terminal", "--", "bash", "-c", cmd])
+                    except Exception:
+                        subprocess.Popen(["bash", "-c", updater.LINUX_INSTALL_CMD])
+            elif ans is False:
+                webbrowser.open(html_url or download_url)
+
+        else:
+            target_url = download_url or html_url
+            webbrowser.open(target_url)
+
+    def _on_click_skip_update(self) -> None:
+        if self._latest_update_info:
+            self.cfg["skipped_update_id"] = self._latest_update_info.get("update_id", "")
+            self._save_config()
+        self.update_bar_frame.pack_forget()
+
+    def _on_check_updates_manual(self) -> None:
+        self.update_status_label.config(text="Checking for updates...", fg=ACCENT)
+        self.btn_check_updates.config(state="disabled")
+
+        def _worker():
+            try:
+                info = updater.check_for_updates()
+                if info and info.get("available"):
+                    def _show():
+                        self.btn_check_updates.config(state="normal")
+                        v_disp = info.get("display_version", info.get("tag_name", ""))
+                        self.update_status_label.config(text=f"New update available: {v_disp}", fg="#00FFCC")
+                        self._show_update_bar(info)
+                    self.root.after(0, _show)
+                else:
+                    def _up_to_date():
+                        self.btn_check_updates.config(state="normal")
+                        self.update_status_label.config(text=f"Air Speaker v{APP_VERSION} is up to date.", fg=ACCENT)
+                        messagebox.showinfo("Up to Date", f"Air Speaker v{APP_VERSION} is currently up to date!")
+                    self.root.after(0, _up_to_date)
+            except Exception as exc:
+                def _err():
+                    self.btn_check_updates.config(state="normal")
+                    self.update_status_label.config(text="Could not check for updates (offline or rate limited).", fg=WARN)
+                self.root.after(0, _err)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
 
 

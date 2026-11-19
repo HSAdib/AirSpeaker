@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-build_linux.py — Build standalone Linux executable and .run installer for Air Speaker v1.0.
+build_linux.py — Build persistent standalone Linux application bundle and tarball for Air Speaker.
 
 Output:
-  - dist/AirSpeaker-v1 (Standalone Linux executable, like .exe on Windows)
-  - ../AirSpeaker-v1-Linux-Installer.run (One-click Linux installer with desktop icon)
+  - dist/AirSpeaker/ (Self-contained --onedir Linux application bundle)
+  - ../AirSpeaker-v1-Linux-x86_64.tar.gz (Gzip tarball of the bundle for release)
 """
 
 import ctypes.util
@@ -31,6 +31,23 @@ def run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     return result
 
 
+def write_build_info() -> str:
+    env_sha = os.environ.get("GITHUB_SHA")
+    sha = "dev"
+    if env_sha:
+        sha = env_sha[:7]
+    else:
+        try:
+            out = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
+            sha = out.decode("utf-8").strip()
+        except Exception:
+            sha = "dev"
+    build_info_path = ROOT / "src" / "_build_info.py"
+    build_info_path.write_text(f'BUILD_SHA = "{sha}"\n', encoding="utf-8")
+    print(f"Stamped BUILD_SHA = '{sha}' -> {build_info_path}", flush=True)
+    return sha
+
+
 def find_system_libopus() -> Path | None:
     candidates = [
         Path("/usr/lib/libopus.so.0"),
@@ -51,22 +68,32 @@ def main() -> None:
     os.chdir(ROOT)
     VENDOR.mkdir(parents=True, exist_ok=True)
 
-    if not VENV.exists():
-        print("Creating Linux virtual environment...", flush=True)
-        run([sys.executable, "-m", "venv", "--system-site-packages", str(VENV)])
+    # 1. Stamp BUILD_SHA
+    write_build_info()
 
-    python = VENV / "bin" / "python"
-    pip = VENV / "bin" / "pip"
+    # 2. Virtual environment setup (when on Linux)
+    python = sys.executable
+    pip = None
+    if sys.platform.startswith("linux"):
+        if not VENV.exists():
+            print("Creating Linux virtual environment...", flush=True)
+            run([sys.executable, "-m", "venv", "--system-site-packages", str(VENV)])
+        python = str(VENV / "bin" / "python")
+        pip = str(VENV / "bin" / "pip")
 
-    run([str(python), "-m", "pip", "install", "--upgrade", "pip", "-q"])
+        run([pip, "install", "--upgrade", "pip", "-q"])
+        linux_pkgs = [
+            "numpy>=1.26.0",
+            "psutil>=5.9.8",
+            "Pillow>=10.3.0",
+            "pystray>=0.19.5",
+            "pyinstaller>=6.6.0",
+            "qrcode>=7.4.2",
+        ]
+        run([pip, "install"] + linux_pkgs)
+        subprocess.run([pip, "install", "soxr", "pyaudio"], check=False)
 
-    # Install Linux Python requirements (PyAudioWPatch is Windows-only; on Linux use numpy, psutil, Pillow, pystray, pyinstaller)
-    linux_pkgs = ["numpy>=1.26.0", "psutil>=5.9.8", "Pillow>=10.3.0", "pystray>=0.19.5", "pyinstaller>=6.6.0", "qrcode>=7.4.2"]
-    run([str(pip), "install"] + linux_pkgs)
-    # Try optional pyaudio & soxr (non-fatal if portaudio headers aren't installed; parec/pacat work natively!)
-    subprocess.run([str(pip), "install", "soxr", "pyaudio"], check=False)
-
-    # Locate and copy libopus.so.0 into vendor/
+    # 3. Locate system libopus
     opus_so = VENDOR / "libopus.so.0"
     if not opus_so.exists():
         sys_opus = find_system_libopus()
@@ -74,7 +101,7 @@ def main() -> None:
             shutil.copy2(sys_opus, opus_so)
             print(f"Bundling system libopus: {sys_opus} -> {opus_so}")
 
-    # Generate PNG icon
+    # 4. Icon generation
     icon_png = VENDOR / "app_icon.png"
     if not icon_png.exists():
         gen_script = (
@@ -85,13 +112,19 @@ def main() -> None:
         )
         subprocess.run([str(python), "-c", gen_script], check=False)
 
-    # Build single-file Linux binary with PyInstaller
+    # 5. Build onedir Linux application bundle with PyInstaller
+    print("\n--- Building Linux Onedir Application Bundle (dist/AirSpeaker/) ---", flush=True)
+    dist_dir = ROOT / "dist"
+    app_dir = dist_dir / "AirSpeaker"
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+
     pyinstaller_args = [
         str(python), "-m", "PyInstaller",
         "--noconsole",
-        "--onefile",
-        "--name", "AirSpeaker-v1",
-        "--distpath", str(ROOT / "dist"),
+        "--onedir",
+        "--name", "AirSpeaker",
+        "--distpath", str(dist_dir),
         "--workpath", str(ROOT / "build-linux"),
         "--specpath", str(ROOT),
         "--paths", str(ROOT / "src"),
@@ -99,71 +132,37 @@ def main() -> None:
     ]
     if opus_so.exists():
         pyinstaller_args += ["--add-binary", f"{opus_so}:."]
+    if icon_png.exists():
+        pyinstaller_args += ["--add-data", f"{icon_png}:vendor"]
 
     pyinstaller_args.append(str(SRC_MAIN))
     run(pyinstaller_args)
 
-    binary = ROOT / "dist" / "AirSpeaker-v1"
-    if not binary.exists():
-        print("ERROR: Linux binary was not created.")
+    if not app_dir.exists():
+        print(f"ERROR: Linux application bundle was not created at {app_dir}")
         sys.exit(1)
 
-    binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    root_bin = ROOT.parent / "AirSpeaker-v1"
-    shutil.copy2(binary, root_bin)
-    print(f"Standalone Linux binary ready: {root_bin}")
+    # Ensure icon is available inside the bundle
+    if icon_png.exists() and not (app_dir / "app_icon.png").exists():
+        shutil.copy2(icon_png, app_dir / "app_icon.png")
 
-    # Build self-extracting .run installer
-    payload_tar = ROOT / "dist" / "payload.tar.gz"
-    with tarfile.open(payload_tar, "w:gz") as tar:
-        tar.add(binary, arcname="AirSpeaker-v1")
-        if icon_png.exists():
-            tar.add(icon_png, arcname="app_icon.png")
+    binary = app_dir / "AirSpeaker"
+    if binary.exists():
+        binary.chmod(binary.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
 
-    installer_header = b"""#!/usr/bin/env bash
-set -e
-echo "===================================================="
-echo " Installing Air Speaker v1.0 Studio for Linux..."
-echo "===================================================="
-INSTALL_DIR="$HOME/.local/opt/airspeaker"
-BIN_DIR="$HOME/.local/bin"
-APP_DIR="$HOME/.local/share/applications"
-mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$APP_DIR"
+    # 6. Package dist/AirSpeaker into ../AirSpeaker-v1-Linux-x86_64.tar.gz
+    tar_out = ROOT.parent / "AirSpeaker-v1-Linux-x86_64.tar.gz"
+    print(f"\nPackaging application bundle into {tar_out}...", flush=True)
+    if tar_out.exists():
+        tar_out.unlink()
 
-ARCHIVE_LINE=$(awk '/^__ARCHIVE_BELOW__/ {print NR + 1; exit 0; }' "$0")
-tail -n+$ARCHIVE_LINE "$0" | tar -xz -C "$INSTALL_DIR"
+    with tarfile.open(tar_out, "w:gz") as tar:
+        for item in app_dir.iterdir():
+            tar.add(item, arcname=item.name)
 
-chmod +x "$INSTALL_DIR/AirSpeaker-v1"
-ln -sf "$INSTALL_DIR/AirSpeaker-v1" "$BIN_DIR/airspeaker"
-
-cat > "$APP_DIR/airspeaker.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Air Speaker v1.0 Studio
-Comment=Low-latency Wireless Audio & Internal Sound Studio
-Exec=$INSTALL_DIR/AirSpeaker-v1
-Icon=$INSTALL_DIR/app_icon.png
-Terminal=false
-Categories=AudioVideo;Audio;Network;
-EOF
-
-chmod +x "$APP_DIR/airspeaker.desktop"
-update-desktop-database "$APP_DIR" 2>/dev/null || true
-
-echo "SUCCESS! Installed to $INSTALL_DIR/AirSpeaker-v1"
-echo "Run 'airspeaker' from terminal or launch 'Air Speaker v1.0 Studio' from your App Menu!"
-exit 0
-__ARCHIVE_BELOW__
-"""
-    installer_run = ROOT.parent / "AirSpeaker-v1-Linux-Installer.run"
-    with open(installer_run, "wb") as out_f:
-        out_f.write(installer_header)
-        out_f.write(payload_tar.read_bytes())
-
-    installer_run.chmod(installer_run.stat().st_mode | stat.S_IEXEC)
-    print(f"Self-extracting Linux Installer created: {installer_run}")
+    size_mb = tar_out.stat().st_size / (1024 * 1024)
+    print(f"SUCCESS: Linux application tarball created at {tar_out} ({size_mb:.1f} MB)", flush=True)
 
 
 if __name__ == "__main__":
     main()
-

@@ -49,6 +49,7 @@ _DEFAULTS: Dict[str, Any] = {
     "party_ips": [],
     "config_rev": 1,
     "eq_settings": {},
+    "skipped_update_id": "",
 }
 
 

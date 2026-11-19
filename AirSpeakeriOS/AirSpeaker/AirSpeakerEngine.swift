@@ -280,6 +280,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var currentPartyHostIp: String = ""
     @Published public var statusMessage: String = "Ready"
 
+    // MARK: - Update Notification States
+    @Published public var updateAvailableVersion: String = ""
+    @Published public var updateDownloadUrl: String = ""
+    @Published public var showUpdateBanner: Bool = false
+    @Published public var updateStatusMessage: String = ""
+    @Published public var updateId: String = ""
+
     // MARK: - Synchronization & Locks
     private let peersLock = NSLock()
     private let stateLock = NSLock()
@@ -1629,6 +1636,115 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
         freeifaddrs(ifaddr)
         return bridgeIp ?? wifiIp ?? allIps.first ?? "127.0.0.1"
+    }
+
+    // MARK: - Automatic GitHub Update Checker
+    public func dismissUpdateBanner(skip: Bool = false) {
+        if skip && !updateId.isEmpty {
+            UserDefaults.standard.set(updateId, forKey: "skipped_update_id")
+        }
+        showUpdateBanner = false
+    }
+
+    public func checkForUpdates(manual: Bool = false) {
+        if manual {
+            updateStatusMessage = "Checking for updates..."
+        }
+        guard let url = URL(string: "https://api.github.com/repos/HSAdib/AirSpeaker/releases/latest") else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5.0
+        request.setValue("AirSpeaker-iOS/1.0.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            guard let data = data, error == nil,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else {
+                if manual {
+                    DispatchQueue.main.async {
+                        self.updateStatusMessage = "Could not check for updates (offline or rate limited)."
+                    }
+                }
+                return
+            }
+
+            let body = json["body"] as? String ?? ""
+            let htmlUrl = json["html_url"] as? String ?? "https://github.com/HSAdib/AirSpeaker/releases/latest"
+
+            // Extract remote build sha: <!-- build: a1b2c3d -->
+            var remoteSha: String? = nil
+            if let regex = try? NSRegularExpression(pattern: "<!--\\s*build:\\s*([a-fA-F0-9]+)\\s*-->", options: .caseInsensitive),
+               let match = regex.firstMatch(in: body, options: [], range: NSRange(location: 0, length: body.utf16.count)),
+               let range = Range(match.range(at: 1), in: body) {
+                remoteSha = String(body[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            let localBuildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
+            let localVersion = "1.0.0"
+
+            func parseSemver(_ v: String) -> (Int, Int, Int) {
+                let cleaned = v.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+                let parts = cleaned.components(separatedBy: ".")
+                let n0 = parts.count > 0 ? Int(parts[0].filter { $0.isNumber }) ?? 0 : 0
+                let n1 = parts.count > 1 ? Int(parts[1].filter { $0.isNumber }) ?? 0 : 0
+                let n2 = parts.count > 2 ? Int(parts[2].filter { $0.isNumber }) ?? 0 : 0
+                return (n0, n1, n2)
+            }
+
+            let remoteSem = parseSemver(tagName)
+            let localSem = parseSemver(localVersion)
+
+            var isNewerSemver = false
+            if remoteSem.0 > localSem.0 { isNewerSemver = true }
+            else if remoteSem.0 == localSem.0 && remoteSem.1 > localSem.1 { isNewerSemver = true }
+            else if remoteSem.0 == localSem.0 && remoteSem.1 == localSem.1 && remoteSem.2 > localSem.2 { isNewerSemver = true }
+
+            var isNewerRebuild = false
+            if remoteSem.0 == localSem.0 && remoteSem.1 == localSem.1 && remoteSem.2 == localSem.2 {
+                if let rSha = remoteSha, localBuildSha != "dev", rSha.lowercased() != localBuildSha.lowercased() {
+                    isNewerRebuild = true
+                }
+            }
+
+            guard isNewerSemver || isNewerRebuild else {
+                if manual {
+                    DispatchQueue.main.async {
+                        self.updateStatusMessage = "Air Speaker v1.0.0 is up to date."
+                    }
+                }
+                return
+            }
+
+            let newUpdateId = remoteSha != nil ? "\(tagName)_\(remoteSha!)" : tagName
+            let skippedId = UserDefaults.standard.string(forKey: "skipped_update_id") ?? ""
+            if !manual && skippedId == newUpdateId {
+                return
+            }
+
+            var downloadUrl = htmlUrl
+            if let assets = json["assets"] as? [[String: Any]] {
+                for asset in assets {
+                    let name = asset["name"] as? String ?? ""
+                    if name.hasSuffix(".ipa") || name.contains("iOS") {
+                        if let browserUrl = asset["browser_download_url"] as? String {
+                            downloadUrl = browserUrl
+                            break
+                        }
+                    }
+                }
+            }
+
+            let displayVersion = (isNewerRebuild && remoteSha != nil) ? "\(tagName) (\(String(remoteSha!.prefix(7))))" : tagName
+
+            DispatchQueue.main.async {
+                self.updateId = newUpdateId
+                self.updateAvailableVersion = displayVersion
+                self.updateDownloadUrl = downloadUrl
+                self.showUpdateBanner = true
+                self.updateStatusMessage = "Update available: \(displayVersion)"
+            }
+        }.resume()
     }
 }
 

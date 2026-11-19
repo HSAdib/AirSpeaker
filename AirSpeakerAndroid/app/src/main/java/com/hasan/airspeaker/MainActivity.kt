@@ -695,6 +695,10 @@ class MainActivity : AppCompatActivity() {
         setupUI()
         checkPermissions()
         refreshLocalIps()
+
+        handler.postDelayed({
+            performUpdateCheck(isManual = false)
+        }, 2500)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -1760,9 +1764,63 @@ class MainActivity : AppCompatActivity() {
         binding.btnBatteryOpt.setOnClickListener { requestBatteryOptimizationExemption() }
         binding.btnRefreshIps.setOnClickListener { refreshLocalIps() }
 
+        val shaStr = if (BuildConfig.BUILD_SHA != "dev") " (${BuildConfig.BUILD_SHA})" else ""
+        binding.tvAppVersion.text = "Air Speaker v1.0.0$shaStr"
+        binding.btnCheckForUpdates.setOnClickListener {
+            performUpdateCheck(isManual = true)
+        }
+
         updateCodecBitrateUiState(binding.rbCodecOpus.isChecked)
         showPartyScreen("CHOOSER")
         binding.root.post { suppressSync = false }
+    }
+
+    private fun performUpdateCheck(isManual: Boolean) {
+        if (isManual) {
+            binding.tvUpdateStatus.visibility = View.VISIBLE
+            binding.tvUpdateStatus.text = "Checking for updates..."
+            binding.btnCheckForUpdates.isEnabled = false
+        }
+        UpdateChecker.checkForUpdates(this, isManual) { info ->
+            if (isManual) {
+                binding.btnCheckForUpdates.isEnabled = true
+            }
+            if (info != null && info.isAvailable) {
+                if (isManual) {
+                    binding.tvUpdateStatus.visibility = View.VISIBLE
+                    binding.tvUpdateStatus.text = "Update available: ${info.displayVersion}"
+                }
+                showUpdateDialog(info)
+            } else if (isManual) {
+                binding.tvUpdateStatus.visibility = View.VISIBLE
+                binding.tvUpdateStatus.text = "Air Speaker is up to date."
+                androidx.appcompat.app.AlertDialog.Builder(this, com.google.android.material.R.style.ThemeOverlay_MaterialComponents_Dialog_Alert)
+                    .setTitle("Up to Date")
+                    .setMessage("Air Speaker v1.0.0 is currently up to date.")
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun showUpdateDialog(info: UpdateChecker.UpdateInfo) {
+        if (isFinishing || isDestroyed) return
+        val builder = androidx.appcompat.app.AlertDialog.Builder(this, com.google.android.material.R.style.ThemeOverlay_MaterialComponents_Dialog_Alert)
+        builder.setTitle("⬆ Update Available")
+        builder.setMessage("Air Speaker ${info.displayVersion} is now available!\n\nWould you like to download and install this update?")
+        builder.setPositiveButton("Download Update") { _, _ ->
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl))
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open update download URL: ${e.message}")
+            }
+        }
+        builder.setNeutralButton("Later", null)
+        builder.setNegativeButton("Skip") { _, _ ->
+            UpdateChecker.skipUpdate(this, info.updateId)
+        }
+        builder.show()
     }
 
     // ------------------------------------------------------------------

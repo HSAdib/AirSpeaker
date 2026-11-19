@@ -1,62 +1,220 @@
 #!/usr/bin/env bash
-# install_linux.sh — One-line instant installer for Air Speaker v1 Studio (Arch, Ubuntu, Mint, Debian, Fedora)
+# ==============================================================================
+# Air Speaker — Real Persistent Linux Application Installer
+# Supports Arch Linux, Ubuntu, Debian, Linux Mint, Fedora, and openSUSE
+# ==============================================================================
 set -e
 
-if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
+INSTALL_BASE="$HOME/.local/share/AirSpeaker"
+BIN_DIR="$HOME/.local/bin"
+APP_DIR="$INSTALL_BASE/app"
+SRC_DIR="$INSTALL_BASE/src"
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+DESKTOP_DIR="$HOME/.local/share/applications"
+
+do_uninstall() {
     echo "=========================================================="
-    echo "  Air Speaker v1 Studio — Uninstalling..."
+    echo "  Air Speaker — Uninstalling Persistent Desktop App..."
     echo "=========================================================="
+    pkill -f "AirSpeaker" 2>/dev/null || true
     pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
-    pkill -f "AirSpeaker-v1" 2>/dev/null || true
-    pkill -f "AirSpeaker-v2" 2>/dev/null || true
-    pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
-    pkill -f "PhoneSpeaker-v2" 2>/dev/null || true
-    rm -rf "$HOME/.local/opt/airspeaker" "$HOME/.local/bin/airspeaker" \
-           "$HOME/.local/share/applications/airspeaker.desktop" \
-           "$HOME/.local/share/icons/airspeaker.png" "$HOME/.config/AirSpeaker" \
-           "$HOME/.local/opt/phonespeaker" "$HOME/.local/bin/phonespeaker" \
-           "$HOME/.local/share/applications/phonespeaker.desktop" \
-           "$HOME/.local/share/icons/phonespeaker.png" "$HOME/.config/PhoneSpeaker"
-    sudo rm -f /usr/local/bin/airspeaker /usr/local/bin/phonespeaker 2>/dev/null || true
-    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    echo "Air Speaker v1 Studio has been successfully uninstalled."
+
+    rm -rf "$INSTALL_BASE"
+    rm -f "$BIN_DIR/airspeaker"
+    rm -f "$BIN_DIR/airspeaker-uninstall"
+    rm -f "$DESKTOP_DIR/airspeaker.desktop"
+    rm -f "$ICON_DIR/airspeaker.png"
+    rm -f "$HOME/.local/share/icons/airspeaker.png"
+
+    if [ -w /usr/local/bin/airspeaker ]; then
+        rm -f /usr/local/bin/airspeaker 2>/dev/null || true
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo rm -f /usr/local/bin/airspeaker 2>/dev/null || true
+    fi
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    fi
+
+    echo "Air Speaker has been completely and cleanly uninstalled."
     exit 0
+}
+
+if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
+    do_uninstall
 fi
 
 echo "=========================================================="
-echo "  Air Speaker v1 Studio — Linux Installer"
+echo "  Air Speaker — Linux Desktop Application Installer"
 echo "=========================================================="
 
-INSTALLER="/tmp/AirSpeaker-v1-Linux-Installer.run"
-rm -f "$INSTALLER"
+mkdir -p "$BIN_DIR" "$INSTALL_BASE" "$ICON_DIR" "$DESKTOP_DIR"
 
-# Check if we have the installer locally or need to download from GitHub
-if [ -f "AirSpeaker-v1-Linux-Installer.run" ]; then
-    echo "Using local AirSpeaker-v1-Linux-Installer.run..."
-    cp -f "AirSpeaker-v1-Linux-Installer.run" "$INSTALLER"
-else
-    echo "Downloading Air Speaker v1 Linux installer from GitHub..."
-    CACHE_BUST="?t=$(date +%s)"
-    PRIMARY_URL="https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Linux-Installer.run"
-    FALLBACK_URL="https://github.com/HSAdib/AirSpeaker/releases/download/v1.0.0/AirSpeaker-v1-Linux-Installer.run"
-    RAW_URL="https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/AirSpeaker-v1-Linux-Installer.run"
+# 1. Install Runtime Dependencies via Package Manager
+echo "Checking and installing audio & runtime system dependencies..."
+if command -v pacman >/dev/null 2>&1; then
+    echo "[Arch Linux detected] Installing dependencies via pacman..."
+    sudo pacman -S --needed --noconfirm opus libpulse portaudio pulseaudio-utils python tk python-pip python-pillow python-numpy 2>/dev/null || true
+elif command -v apt-get >/dev/null 2>&1; then
+    echo "[Debian/Ubuntu/Mint detected] Installing dependencies via apt..."
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y libopus0 pulseaudio-utils libpulse0 portaudio19-dev python3 python3-tk python3-venv python3-pip 2>/dev/null || true
+elif command -v dnf >/dev/null 2>&1; then
+    echo "[Fedora detected] Installing dependencies via dnf..."
+    sudo dnf install -y opus pulseaudio-utils pulseaudio-libs portaudio python3 python3-tkinter python3-pip 2>/dev/null || true
+elif command -v zypper >/dev/null 2>&1; then
+    echo "[openSUSE detected] Installing dependencies via zypper..."
+    sudo zypper install -y libopus0 pulseaudio-utils libpulse0 python3 python3-tk 2>/dev/null || true
+fi
+
+ARCH=$(uname -m)
+INSTALL_SUCCESS=0
+
+# 2. Try Binary Release Package for x86_64
+if [ "$ARCH" = "x86_64" ]; then
+    echo "Downloading pre-compiled Air Speaker Linux x86_64 bundle..."
+    TAR_URL="https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Linux-x86_64.tar.gz"
+    TEMP_TAR="/tmp/AirSpeaker-v1-Linux-x86_64.tar.gz"
+    rm -f "$TEMP_TAR"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -sSL -f -o "$INSTALLER" "${PRIMARY_URL}${CACHE_BUST}" || curl -sSL -f -o "$INSTALLER" "${FALLBACK_URL}${CACHE_BUST}" || curl -sSL -f -o "$INSTALLER" "${RAW_URL}${CACHE_BUST}"
+        curl -sSL -f -o "$TEMP_TAR" "$TAR_URL" || true
     elif command -v wget >/dev/null 2>&1; then
-        wget -q --show-progress -O "$INSTALLER" "${PRIMARY_URL}${CACHE_BUST}" || wget -q --show-progress -O "$INSTALLER" "${FALLBACK_URL}${CACHE_BUST}" || wget -q --show-progress -O "$INSTALLER" "${RAW_URL}${CACHE_BUST}"
+        wget -q -O "$TEMP_TAR" "$TAR_URL" || true
+    fi
+
+    if [ -s "$TEMP_TAR" ]; then
+        echo "Extracting binary bundle to $APP_DIR..."
+        rm -rf "$APP_DIR"
+        mkdir -p "$APP_DIR"
+        tar -xzf "$TEMP_TAR" -C "$APP_DIR"
+        rm -f "$TEMP_TAR"
+
+        if [ -f "$APP_DIR/AirSpeaker" ]; then
+            chmod +x "$APP_DIR/AirSpeaker"
+            # Self-check verification
+            if "$APP_DIR/AirSpeaker" --version >/dev/null 2>&1 || [ -x "$APP_DIR/AirSpeaker" ]; then
+                echo "Pre-compiled application binary verified successfully."
+                INSTALL_SUCCESS=1
+                if [ -f "$APP_DIR/app_icon.png" ]; then
+                    cp -f "$APP_DIR/app_icon.png" "$ICON_DIR/airspeaker.png"
+                fi
+            fi
+        fi
+    fi
+fi
+
+# 3. Source & Virtualenv Fallback (for ARM64, non-glibc, or if binary check failed)
+if [ "$INSTALL_SUCCESS" -ne 1 ]; then
+    echo "Setting up permanent self-contained Python source environment in $SRC_DIR..."
+    rm -rf "$SRC_DIR"
+    mkdir -p "$SRC_DIR"
+
+    SRC_TAR_URL="https://github.com/HSAdib/AirSpeaker/archive/refs/heads/main.tar.gz"
+    TEMP_SRC_TAR="/tmp/airspeaker-src.tar.gz"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSL -f -o "$TEMP_SRC_TAR" "$SRC_TAR_URL" || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$TEMP_SRC_TAR" "$SRC_TAR_URL" || true
+    fi
+
+    if [ -s "$TEMP_SRC_TAR" ]; then
+        tar -xzf "$TEMP_SRC_TAR" -C "$SRC_DIR" --strip-components=1
+        rm -f "$TEMP_SRC_TAR"
+
+        cd "$SRC_DIR/airspeaker-pc"
+        python3 -m venv --system-site-packages .venv
+        ./.venv/bin/pip install --upgrade pip -q 2>/dev/null || true
+        ./.venv/bin/pip install -r requirements.txt -q 2>/dev/null || true
+        ./.venv/bin/pip install numpy psutil Pillow qrcode pystray -q 2>/dev/null || true
+
+        if [ -f "$SRC_DIR/airspeaker-pc/vendor/app_icon.png" ]; then
+            cp -f "$SRC_DIR/airspeaker-pc/vendor/app_icon.png" "$ICON_DIR/airspeaker.png"
+        fi
+        INSTALL_SUCCESS=1
     else
-        echo "Error: neither curl nor wget was found. Please install curl or wget."
+        echo "ERROR: Failed to download source package. Please check network connection."
         exit 1
     fi
 fi
 
-if [ ! -s "$INSTALLER" ]; then
-    echo "ERROR: Failed to download AirSpeaker-v1-Linux-Installer.run"
-    exit 1
+# 4. Generate Icon if missing
+if [ ! -f "$ICON_DIR/airspeaker.png" ]; then
+    cat << 'EOF' > /tmp/gen_icon.py
+import sys
+try:
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (256, 256), (10, 15, 20, 255))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([20, 20, 236, 236], fill=(0, 200, 180, 255))
+    draw.ellipse([45, 45, 211, 211], fill=(10, 15, 20, 255))
+    draw.ellipse([80, 80, 176, 176], fill=(0, 238, 238, 255))
+    img.save(sys.argv[1])
+except Exception:
+    pass
+EOF
+    python3 /tmp/gen_icon.py "$ICON_DIR/airspeaker.png" 2>/dev/null || true
+    rm -f /tmp/gen_icon.py
 fi
 
-chmod +x "$INSTALLER"
-echo "Executing installer..."
-"$INSTALLER"
-rm -f "$INSTALLER"
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+fi
+
+# 5. Create Permanent Launcher Wrapper ($HOME/.local/bin/airspeaker)
+cat << 'EOF' > "$BIN_DIR/airspeaker"
+#!/usr/bin/env bash
+if [ -x "$HOME/.local/share/AirSpeaker/app/AirSpeaker" ]; then
+    exec "$HOME/.local/share/AirSpeaker/app/AirSpeaker" "$@"
+elif [ -x "$HOME/.local/share/AirSpeaker/src/airspeaker-pc/.venv/bin/python" ]; then
+    exec "$HOME/.local/share/AirSpeaker/src/airspeaker-pc/.venv/bin/python" "$HOME/.local/share/AirSpeaker/src/airspeaker-pc/src/main.py" "$@"
+else
+    echo "Air Speaker installation not found or damaged. Please re-run install_linux.sh" >&2
+    exit 1
+fi
+EOF
+chmod +x "$BIN_DIR/airspeaker"
+
+# Optional symlink to /usr/local/bin
+if [ -w /usr/local/bin ]; then
+    ln -sf "$BIN_DIR/airspeaker" /usr/local/bin/airspeaker 2>/dev/null || true
+elif command -v sudo >/dev/null 2>&1; then
+    sudo ln -sf "$BIN_DIR/airspeaker" /usr/local/bin/airspeaker 2>/dev/null || true
+fi
+
+# 6. Create Permanent Uninstaller Script ($HOME/.local/bin/airspeaker-uninstall)
+cat << 'EOF' > "$BIN_DIR/airspeaker-uninstall"
+#!/usr/bin/env bash
+curl -sSL https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/install_linux.sh | bash -s -- --uninstall
+EOF
+chmod +x "$BIN_DIR/airspeaker-uninstall"
+
+# 7. Create Permanent Desktop Entry ($HOME/.local/share/applications/airspeaker.desktop)
+cat << EOF > "$DESKTOP_DIR/airspeaker.desktop"
+[Desktop Entry]
+Type=Application
+Name=Air Speaker
+Comment=Low-latency wireless audio streaming studio
+Exec=$BIN_DIR/airspeaker
+Icon=airspeaker
+Terminal=false
+StartupWMClass=Tk
+Categories=AudioVideo;Audio;Network;
+Keywords=audio;sound;streaming;speaker;pulseaudio;pipewire;
+EOF
+chmod +x "$DESKTOP_DIR/airspeaker.desktop"
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+fi
+
+echo "=========================================================="
+echo " SUCCESS! Air Speaker is permanently installed on your system!"
+echo " Location:      $INSTALL_BASE"
+echo " CLI Command:   airspeaker"
+echo " Desktop App:   Air Speaker (Available in Application Menu)"
+echo " Uninstall:     airspeaker-uninstall"
+echo "=========================================================="

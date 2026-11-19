@@ -27,6 +27,7 @@ targets:
       path: AirSpeaker/Info.plist
       properties:
         CFBundleDisplayName: Air Speaker v1
+        AirSpeakerBuildSHA: "dev"
         UILaunchScreen: {}
         UIBackgroundModes:
           - audio
