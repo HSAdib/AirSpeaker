@@ -11,11 +11,11 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.hasan.airspeaker.v2"
+        applicationId = "com.hasan.airspeaker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "2.1.0"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
@@ -105,7 +105,7 @@ dependencies {
 tasks.register("copyDebugApkToRoot") {
     doLast {
         val srcApk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
-        val destApkV21 = rootProject.projectDir.parentFile.resolve("AirSpeaker.v2.1.apk")
+        val destApkV21 = rootProject.projectDir.parentFile.resolve("AirSpeaker.v1.apk")
         if (srcApk.exists()) {
             srcApk.copyTo(destApkV21, overwrite = true)
             println("Copied ${srcApk.absolutePath} to ${destApkV21.absolutePath}")

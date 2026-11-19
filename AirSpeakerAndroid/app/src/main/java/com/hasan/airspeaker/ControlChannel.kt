@@ -277,7 +277,7 @@ class ControlChannel(
                     val json = JSONObject().apply {
                         put("type", "BEACON")
                         put("app", "AirSpeaker")
-                        put("version", 2)
+                        put("version", 1)
                         put("ips", JSONArray(ips))
                         put("audio_port", audioPort)
                         put("device", getPhoneModelName())
@@ -449,7 +449,7 @@ class ControlChannel(
                     val json = JSONObject().apply {
                         put("type", "BEACON")
                         put("app", "AirSpeaker")
-                        put("version", 2)
+                        put("version", 1)
                         put("device", getPhoneModelName())
                         put("party_join", true)
                         put("audio_port", 5004)
@@ -481,7 +481,7 @@ class ControlChannel(
                     val json = JSONObject().apply {
                         put("type", "BEACON")
                         put("app", "AirSpeaker")
-                        put("version", 2)
+                        put("version", 1)
                         put("ips", org.json.JSONArray(ips))
                         put("audio_port", 5004)
                         put("device", getPhoneModelName())

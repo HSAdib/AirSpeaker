@@ -1,7 +1,7 @@
 """
 virtual_device.py — Cross-platform virtual audio device detection,
 OS sound settings launchers, fast registry friendly-name tool, and
-VB-CABLE / PipeWire virtual driver installer for Air Speaker v2.1.
+VB-CABLE / PipeWire virtual driver installer for Air Speaker v1.0.
 """
 
 import logging
@@ -56,7 +56,7 @@ def setup_macos_virtual_audio() -> Tuple[bool, str]:
     pkg_url = "https://existential.audio/downloads/BlackHole2ch-0.6.0.pkg"
     pkg_path = Path("/tmp/BlackHole2ch.pkg")
     try:
-        req = urllib.request.Request(pkg_url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AirSpeaker/2.1"})
+        req = urllib.request.Request(pkg_url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AirSpeaker/1.0"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             pkg_path.write_bytes(resp.read())
         subprocess.Popen(["open", str(pkg_path)])
@@ -396,7 +396,7 @@ def download_and_install_vbcable(target_dir: Optional[Path] = None) -> Tuple[boo
             logger.info("Downloading VB-CABLE driver package to %s...", zip_dest)
             req = urllib.request.Request(
                 VBCABLE_URL,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AirSpeaker/2.1"},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AirSpeaker/1.0"},
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
                 zip_dest.write_bytes(resp.read())

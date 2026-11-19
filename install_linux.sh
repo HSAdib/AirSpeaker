@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# install_linux.sh — One-line instant installer for Air Speaker v2.1 Studio (Arch, Ubuntu, Mint, Debian, Fedora)
+# install_linux.sh — One-line instant installer for Air Speaker v1 Studio (Arch, Ubuntu, Mint, Debian, Fedora)
 set -e
 
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "=========================================================="
-    echo "  Air Speaker v2.1 Studio — Uninstalling..."
+    echo "  Air Speaker v1 Studio — Uninstalling..."
     echo "=========================================================="
     pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
+    pkill -f "AirSpeaker-v1"
     pkill -f "AirSpeaker-v2" 2>/dev/null || true
     pkill -f "phonespeaker-pc/src/main.py" 2>/dev/null || true
     pkill -f "PhoneSpeaker-v2" 2>/dev/null || true
@@ -18,27 +19,27 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
            "$HOME/.local/share/icons/phonespeaker.png" "$HOME/.config/PhoneSpeaker"
     sudo rm -f /usr/local/bin/airspeaker /usr/local/bin/phonespeaker 2>/dev/null || true
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    echo "Air Speaker v2.1 Studio has been successfully uninstalled."
+    echo "Air Speaker v1 Studio has been successfully uninstalled."
     exit 0
 fi
 
 echo "=========================================================="
-echo "  Air Speaker v2.1 Studio — Linux Installer"
+echo "  Air Speaker v1 Studio — Linux Installer"
 echo "=========================================================="
 
-INSTALLER="/tmp/AirSpeaker-v2-Linux-Installer.run"
+INSTALLER="/tmp/AirSpeaker-v1-Linux-Installer.run"
 rm -f "$INSTALLER"
 
 # Check if we have the installer locally or need to download from GitHub
-if [ -f "AirSpeaker-v2-Linux-Installer.run" ]; then
-    echo "Using local AirSpeaker-v2-Linux-Installer.run..."
-    cp -f "AirSpeaker-v2-Linux-Installer.run" "$INSTALLER"
+if [ -f "AirSpeaker-v1-Linux-Installer.run" ]; then
+    echo "Using local AirSpeaker-v1-Linux-Installer.run..."
+    cp -f "AirSpeaker-v1-Linux-Installer.run" "$INSTALLER"
 else
-    echo "Downloading Air Speaker v2.1 Linux installer from GitHub..."
+    echo "Downloading Air Speaker v1 Linux installer from GitHub..."
     CACHE_BUST="?t=$(date +%s)"
-    PRIMARY_URL="https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v2-Linux-Installer.run"
-    FALLBACK_URL="https://github.com/HSAdib/AirSpeaker/releases/download/v2.1.0/AirSpeaker-v2-Linux-Installer.run"
-    RAW_URL="https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/AirSpeaker-v2-Linux-Installer.run"
+    PRIMARY_URL="https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Linux-Installer.run"
+    FALLBACK_URL="https://github.com/HSAdib/AirSpeaker/releases/download/v1.0.0/AirSpeaker-v1-Linux-Installer.run"
+    RAW_URL="https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/AirSpeaker-v1-Linux-Installer.run"
 
     if command -v curl >/dev/null 2>&1; then
         curl -sSL -f -o "$INSTALLER" "${PRIMARY_URL}${CACHE_BUST}" || curl -sSL -f -o "$INSTALLER" "${FALLBACK_URL}${CACHE_BUST}" || curl -sSL -f -o "$INSTALLER" "${RAW_URL}${CACHE_BUST}"
@@ -51,7 +52,7 @@ else
 fi
 
 if [ ! -s "$INSTALLER" ]; then
-    echo "ERROR: Failed to download AirSpeaker-v2-Linux-Installer.run"
+    echo "ERROR: Failed to download AirSpeaker-v1-Linux-Installer.run"
     exit 1
 fi
 

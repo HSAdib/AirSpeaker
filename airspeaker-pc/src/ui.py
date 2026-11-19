@@ -1,5 +1,5 @@
 """
-ui.py — Tkinter-based GUI for Air Speaker v2.1 Studio.
+ui.py — Tkinter-based GUI for Air Speaker v1 Studio.
 
 Theme: black background, white foreground/borders, Consolas font.
 Tabs: Stream / Roles | Audio & Buffer Settings | Windows Virtual Device
@@ -387,7 +387,7 @@ class AirSpeakerApp:
         self._save_config()
 
     def _setup_window(self) -> None:
-        self.root.title("Air Speaker v2.1 Studio")
+        self.root.title("Air Speaker v1 Studio")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
         self.root.minsize(560, 650)
@@ -458,7 +458,7 @@ class AirSpeakerApp:
         title_frame = tk.Frame(self.root, bg=BG, bd=1, relief="solid")
         title_frame.pack(fill="x", padx=8, pady=(8, 4))
         tk.Label(
-            title_frame, text="◀ Air Speaker v2.1 Studio ▶",
+            title_frame, text="◀ Air Speaker v1 Studio ▶",
             bg=BG, fg=FG, font=FONT_MONO_LG
         ).pack(side="left", padx=8, pady=4)
 
@@ -1888,7 +1888,7 @@ class AirSpeakerApp:
                 {
                     "type": "BEACON",
                     "app": "AirSpeaker",
-                    "version": 2,
+                    "version": 1,
                     "party_join": True,
                     "is_party_host": False,
                     "is_extended_host": bool(self.party_extend_var.get()),
@@ -2832,7 +2832,7 @@ class AirSpeakerApp:
                                 {
                                     "type": "BEACON",
                                     "app": "AirSpeaker",
-                                    "version": 2,
+                                    "version": 1,
                                     "party_join": True,
                                     "is_party_host": False,
                                     "is_extended_host": bool(self.party_extend_var.get()),
@@ -3210,7 +3210,7 @@ class AirSpeakerApp:
 
     def _show_help_dialog(self) -> None:
         dlg = tk.Toplevel(self.root)
-        dlg.title("Air Speaker v2.1 Studio — User Guide & Help")
+        dlg.title("Air Speaker v1 Studio — User Guide & Help")
         dlg.configure(bg=BG)
         dlg.geometry("680x580")
         dlg.resizable(True, True)
@@ -3218,7 +3218,7 @@ class AirSpeakerApp:
         header = tk.Frame(dlg, bg=BG)
         header.pack(fill="x", padx=12, pady=(10, 6))
         tk.Label(
-            header, text="◀ Air Speaker v2.1 Studio Guide ▶",
+            header, text="◀ Air Speaker v1 Studio Guide ▶",
             bg=BG, fg=ACCENT, font=FONT_MONO_LG
         ).pack(side="left")
         ttk.Button(header, text="✕ Close", command=dlg.destroy).pack(side="right")
@@ -3238,7 +3238,7 @@ class AirSpeakerApp:
         scrollbar.config(command=guide_text.yview)
 
         help_content = """============================================================
-AIR SPEAKER v2.1 STUDIO — USER GUIDE (CROSS-PLATFORM STUDIO)
+AIR SPEAKER v1 STUDIO — USER GUIDE (CROSS-PLATFORM STUDIO)
 ============================================================
 
 PLATFORMS SUPPORTED:
@@ -3294,7 +3294,7 @@ TABS:
             img = _make_tray_image(64)
             if img is None:
                 return
-            self._tray_icon = pystray.Icon("AirSpeaker", img, "Air Speaker v2.1", menu)
+            self._tray_icon = pystray.Icon("AirSpeaker", img, "Air Speaker v1", menu)
             threading.Thread(target=self._tray_icon.run, daemon=True).start()
         except Exception as e:
             logger.warning("Failed to start tray icon: %s", e)

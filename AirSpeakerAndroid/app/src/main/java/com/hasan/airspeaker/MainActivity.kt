@@ -185,12 +185,12 @@ class MainActivity : AppCompatActivity() {
     private fun showHelpDialog() {
         val guideText = """
         ============================================================
-        AIR SPEAKER v2.1 STUDIO — USER GUIDE & HELP
+        AIR SPEAKER v1 STUDIO — USER GUIDE & HELP
         ============================================================
 
         ✓ STUDIO ARCHITECTURE: 4 DEDICATED TABS
         ------------------------------------------------------------
-        Air Speaker v2.1 features a unified monospace layout across
+        Air Speaker v1 features a unified monospace layout across
         Android, iOS, Windows, macOS, and Linux:
 
         1. [ PLAY ] TAB (PC -> PHONE AUDIO PLAYER)
@@ -239,7 +239,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Air Speaker v2.1 Studio Guide")
+            .setTitle("Air Speaker v1 Studio Guide")
             .setView(scroll)
             .setPositiveButton("Close", null)
             .show()

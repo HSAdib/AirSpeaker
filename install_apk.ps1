@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Air Speaker v2.1 - Android Rebuild and Install Script" -ForegroundColor Cyan
+Write-Host "Air Speaker v1 - Android Rebuild and Install Script" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # 1. Locate / Detect JAVA_HOME (prefer standard LTS JDK 17/21)
@@ -44,7 +44,7 @@ if (-not $env:JAVA_HOME) {
 
 # 2. Compile fresh APK with gradlew.bat assembleDebug
 $androidDir = Join-Path $PSScriptRoot "AirSpeakerAndroid"
-Write-Host "`n[1/3] Building fresh Air Speaker v2.1 APK..." -ForegroundColor Cyan
+Write-Host "`n[1/3] Building fresh Air Speaker v1 APK..." -ForegroundColor Cyan
 Push-Location $androidDir
 try {
     & .\gradlew.bat assembleDebug
@@ -56,7 +56,7 @@ try {
 }
 
 $builtApk = Join-Path $PSScriptRoot "AirSpeakerAndroid\app\build\outputs\apk\debug\app-debug.apk"
-$apkPath = Join-Path $PSScriptRoot "AirSpeaker.v2.1.apk"
+$apkPath = Join-Path $PSScriptRoot "AirSpeaker.v1.apk"
 if (Test-Path $builtApk) {
     Copy-Item -Path $builtApk -Destination $apkPath -Force
     Write-Host "Fresh APK copied to: $apkPath" -ForegroundColor Green
@@ -96,6 +96,7 @@ if (-not $devices) {
 }
 
 Write-Host "`n[3/3] Device detected! Stopping old instance, installing fresh APK, and launching..." -ForegroundColor Green
+& $adb shell am force-stop com.hasan.airspeaker
 & $adb shell am force-stop com.hasan.airspeaker.v2
 & $adb shell am force-stop com.hasan.airspeaker
 & $adb shell am force-stop com.hasan.phonespeaker.v2
@@ -108,9 +109,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "`nLaunching Air Speaker MainActivity on device..." -ForegroundColor Green
-& $adb shell am start -n com.hasan.airspeaker.v2/com.hasan.airspeaker.MainActivity
+& $adb shell am start -n com.hasan.airspeaker/.MainActivity
 if ($LASTEXITCODE -ne 0) {
     & $adb shell am start -n com.hasan.airspeaker/.MainActivity
 }
 
-Write-Host "`nSuccess! Air Speaker v2.1 is compiled and running on your phone." -ForegroundColor Cyan
+Write-Host "`nSuccess! Air Speaker v1 is compiled and running on your phone." -ForegroundColor Cyan

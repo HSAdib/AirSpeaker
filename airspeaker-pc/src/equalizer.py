@@ -1,6 +1,6 @@
 """
 equalizer.py — Real-time 5-band stereo biquad Equalizer DSP, preset manager,
-and Tkinter studio dialog for Air Speaker v2.1.
+and Tkinter studio dialog for Air Speaker v1.0.
 
 Supports 5 independent EQ contexts:
   - 'play'       : Optional local receiver EQ on PLAY tab

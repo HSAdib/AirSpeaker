@@ -1,5 +1,5 @@
 """
-protocol.py — Shared wire protocol definitions for Air Speaker v2.1.
+protocol.py — Shared wire protocol definitions for Air Speaker v1.0.
 """
 
 import struct
@@ -28,7 +28,7 @@ BUFFER_PRESETS = {
     "HIGH": 80.0,
 }
 
-# Default v2.1 Configuration
+# Default v1.0 Configuration
 DEFAULT_CONFIG: Dict[str, Any] = {
     "type": "CONFIG_SYNC",
     "rev": 1,

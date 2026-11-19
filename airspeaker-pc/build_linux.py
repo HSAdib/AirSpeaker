@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-build_linux.py — Build standalone Linux executable and .run installer for Air Speaker v2.1.
+build_linux.py — Build standalone Linux executable and .run installer for Air Speaker v1.0.
 
 Output:
-  - dist/AirSpeaker-v2 (Standalone Linux executable, like .exe on Windows)
-  - ../AirSpeaker-v2-Linux-Installer.run (One-click Linux installer with desktop icon)
+  - dist/AirSpeaker-v1 (Standalone Linux executable, like .exe on Windows)
+  - ../AirSpeaker-v1-Linux-Installer.run (One-click Linux installer with desktop icon)
 """
 
 import ctypes.util
@@ -90,7 +90,7 @@ def main() -> None:
         str(python), "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
-        "--name", "AirSpeaker-v2",
+        "--name", "AirSpeaker-v1",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build-linux"),
         "--specpath", str(ROOT),
@@ -103,27 +103,27 @@ def main() -> None:
     pyinstaller_args.append(str(SRC_MAIN))
     run(pyinstaller_args)
 
-    binary = ROOT / "dist" / "AirSpeaker-v2"
+    binary = ROOT / "dist" / "AirSpeaker-v1"
     if not binary.exists():
         print("ERROR: Linux binary was not created.")
         sys.exit(1)
 
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    root_bin = ROOT.parent / "AirSpeaker-v2"
+    root_bin = ROOT.parent / "AirSpeaker-v1"
     shutil.copy2(binary, root_bin)
     print(f"Standalone Linux binary ready: {root_bin}")
 
     # Build self-extracting .run installer
     payload_tar = ROOT / "dist" / "payload.tar.gz"
     with tarfile.open(payload_tar, "w:gz") as tar:
-        tar.add(binary, arcname="AirSpeaker-v2")
+        tar.add(binary, arcname="AirSpeaker-v1")
         if icon_png.exists():
             tar.add(icon_png, arcname="app_icon.png")
 
     installer_header = b"""#!/usr/bin/env bash
 set -e
 echo "===================================================="
-echo " Installing Air Speaker v2.1 Studio for Linux..."
+echo " Installing Air Speaker v1.0 Studio for Linux..."
 echo "===================================================="
 INSTALL_DIR="$HOME/.local/opt/airspeaker"
 BIN_DIR="$HOME/.local/bin"
@@ -133,15 +133,15 @@ mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$APP_DIR"
 ARCHIVE_LINE=$(awk '/^__ARCHIVE_BELOW__/ {print NR + 1; exit 0; }' "$0")
 tail -n+$ARCHIVE_LINE "$0" | tar -xz -C "$INSTALL_DIR"
 
-chmod +x "$INSTALL_DIR/AirSpeaker-v2"
-ln -sf "$INSTALL_DIR/AirSpeaker-v2" "$BIN_DIR/airspeaker"
+chmod +x "$INSTALL_DIR/AirSpeaker-v1"
+ln -sf "$INSTALL_DIR/AirSpeaker-v1" "$BIN_DIR/airspeaker"
 
 cat > "$APP_DIR/airspeaker.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Air Speaker v2.1 Studio
+Name=Air Speaker v1.0 Studio
 Comment=Low-latency Wireless Audio & Internal Sound Studio
-Exec=$INSTALL_DIR/AirSpeaker-v2
+Exec=$INSTALL_DIR/AirSpeaker-v1
 Icon=$INSTALL_DIR/app_icon.png
 Terminal=false
 Categories=AudioVideo;Audio;Network;
@@ -150,12 +150,12 @@ EOF
 chmod +x "$APP_DIR/airspeaker.desktop"
 update-desktop-database "$APP_DIR" 2>/dev/null || true
 
-echo "SUCCESS! Installed to $INSTALL_DIR/AirSpeaker-v2"
-echo "Run 'airspeaker' from terminal or launch 'Air Speaker v2.1 Studio' from your App Menu!"
+echo "SUCCESS! Installed to $INSTALL_DIR/AirSpeaker-v1"
+echo "Run 'airspeaker' from terminal or launch 'Air Speaker v1.0 Studio' from your App Menu!"
 exit 0
 __ARCHIVE_BELOW__
 """
-    installer_run = ROOT.parent / "AirSpeaker-v2-Linux-Installer.run"
+    installer_run = ROOT.parent / "AirSpeaker-v1-Linux-Installer.run"
     with open(installer_run, "wb") as out_f:
         out_f.write(installer_header)
         out_f.write(payload_tar.read_bytes())

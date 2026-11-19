@@ -2,7 +2,7 @@
 //  AirSpeakerApp.swift
 //  AirSpeaker
 //
-//  Created for Air Speaker v2.1.
+//  Created for Air Speaker v1.0.
 //
 
 import SwiftUI

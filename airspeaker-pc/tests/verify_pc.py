@@ -304,10 +304,10 @@ def test_udp_localhost_integration() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 8: Protocol v2.0 bidirectional header & CONFIG_SYNC validation
+# Test 8: Protocol v1.0 bidirectional header & CONFIG_SYNC validation
 # ---------------------------------------------------------------------------
 def test_protocol_v2_and_sync() -> None:
-    name = "Protocol v2.0 bidirectional header & CONFIG_SYNC validation"
+    name = "Protocol v1.0 bidirectional header & CONFIG_SYNC validation"
     try:
         from protocol import (
             AUDIO_PORT,

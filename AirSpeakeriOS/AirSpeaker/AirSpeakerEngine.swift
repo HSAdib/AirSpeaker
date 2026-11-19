@@ -4,7 +4,7 @@
 //
 //  Full native iOS audio streaming, jitter buffering, microphone transmission,
 //  multi-device party mode daisy-chain relay, and control protocol.
-//  100% wire-compatible with Windows, Linux, macOS, and Android (Air Speaker v2.1).
+//  100% wire-compatible with Windows, Linux, macOS, and Android (Air Speaker v1.0).
 //
 
 import Foundation
@@ -1232,7 +1232,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             sendControlMessage([
                 "type": "BEACON",
                 "app": "AirSpeaker",
-                "version": 2,
+                "version": 1,
                 "device": deviceName,
                 "party_join": false,
                 "audio_port": 5004
@@ -1307,7 +1307,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         let beacon: [String: Any] = [
             "type": "BEACON",
             "app": "AirSpeaker",
-            "version": 2,
+            "version": 1,
             "ips": AirSpeakerEngine.getLocalIpv4Addresses(),
             "audio_port": 5004,
             "device": self.deviceName,
@@ -1326,7 +1326,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         let joinBeacon: [String: Any] = [
             "type": "BEACON",
             "app": "AirSpeaker",
-            "version": 2,
+            "version": 1,
             "device": self.deviceName,
             "party_join": true,
             "is_party_host": false,

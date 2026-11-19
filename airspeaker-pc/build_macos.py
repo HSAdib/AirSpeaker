@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-build_macos.py — Build standalone macOS Application bundle (.app) and DMG for Air Speaker v2.1.
+build_macos.py — Build standalone macOS Application bundle (.app) and DMG for Air Speaker v1.0.
 
 Output:
-  - dist/Air Speaker v2.app (macOS Application bundle)
-  - ../AirSpeaker-v2-macOS.dmg (Drag-and-Drop macOS Disk Image installer)
+  - dist/Air Speaker v1.app (macOS Application bundle)
+  - ../AirSpeaker-v1-macOS.dmg (Drag-and-Drop macOS Disk Image installer)
 """
 
 import ctypes.util
@@ -117,7 +117,7 @@ def main() -> None:
         str(python), "-m", "PyInstaller",
         "--windowed",
         "--noconsole",
-        "--name", "Air Speaker v2",
+        "--name", "Air Speaker v1",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build-macos"),
         "--specpath", str(ROOT),
@@ -132,24 +132,24 @@ def main() -> None:
     pyinstaller_args.append(str(SRC_MAIN))
     run(pyinstaller_args)
 
-    app_path = ROOT / "dist" / "Air Speaker v2.app"
+    app_path = ROOT / "dist" / "Air Speaker v1.app"
     if not app_path.exists():
-        print("ERROR: Air Speaker v2.app was not created.")
+        print("ERROR: Air Speaker v1.app was not created.")
         sys.exit(1)
 
     print(f"macOS Application bundle ready: {app_path}")
 
     # Build DMG if hdiutil is available
     hdiutil = shutil.which("hdiutil")
-    dmg_path = ROOT.parent / "AirSpeaker-v2-macOS.dmg"
+    dmg_path = ROOT.parent / "AirSpeaker-v1-macOS.dmg"
     if hdiutil:
         print("Creating macOS DMG image installer...", flush=True)
-        dmg_temp = ROOT / "dist" / "AirSpeaker-v2-macOS.dmg"
+        dmg_temp = ROOT / "dist" / "AirSpeaker-v1-macOS.dmg"
         if dmg_temp.exists():
             dmg_temp.unlink()
         run([
             "hdiutil", "create",
-            "-volname", "Air Speaker v2",
+            "-volname", "Air Speaker v1",
             "-srcfolder", str(app_path),
             "-ov",
             "-format", "UDZO",
@@ -160,7 +160,7 @@ def main() -> None:
             size_mb = dmg_path.stat().st_size / (1024 * 1024)
             print(f"SUCCESS: macOS DMG installer created at {dmg_path} ({size_mb:.1f} MB)")
     else:
-        print("Note: 'hdiutil' not available on this platform. App bundle is at dist/Air Speaker v2.app")
+        print("Note: 'hdiutil' not available on this platform. App bundle is at dist/Air Speaker v1.app")
 
 
 if __name__ == "__main__":

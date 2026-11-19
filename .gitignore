@@ -12,8 +12,6 @@ env/
 # PyInstaller build outputs
 airspeaker-pc/build/
 airspeaker-pc/dist/
-phonespeaker-pc/build/
-phonespeaker-pc/dist/
 
 # Android & Gradle
 .gradle/
@@ -27,9 +25,6 @@ gradle-8.7/
 AirSpeakerAndroid/.gradle/
 AirSpeakerAndroid/app/build/
 AirSpeakerAndroid/app/.cxx/
-PhoneSpeakerAndroid/.gradle/
-PhoneSpeakerAndroid/app/build/
-PhoneSpeakerAndroid/app/.cxx/
 
 # IDEs & OS
 .idea/
@@ -43,5 +38,5 @@ code_dump_part*.txt
 cmdline-tools.zip
 diagnostic.wav
 app-debug.apk
-PhoneSpeaker_old.exe
+AirSpeaker_old.exe
 

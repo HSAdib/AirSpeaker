@@ -638,7 +638,7 @@ class ControlListener:
                 msg = json.dumps({
                     "type": "PC_ANNOUNCE",
                     "app": "AirSpeakerPC",
-                    "version": 2,
+                    "version": 1,
                     "pc_name": socket.gethostname(),
                     "party_mode": bool(self._party_mode_enabled),
                     "is_party_host": bool(self._party_mode_enabled),
@@ -692,7 +692,7 @@ class ControlListener:
                             reply = json.dumps({
                                 "type": "PC_ANNOUNCE",
                                 "app": "AirSpeakerPC",
-                                "version": 2,
+                                "version": 1,
                                 "pc_name": socket.gethostname(),
                                 "party_mode": bool(self._party_mode_enabled),
                                 "is_party_host": bool(self._party_mode_enabled),

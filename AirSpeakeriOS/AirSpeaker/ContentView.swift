@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  AirSpeaker
 //
-//  AirSpeaker v2.1 Studio Monospace UI for iOS.
+//  Air Speaker v1 Studio Monospace UI for iOS.
 //  100% unified with Android (activity_main.xml & MainActivity.kt) and PC Studio.
 //
 
@@ -22,7 +22,7 @@ public struct ContentView: View {
                 // Top Studio Header
                 VStack(spacing: 4) {
                     HStack(alignment: .center) {
-                        Text("AIR SPEAKER v2.1")
+                        Text("AIR SPEAKER v1")
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
 
@@ -1486,7 +1486,7 @@ struct StudioHelpModal: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("AIR SPEAKER v2.1 STUDIO GUIDE")
+                    Text("AIR SPEAKER v1 STUDIO GUIDE")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
                     Spacer()
@@ -1501,7 +1501,7 @@ struct StudioHelpModal: View {
                 ScrollView {
                     Text("""
 ============================================================
-AIR SPEAKER v2.1 STUDIO — CROSS-PLATFORM GUIDE
+AIR SPEAKER v1 STUDIO — CROSS-PLATFORM GUIDE
 ============================================================
 
 PLATFORMS:

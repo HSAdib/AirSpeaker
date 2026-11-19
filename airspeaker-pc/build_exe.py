@@ -2,7 +2,7 @@
 build_exe.py — Build AirSpeaker.exe using PyInstaller.
 
 Creates venv if needed, installs requirements, then runs PyInstaller.
-Output: dist/Air Speaker v2.exe
+Output: dist/Air Speaker v1.exe
 """
 
 import os
@@ -68,13 +68,13 @@ def main() -> None:
         print(f"opus.dll already present: {OPUS_DLL}", flush=True)
 
     # 5. Build EXE
-    print("Building Air Speaker v2.exe with PyInstaller...", flush=True)
+    print("Building Air Speaker v1.exe with PyInstaller...", flush=True)
 
     pyinstaller_args = [
         str(python), "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
-        "--name", "Air Speaker v2",
+        "--name", "Air Speaker v1",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT),
@@ -108,19 +108,19 @@ def main() -> None:
 
     run(pyinstaller_args)
 
-    exe = ROOT / "dist" / "Air Speaker v2.exe"
+    exe = ROOT / "dist" / "Air Speaker v1.exe"
     if exe.exists():
         size_mb = exe.stat().st_size / (1024 * 1024)
         print(f"\nSUCCESS: {exe} ({size_mb:.1f} MB)", flush=True)
 
-        target_path = ROOT.parent / "AirSpeaker.v2.1.exe"
+        target_path = ROOT.parent / "AirSpeaker.v1.exe"
         try:
             shutil.copy2(exe, target_path)
             print(f"Copied to root: {target_path}", flush=True)
         except Exception as exc:
             print(f"Warning: Could not copy to {target_path}: {exc}", flush=True)
 
-    spec_file = ROOT / "Air Speaker v2.spec"
+    spec_file = ROOT / "Air Speaker v1.spec"
     if spec_file.exists():
         try:
             spec_file.unlink()
@@ -133,13 +133,13 @@ def main() -> None:
 
 def build_linux_installer_bundle() -> None:
     """
-    Create a self-extracting Linux installer (AirSpeaker-v2-Linux-Installer.run)
-    and place it directly in the project root alongside AirSpeaker.v2.1.exe and AirSpeaker.v2.1.apk.
+    Create a self-extracting Linux installer (AirSpeaker-v1-Linux-Installer.run)
+    and place it directly in the project root alongside AirSpeaker.v1.exe and AirSpeaker.v1.apk.
     """
     import io
     import tarfile
 
-    print("\nPackaging Linux self-extracting installer (AirSpeaker-v2-Linux-Installer.run)...", flush=True)
+    print("\nPackaging Linux self-extracting installer (AirSpeaker-v1-Linux-Installer.run)...", flush=True)
     tar_buffer = io.BytesIO()
     with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
         for f in (ROOT / "src").glob("*.py"):
@@ -165,21 +165,22 @@ set -e
 
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "=========================================================="
-    echo "  Air Speaker v2.1 Studio — Uninstalling..."
+    echo "  Air Speaker v1 Studio — Uninstalling..."
     echo "=========================================================="
     pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
+    pkill -f "AirSpeaker-v1" 2>/dev/null || true
     pkill -f "AirSpeaker-v2" 2>/dev/null || true
     rm -rf "$HOME/.local/opt/airspeaker" "$HOME/.local/bin/airspeaker" \
            "$HOME/.local/share/applications/airspeaker.desktop" \
            "$HOME/.local/share/icons/airspeaker.png" "$HOME/.config/AirSpeaker"
     sudo rm -f /usr/local/bin/airspeaker 2>/dev/null || true
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    echo "Air Speaker v2.1 Studio has been successfully uninstalled."
+    echo "Air Speaker v1 Studio has been successfully uninstalled."
     exit 0
 fi
 
 echo "=========================================================="
-echo " Air Speaker v2.1 Studio — Linux One-Click Installer"
+echo " Air Speaker v1 Studio — Linux One-Click Installer"
 echo "=========================================================="
 
 # 1. Ensure system dependencies (Arch / Debian / Ubuntu / Fedora)
@@ -213,7 +214,7 @@ python3 -m venv --system-site-packages .venv-linux
 
 cp -f "$INSTALL_DIR/airspeaker-pc/vendor/app_icon.png" "$ICON_DIR/airspeaker.png" 2>/dev/null || true
 
-cat > "$INSTALL_DIR/AirSpeaker-v2" <<'EOF'
+cat > "$INSTALL_DIR/AirSpeaker-v1" <<'EOF'
 #!/usr/bin/env bash
 mkdir -p "$HOME/.config/AirSpeaker"
 
@@ -221,16 +222,16 @@ PYTHON="$HOME/.local/opt/airspeaker/airspeaker-pc/.venv-linux/bin/python"
 [ -x "$PYTHON" ] || PYTHON=python3
 "$PYTHON" "$HOME/.local/opt/airspeaker/airspeaker-pc/src/main.py" "$@" >>"$HOME/.config/AirSpeaker/startup.log" 2>&1
 EOF
-chmod +x "$INSTALL_DIR/AirSpeaker-v2"
-ln -sf "$INSTALL_DIR/AirSpeaker-v2" "$BIN_DIR/airspeaker"
-sudo ln -sf "$INSTALL_DIR/AirSpeaker-v2" /usr/local/bin/airspeaker 2>/dev/null || true
+chmod +x "$INSTALL_DIR/AirSpeaker-v1"
+ln -sf "$INSTALL_DIR/AirSpeaker-v1" "$BIN_DIR/airspeaker"
+sudo ln -sf "$INSTALL_DIR/AirSpeaker-v1" /usr/local/bin/airspeaker 2>/dev/null || true
 
 cat > "$APP_DIR/airspeaker.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Air Speaker v2.1 Studio
+Name=Air Speaker v1 Studio
 Comment=Low-latency Wireless Audio & Internal Sound Studio
-Exec=$INSTALL_DIR/AirSpeaker-v2
+Exec=$INSTALL_DIR/AirSpeaker-v1
 Icon=$ICON_DIR/airspeaker.png
 Terminal=false
 StartupNotify=true
@@ -240,9 +241,9 @@ chmod +x "$APP_DIR/airspeaker.desktop"
 update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 
 echo "=========================================================="
-echo " SUCCESS! Air Speaker v2.1 Studio installed!"
+echo " SUCCESS! Air Speaker v1 Studio installed!"
 echo " Command: airspeaker"
-echo " Launching Air Speaker v2.1 Studio now..."
+echo " Launching Air Speaker v1 Studio now..."
 echo "=========================================================="
 
 # Pre-launch health check: verify critical Python modules are importable
@@ -250,7 +251,7 @@ if ! "$INSTALL_DIR/airspeaker-pc/.venv-linux/bin/python" -c "import tkinter, num
     echo "INFO: venv Python missing some modules; launcher will auto-fallback to system python3."
 fi
 
-nohup "$INSTALL_DIR/AirSpeaker-v2" >/dev/null 2>&1 &
+nohup "$INSTALL_DIR/AirSpeaker-v1" >/dev/null 2>&1 &
 LAUNCH_PID=$!
 sleep 1
 if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
@@ -265,7 +266,7 @@ exit 0
 __ARCHIVE_BELOW__
 """.replace("\r\n", "\n").encode("utf-8")
 
-    installer_path = ROOT.parent / "AirSpeaker-v2-Linux-Installer.run"
+    installer_path = ROOT.parent / "AirSpeaker-v1-Linux-Installer.run"
     with open(installer_path, "wb") as f:
         f.write(header_script)
         f.write(tar_buffer.getvalue())
@@ -275,13 +276,13 @@ __ARCHIVE_BELOW__
 
 def build_macos_installer_bundle() -> None:
     """
-    Create a self-extracting macOS installer (AirSpeaker-v2-macOS-Installer.command)
-    and place it directly in the project root alongside Air Speaker v2.exe and AirSpeaker-v2-Linux-Installer.run.
+    Create a self-extracting macOS installer (AirSpeaker-v1-macOS-Installer.command)
+    and place it directly in the project root alongside Air Speaker v1.exe and AirSpeaker-v1-Linux-Installer.run.
     """
     import io
     import tarfile
 
-    print("\nPackaging macOS self-extracting installer (AirSpeaker-v2-macOS-Installer.command)...", flush=True)
+    print("\nPackaging macOS self-extracting installer (AirSpeaker-v1-macOS-Installer.command)...", flush=True)
     tar_buffer = io.BytesIO()
     with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
         for f in (ROOT / "src").glob("*.py"):
@@ -312,20 +313,22 @@ cd "$(dirname "$0")"
 
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "=========================================================="
-    echo "  Air Speaker v2.1 Studio — Uninstalling for macOS..."
+    echo "  Air Speaker v1 Studio — Uninstalling for macOS..."
     echo "=========================================================="
     pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
-    rm -rf "$HOME/Applications/Air Speaker v2.app" \
+    rm -rf "$HOME/Applications/Air Speaker v1.app" \
+           "/Applications/Air Speaker v1.app" \
+           "$HOME/Applications/Air Speaker v2.app" \
            "/Applications/Air Speaker v2.app" \
            "$HOME/Library/Application Support/AirSpeaker" \
            "$HOME/.local/bin/airspeaker"
     sudo rm -f /usr/local/bin/airspeaker 2>/dev/null || true
-    echo "Air Speaker v2.1 Studio has been successfully uninstalled."
+    echo "Air Speaker v1 Studio has been successfully uninstalled."
     exit 0
 fi
 
 echo "=========================================================="
-echo " Air Speaker v2.1 Studio — macOS One-Click Installer"
+echo " Air Speaker v1 Studio — macOS One-Click Installer"
 echo "=========================================================="
 
 # 1. Check for Homebrew
@@ -343,7 +346,7 @@ if command -v brew >/dev/null 2>&1; then
 fi
 
 INSTALL_DIR="$HOME/Library/Application Support/AirSpeaker/app"
-APP_DIR="$HOME/Applications/Air Speaker v2.app"
+APP_DIR="$HOME/Applications/Air Speaker v1.app"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$HOME/Applications" "$HOME/Library/Application Support/AirSpeaker"
 
@@ -375,13 +378,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
     <key>CFBundleIconFile</key>
     <string>app_icon.png</string>
     <key>CFBundleIdentifier</key>
-    <string>com.hasan.airspeaker.v2</string>
+    <string>com.hasan.airspeaker</string>
     <key>CFBundleName</key>
-    <string>Air Speaker v2</string>
+    <string>Air Speaker v1</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1</string>
+    <string>1.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
@@ -420,17 +423,17 @@ ln -sf "$APP_DIR/Contents/MacOS/airspeaker" "$BIN_DIR/airspeaker"
 sudo ln -sf "$APP_DIR/Contents/MacOS/airspeaker" /usr/local/bin/airspeaker 2>/dev/null || true
 
 echo "=========================================================="
-echo " SUCCESS! Air Speaker v2.1 Studio installed for macOS!"
+echo " SUCCESS! Air Speaker v1 Studio installed for macOS!"
 echo " Location: $APP_DIR"
 echo " CLI Command: airspeaker"
-echo " Launching Air Speaker v2 now..."
+echo " Launching Air Speaker v1 now..."
 echo "=========================================================="
 open -a "$APP_DIR"
 exit 0
 __ARCHIVE_BELOW__
 """.replace("\r\n", "\n").encode("utf-8")
 
-    installer_path = ROOT.parent / "AirSpeaker-v2-macOS-Installer.command"
+    installer_path = ROOT.parent / "AirSpeaker-v1-macOS-Installer.command"
     with open(installer_path, "wb") as f:
         f.write(header_script)
         f.write(tar_buffer.getvalue())

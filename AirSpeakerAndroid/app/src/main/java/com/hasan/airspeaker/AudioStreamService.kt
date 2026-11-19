@@ -560,7 +560,7 @@ class AudioStreamService : Service() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Air Speaker v2.1 Studio")
+            .setContentTitle("Air Speaker v1 Studio")
             .setContentText(modeText)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setContentIntent(pendingIntent)
