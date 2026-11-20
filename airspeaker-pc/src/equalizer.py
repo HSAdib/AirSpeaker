@@ -560,7 +560,7 @@ def open_equalizer_dialog(
 ) -> None:
     dlg = tk.Toplevel(parent)
     dlg.title(f"Studio 5-Band Equalizer — {title_label}")
-    dlg.configure(bg="#000000")
+    dlg.configure(bg="#101318")
     dlg.resizable(False, False)
 
     cfg = eq_manager.get_context(context_key)
@@ -587,14 +587,14 @@ def open_equalizer_dialog(
         if on_updated:
             on_updated()
 
-    top = tk.Frame(dlg, bg="#000000", padx=12, pady=8)
+    top = tk.Frame(dlg, bg="#1B2029", padx=14, pady=10)
     top.pack(fill="x")
-    tk.Label(top, text=f"🎛️ {title_label.upper()}", bg="#000000", fg="#00FF00", font=font_bold).pack(side="left")
+    tk.Label(top, text=f"🎛️ {title_label}", bg="#1B2029", fg="#7BDCA8", font=font_bold).pack(side="left")
 
     chk_text = "Enable Equalizer (Active)" if context_key != "universal" else "Enable Universal Device Equalizer"
     tk.Checkbutton(
         top, text=chk_text, variable=enabled_var,
-        bg="#000000", fg="#FFFFFF", selectcolor="#222222",
+        bg="#101318", fg="#E3E6EE", selectcolor="#222222",
         activebackground="#000000", activeforeground="#00FF00",
         font=font_bold, command=_push_changes
     ).pack(side="right")
@@ -605,21 +605,21 @@ def open_equalizer_dialog(
                 enabled_var.set(True)
             _push_changes()
 
-        u_frame = tk.LabelFrame(dlg, text=" Universal Equalizer Target Routing ", bg="#000000", fg="#00EEEE", font=font_bold, padx=8, pady=6)
+        u_frame = tk.LabelFrame(dlg, text=" Universal Equalizer Target Routing ", bg="#101318", fg="#A8C7FA", font=font_bold, padx=8, pady=6)
         u_frame.pack(fill="x", padx=12, pady=(0, 6))
         tk.Checkbutton(
             u_frame, text="Apply to Hosting & Serving (SERVE + PARTY HOST Outbound TX)",
-            variable=apply_tx_var, bg="#000000", fg="#FFFFFF", selectcolor="#222222",
+            variable=apply_tx_var, bg="#101318", fg="#E3E6EE", selectcolor="#222222",
             font=font_mono, command=_on_univ_route_toggled
         ).pack(anchor="w")
         tk.Checkbutton(
             u_frame, text="Apply to Playing & Joining (PLAY + PARTY JOIN Inbound RX)",
-            variable=apply_rx_var, bg="#000000", fg="#FFFFFF", selectcolor="#222222",
+            variable=apply_rx_var, bg="#101318", fg="#E3E6EE", selectcolor="#222222",
             font=font_mono, command=_on_univ_route_toggled
         ).pack(anchor="w")
 
     # Preset Bar
-    p_frame = tk.LabelFrame(dlg, text=" Equalizer Presets (Built-in & Custom Saved) ", bg="#000000", fg="#FFFFFF", font=font_bold, padx=8, pady=6)
+    p_frame = tk.LabelFrame(dlg, text=" Equalizer Presets (Built-in & Custom Saved) ", bg="#101318", fg="#E3E6EE", font=font_bold, padx=8, pady=6)
     p_frame.pack(fill="x", padx=12, pady=4)
 
     preset_combo = ttk.Combobox(p_frame, textvariable=preset_var, state="readonly", width=22, font=font_mono)
@@ -687,10 +687,10 @@ def open_equalizer_dialog(
     ttk.Button(p_frame, text="↺ Reset Flat", command=_reset_flat).pack(side="left", padx=2)
 
     # 5 Vertical Sliders
-    b_frame = tk.LabelFrame(dlg, text=" 5-Band Frequency Gains (-12 dB to +12 dB) ", bg="#000000", fg="#FFFFFF", font=font_bold, padx=10, pady=8)
+    b_frame = tk.LabelFrame(dlg, text=" 5-Band Frequency Gains (-12 dB to +12 dB) ", bg="#101318", fg="#E3E6EE", font=font_bold, padx=10, pady=8)
     b_frame.pack(fill="x", padx=12, pady=6)
 
-    sliders_row = tk.Frame(b_frame, bg="#000000")
+    sliders_row = tk.Frame(b_frame, bg="#101318")
     sliders_row.pack(fill="x")
 
     def _make_slider_cb(idx: int):
@@ -703,18 +703,18 @@ def open_equalizer_dialog(
         return _cb
 
     for i, lbl_txt in enumerate(BAND_LABELS):
-        col = tk.Frame(sliders_row, bg="#000000", padx=10)
+        col = tk.Frame(sliders_row, bg="#101318", padx=10)
         col.pack(side="left", expand=True)
-        tk.Label(col, text=lbl_txt, bg="#000000", fg="#38B6FF", font=font_bold).pack(pady=(0, 4))
+        tk.Label(col, text=lbl_txt, bg="#101318", fg="#A8C7FA", font=font_bold).pack(pady=(0, 4))
         sc = tk.Scale(
             col, from_=12.0, to=-12.0, resolution=0.5, orient="vertical",
             variable=band_vars[i], showvalue=False,
-            bg="#000000", fg="#00FF00", troughcolor="#222222",
+            bg="#101318", fg="#7BDCA8", troughcolor="#262D39",
             highlightthickness=0, bd=0, length=130,
             command=_make_slider_cb(i)
         )
         sc.pack()
-        v_lbl = tk.Label(col, text=f"{band_vars[i].get():+.1f} dB", bg="#000000", fg="#00FF00", font=font_mono, width=8)
+        v_lbl = tk.Label(col, text=f"{band_vars[i].get():+.1f} dB", bg="#101318", fg="#7BDCA8", font=font_mono, width=8)
         v_lbl.pack(pady=(4, 0))
         val_labels.append(v_lbl)
 

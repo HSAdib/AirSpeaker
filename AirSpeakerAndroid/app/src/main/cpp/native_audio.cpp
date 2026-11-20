@@ -17,15 +17,16 @@ NativeAudioEngine::~NativeAudioEngine() {
     stop();
 }
 
-bool NativeAudioEngine::start(int audio_port) {
+bool NativeAudioEngine::start(int audio_port, bool useExternalOutput) {
     std::lock_guard<std::mutex> lock(mStartStopMutex);
     mShuttingDown.store(false, std::memory_order_release);
     mReopenPending.store(false, std::memory_order_release);
+    mReopenAgain.store(false, std::memory_order_release);
     if (mIsRunning.load(std::memory_order_acquire)) return true;
 
     mAudioPort = audio_port;
+    mUseExternalOutput.store(useExternalOutput, std::memory_order_release);
 
-    // Reset instrumentation metrics
     mTotalCallbackCount.store(0, std::memory_order_relaxed);
     mTotalCallbackMicros.store(0, std::memory_order_relaxed);
     mMaxCallbackMicros.store(0, std::memory_order_relaxed);
@@ -35,7 +36,6 @@ bool NativeAudioEngine::start(int audio_port) {
     mAudioEqSeq = 0;
     mAudioEqEnabled = false;
 
-    // 1. Create UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
         LOGE("Failed to create UDP socket");
@@ -51,7 +51,7 @@ bool NativeAudioEngine::start(int audio_port) {
 
     struct timeval tv{};
     tv.tv_sec = 0;
-    tv.tv_usec = 200000; // 200ms timeout for clean shutdown
+    tv.tv_usec = 200000;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in servaddr{};
@@ -67,20 +67,22 @@ bool NativeAudioEngine::start(int audio_port) {
     }
     mSocketFd.store(sockfd, std::memory_order_release);
 
-    // 2. Open Oboe audio output stream
-    if (!openOboeStream()) {
-        LOGE("Failed to open Oboe stream");
-        cleanupAfterFailedStart();
-        return false;
+    if (!useExternalOutput) {
+        if (!openOboeStream()) {
+            LOGE("Failed to open Oboe stream");
+            cleanupAfterFailedStart();
+            return false;
+        }
+    } else {
+        mStreamSampleRate.store(48000, std::memory_order_relaxed);
+        mJitterBuffer.onRouteChanged(mBluetoothRouteActive.load(std::memory_order_acquire), 480);
+        LOGI("Starting NativeAudioEngine in external AudioTrack output mode (bt=%d)",
+             static_cast<int>(mBluetoothRouteActive.load(std::memory_order_acquire)));
     }
 
-    // 3. Start JitterBuffer decode worker thread
     mJitterBuffer.start();
-
-    // 4. Mark running TRUE BEFORE spawning receiver thread so socketReceiverLoop stays alive!
     mIsRunning.store(true, std::memory_order_release);
 
-    // 5. Start UDP receiver thread
     try {
         mReceiverThread = std::thread(&NativeAudioEngine::socketReceiverLoop, this);
     } catch (const std::exception& e) {
@@ -89,14 +91,15 @@ bool NativeAudioEngine::start(int audio_port) {
         return false;
     }
 
-    // 6. Request Oboe stream playback start
-    if (!startOboeStream()) {
-        LOGE("Failed to start Oboe stream playback");
-        cleanupAfterFailedStart();
-        return false;
+    if (!useExternalOutput) {
+        if (!startOboeStream()) {
+            LOGE("Failed to start Oboe stream playback");
+            cleanupAfterFailedStart();
+            return false;
+        }
     }
 
-    LOGI("NativeAudioEngine started successfully on port %d", mAudioPort);
+    LOGI("NativeAudioEngine started on port %d (externalAudioTrack=%d)", mAudioPort, static_cast<int>(useExternalOutput));
     return true;
 }
 
@@ -268,6 +271,9 @@ void NativeAudioEngine::scheduleStreamReopen() {
     std::thread oldReopenThread;
     {
         std::lock_guard<std::mutex> lock(mReopenMutex);
+        if (mUseExternalOutput.load(std::memory_order_acquire)) {
+            return;
+        }
         if (!mIsRunning.load(std::memory_order_acquire) ||
             mShuttingDown.load(std::memory_order_acquire)) {
             return;
@@ -288,7 +294,8 @@ void NativeAudioEngine::scheduleStreamReopen() {
     }
 
     std::lock_guard<std::mutex> lock(mReopenMutex);
-    if (!mIsRunning.load(std::memory_order_acquire) ||
+    if (mUseExternalOutput.load(std::memory_order_acquire) ||
+        !mIsRunning.load(std::memory_order_acquire) ||
         mShuttingDown.load(std::memory_order_acquire)) {
         mReopenPending.store(false, std::memory_order_release);
         return;
@@ -297,46 +304,43 @@ void NativeAudioEngine::scheduleStreamReopen() {
     mReopenThread = std::thread([this]() {
         LOGI("Oboe stream reopen worker started");
         do {
+            if (mUseExternalOutput.load(std::memory_order_acquire)) break;
             mReopenAgain.store(false, std::memory_order_release);
             stopAndCloseOboeStream();
 
             std::memset(mEqZ1, 0, sizeof(mEqZ1));
             std::memset(mEqZ2, 0, sizeof(mEqZ2));
-            for (int retry = 0; retry < 5 && mIsRunning.load(std::memory_order_acquire) && !mShuttingDown.load(std::memory_order_acquire); ++retry) {
+            for (int retry = 0; retry < 5 && mIsRunning.load(std::memory_order_acquire) && !mShuttingDown.load(std::memory_order_acquire) && !mUseExternalOutput.load(std::memory_order_acquire); ++retry) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(120 * (1 << retry)));
-                if (!mIsRunning.load(std::memory_order_acquire) || mShuttingDown.load(std::memory_order_acquire)) break;
+                if (!mIsRunning.load(std::memory_order_acquire) || mShuttingDown.load(std::memory_order_acquire) || mUseExternalOutput.load(std::memory_order_acquire)) break;
 
                 if (openOboeStream() && startOboeStream()) {
                     LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
                     break;
                 }
             }
-        } while (mReopenAgain.load(std::memory_order_acquire) && mIsRunning.load(std::memory_order_acquire) && !mShuttingDown.load(std::memory_order_acquire));
+        } while (mReopenAgain.load(std::memory_order_acquire) && mIsRunning.load(std::memory_order_acquire) && !mShuttingDown.load(std::memory_order_acquire) && !mUseExternalOutput.load(std::memory_order_acquire));
 
         mReopenPending.store(false, std::memory_order_release);
     });
 }
 
 void NativeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result result) {
+    if (mUseExternalOutput.load(std::memory_order_acquire)) {
+        return;
+    }
     LOGW("onErrorAfterClose fired: %s. Scheduling reopen.", oboe::convertToText(result));
     if (mIsRunning.load(std::memory_order_relaxed)) {
         scheduleStreamReopen();
     }
 }
 
-oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
-    oboe::AudioStream* /*stream*/,
-    void* audioData,
-    int32_t numFrames) {
-
+void NativeAudioEngine::processOutputBlock(int16_t* output, int32_t numFrames) {
     auto start_time = std::chrono::steady_clock::now();
-    int16_t* output = static_cast<int16_t*>(audioData);
 
-    // Guaranteed real-time safe: ZERO mutexes, ZERO allocations, ZERO opus decodes.
     mJitterBuffer.observeCallbackFrames(numFrames);
     mJitterBuffer.readAudio(output, numFrames);
 
-    // Lock-free seqlock check for updated EQ coefficients (never blocks or tears)
     uint64_t seq1 = mEqSeq.load(std::memory_order_acquire);
     if ((seq1 & 1ULL) == 0 && seq1 != mAudioEqSeq) {
         EqBandCoeffs tempCoeffs[5];
@@ -416,7 +420,6 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
                 }
             }
 
-            // Flush denormals once per callback
             for (int b = 0; b < 5; ++b) {
                 for (int ch = 0; ch < 2; ++ch) {
                     if (std::abs(mEqZ1[b][ch]) < 1e-18) mEqZ1[b][ch] = 0.0;
@@ -447,10 +450,8 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
         }
     }
 
-    // Section 10: Callback performance instrumentation
     auto end_time = std::chrono::steady_clock::now();
     int64_t elapsed_micros = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-
     mTotalCallbackCount.fetch_add(1, std::memory_order_relaxed);
     mTotalCallbackMicros.fetch_add(elapsed_micros, std::memory_order_relaxed);
 
@@ -458,15 +459,75 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
     while (elapsed_micros > current_max &&
            !mMaxCallbackMicros.compare_exchange_weak(current_max, elapsed_micros, std::memory_order_relaxed)) {}
 
-    // Diagnostic deadline calculation: audio duration = (numFrames * 1,000,000) / sampleRate
     int64_t sr = std::max<int64_t>(8000, mStreamSampleRate.load(std::memory_order_relaxed));
     int64_t audio_duration_micros = (static_cast<int64_t>(numFrames) * 1000000LL) / sr;
-    int64_t deadline_threshold_micros = audio_duration_micros / 4; // 25% of audio duration
+    int64_t deadline_threshold_micros = audio_duration_micros / 4;
     if (elapsed_micros > deadline_threshold_micros) {
         mDeadlineMisses.fetch_add(1, std::memory_order_relaxed);
     }
+}
 
+oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
+    oboe::AudioStream* /*stream*/,
+    void* audioData,
+    int32_t numFrames) {
+    processOutputBlock(static_cast<int16_t*>(audioData), numFrames);
     return oboe::DataCallbackResult::Continue;
+}
+
+int32_t NativeAudioEngine::renderExternalAudio(int16_t* output, int32_t numFrames) {
+    if (!output || numFrames <= 0) return 0;
+    if (!mIsRunning.load(std::memory_order_acquire) || !mUseExternalOutput.load(std::memory_order_acquire)) {
+        std::memset(output, 0, static_cast<size_t>(numFrames) * 2 * sizeof(int16_t));
+        return 0;
+    }
+    processOutputBlock(output, numFrames);
+    return numFrames;
+}
+
+void NativeAudioEngine::setUseExternalOutput(bool useExternal) {
+    bool prev = mUseExternalOutput.exchange(useExternal, std::memory_order_acq_rel);
+    if (prev == useExternal) return;
+
+    if (!mIsRunning.load(std::memory_order_acquire)) return;
+
+    if (useExternal) {
+        mReopenAgain.store(false, std::memory_order_release);
+        std::thread reopenToJoin;
+        {
+            std::lock_guard<std::mutex> reopenLock(mReopenMutex);
+            if (mReopenThread.joinable() && mReopenThread.get_id() != std::this_thread::get_id()) {
+                reopenToJoin = std::move(mReopenThread);
+            }
+        }
+        if (reopenToJoin.joinable()) {
+            reopenToJoin.join();
+        }
+        mReopenPending.store(false, std::memory_order_release);
+        stopAndCloseOboeStream();
+        std::memset(mEqZ1, 0, sizeof(mEqZ1));
+        std::memset(mEqZ2, 0, sizeof(mEqZ2));
+        mStreamSampleRate.store(48000, std::memory_order_relaxed);
+        mJitterBuffer.onRouteChanged(mBluetoothRouteActive.load(std::memory_order_acquire), 480);
+        LOGI("Switched live output backend -> External Android AudioTrack");
+    } else {
+        std::memset(mEqZ1, 0, sizeof(mEqZ1));
+        std::memset(mEqZ2, 0, sizeof(mEqZ2));
+        LOGI("Switched live output backend -> Native Oboe");
+        scheduleStreamReopen();
+    }
+}
+
+bool NativeAudioEngine::isUsingExternalOutput() const {
+    return mUseExternalOutput.load(std::memory_order_acquire);
+}
+
+int32_t NativeAudioEngine::getOutputBackendType() const {
+    if (!mIsRunning.load(std::memory_order_acquire)) return 0;
+    if (mUseExternalOutput.load(std::memory_order_acquire)) return 3;
+    std::lock_guard<std::mutex> lock(mStreamMutex);
+    if (!mAudioStream) return 0;
+    return (mAudioStream->getAudioApi() == oboe::AudioApi::OpenSLES) ? 2 : 1;
 }
 
 void NativeAudioEngine::socketReceiverLoop() {
@@ -576,6 +637,12 @@ bool NativeAudioEngine::isEnableAudioEffects() const {
 void NativeAudioEngine::setBluetoothRouteActive(bool isBluetooth, bool forceReopen) {
     bool prev = mBluetoothRouteActive.exchange(isBluetooth, std::memory_order_acq_rel);
     mJitterBuffer.setBluetoothMode(isBluetooth);
+    if (mUseExternalOutput.load(std::memory_order_acquire)) {
+        if (prev != isBluetooth || forceReopen) {
+            mJitterBuffer.onRouteChanged(isBluetooth, 480);
+        }
+        return;
+    }
     if ((prev != isBluetooth || forceReopen) && mIsRunning.load(std::memory_order_acquire)) {
         LOGI("Audio route changed (bluetooth=%d, force=%d) — reopening Oboe stream",
              static_cast<int>(isBluetooth), static_cast<int>(forceReopen));

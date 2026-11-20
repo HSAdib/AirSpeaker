@@ -1,0 +1,36 @@
+<resources>
+    <!-- Material 3 Dark Tonal Surfaces -->
+    <color name="m3_bg">#101318</color>
+    <color name="m3_surface_low">#171B22</color>
+    <color name="m3_surface_container">#1D222B</color>
+    <color name="m3_surface_high">#262D39</color>
+    <color name="m3_surface_highest">#313948</color>
+
+    <!-- Material 3 Primary / Secondary / Tertiary -->
+    <color name="m3_primary">#A8C7FA</color>
+    <color name="m3_on_primary">#062E6F</color>
+    <color name="m3_primary_container">#0842A0</color>
+    <color name="m3_on_primary_container">#D3E3FD</color>
+
+    <color name="m3_secondary">#BEC6DC</color>
+    <color name="m3_secondary_container">#2B3445</color>
+    <color name="m3_on_secondary_container">#DAE2F9</color>
+
+    <color name="m3_tertiary">#7BDCA8</color>
+    <color name="m3_on_tertiary">#003822</color>
+    <color name="m3_tertiary_container">#0D462F</color>
+    <color name="m3_on_tertiary_container">#A6F4C5</color>
+
+    <!-- Material 3 Error & Warning -->
+    <color name="m3_error">#FFB4AB</color>
+    <color name="m3_on_error">#690005</color>
+    <color name="m3_error_container">#93000A</color>
+    <color name="m3_on_error_container">#FFDAD6</color>
+    <color name="m3_warning">#FFB74D</color>
+
+    <!-- Material 3 Text & Outlines -->
+    <color name="m3_on_surface">#E3E6EE</color>
+    <color name="m3_on_surface_variant">#9BA3B4</color>
+    <color name="m3_outline">#444C5C</color>
+    <color name="m3_outline_variant">#2C3340</color>
+</resources>

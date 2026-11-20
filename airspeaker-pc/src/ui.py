@@ -91,20 +91,32 @@ except Exception:
 
 
 # ---------------------------------------------------------------------------
-# Color / font constants
+# Color / font constants (Material 3 Dark Tonal)
 # ---------------------------------------------------------------------------
-BG = "#000000"
-PANEL_BG = "#0D0D0D"
-FG = "#FFFFFF"
-FG_MUTED = "#888888"
-ACCENT = "#00FF00"
-WARN = "#FF8800"
-ERROR_COLOR = "#FF4444"
+BG = "#101318"              # M3 Surface / Background
+PANEL_BG = "#1B2029"        # M3 Surface Container
+CARD_BG = "#1E242E"         # M3 Elevated Tonal Card
+INPUT_BG = "#262D39"        # M3 Surface Container High
+BORDER_COL = "#2E3646"      # M3 Outline Variant
+FG = "#E3E6EE"              # M3 On Surface
+FG_MUTED = "#9BA3B4"        # M3 On Surface Variant
+PRIMARY = "#A8C7FA"         # M3 Primary
+PRIMARY_BG = "#0842A0"      # M3 Primary Container
+PRIMARY_FG = "#D3E3FD"      # M3 On Primary Container
+ACCENT = "#7BDCA8"          # M3 Tertiary (Active / Connected)
+ACCENT_BG = "#0D462F"       # M3 Tertiary Container
+ACCENT_FG = "#A6F4C5"       # M3 On Tertiary Container
+WARN = "#FFB74D"            # M3 Warning
+ERROR_COLOR = "#FFDAD6"     # M3 On Error Container
+ERROR_BG = "#93000A"        # M3 Error Container
+
+_UI_FAMILY = "SF Pro Text" if sys.platform == "darwin" else ("Ubuntu" if sys.platform.startswith("linux") else "Segoe UI")
 _MONO_FAMILY = "Menlo" if sys.platform == "darwin" else ("DejaVu Sans Mono" if sys.platform.startswith("linux") else "Consolas")
-FONT_MONO = (_MONO_FAMILY, 10)
-FONT_MONO_BOLD = (_MONO_FAMILY, 10, "bold")
-FONT_MONO_LG = (_MONO_FAMILY, 12, "bold")
-FONT_MONO_SM = (_MONO_FAMILY, 9)
+FONT_MONO = (_UI_FAMILY, 10)
+FONT_MONO_BOLD = (_UI_FAMILY, 10, "bold")
+FONT_MONO_LG = (_UI_FAMILY, 12, "bold")
+FONT_MONO_SM = (_UI_FAMILY, 9)
+FONT_CODE = (_MONO_FAMILY, 9)
 
 
 def _make_tray_image(size: int = 64) -> Optional["Image.Image"]:
@@ -163,13 +175,13 @@ class StudioButton(ttk.Button):
     def __init__(self, master=None, **kwargs):
         self._style_name = f"StudioBtn_{id(self)}.TButton"
         self._style = ttk.Style()
-        self._bg = kwargs.pop("bg", kwargs.pop("background", "#1A1A1A"))
+        self._bg = kwargs.pop("bg", kwargs.pop("background", "#262D39"))
         self._fg = kwargs.pop("fg", kwargs.pop("foreground", FG))
-        self._abg = kwargs.pop("activebackground", "#2A2A2A")
-        self._afg = kwargs.pop("activeforeground", self._fg)
+        self._abg = kwargs.pop("activebackground", "#323B4B")
+        self._afg = kwargs.pop("activeforeground", "#FFFFFF")
         self._font = kwargs.pop("font", FONT_MONO_BOLD)
-        padx = kwargs.pop("padx", 8)
-        pady = kwargs.pop("pady", 4)
+        padx = kwargs.pop("padx", 12)
+        pady = kwargs.pop("pady", 6)
         kwargs.pop("relief", None)
         kwargs.pop("bd", None)
         kwargs.pop("borderwidth", None)
@@ -185,8 +197,8 @@ class StudioButton(ttk.Button):
             foreground=self._fg,
             font=self._font,
             padding=self._padding,
-            borderwidth=1,
-            relief="solid",
+            borderwidth=0,
+            relief="flat",
             focusthickness=0,
         )
         self._style.map(
@@ -371,8 +383,8 @@ class AirSpeakerApp:
         btn = StudioButton(
             parent,
             text="≡ EQ",
-            bg="#18222C",
-            fg="#00EEEE",
+            bg=CARD_BG,
+            fg=PRIMARY,
             activebackground="#223344",
             activeforeground="#00FF00",
             font=FONT_MONO_BOLD,
@@ -396,9 +408,9 @@ class AirSpeakerApp:
         c = self._eq_manager.get_context(ctx_key)
         on = bool(c.get("enabled", False))
         if on:
-            btn.config(text="≡ EQ ON", bg="#002B00", fg=ACCENT, activebackground="#004400", activeforeground="#FFFFFF")
+            btn.config(text="≡ EQ ON", bg=ACCENT_BG, fg=ACCENT, activebackground="#004400", activeforeground="#FFFFFF")
         else:
-            btn.config(text="≡ EQ", bg="#18222C", fg="#00EEEE", activebackground="#223344", activeforeground=ACCENT)
+            btn.config(text="≡ EQ", bg=CARD_BG, fg=PRIMARY, activebackground="#223344", activeforeground=ACCENT)
 
     def _on_eq_changed(self) -> None:
         u_ctx = self._eq_manager.get_context("universal")
@@ -422,7 +434,7 @@ class AirSpeakerApp:
         self._save_config()
 
     def _setup_window(self) -> None:
-        self.root.title("Air Speaker v1 Studio")
+        self.root.title("Air Speaker — Material 3 Studio")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
         self.root.minsize(560, 650)
@@ -439,26 +451,27 @@ class AirSpeakerApp:
             logger.debug("Window icon unavailable: %s", exc)
 
         # Ensure Combobox dropdown listboxes use dark theme
-        self.root.option_add("*TCombobox*Listbox*Background", "#141414")
+        self.root.option_add("*TCombobox*Listbox*Background", PANEL_BG)
         self.root.option_add("*TCombobox*Listbox*Foreground", FG)
-        self.root.option_add("*TCombobox*Listbox*selectBackground", "#2A4B5C")
-        self.root.option_add("*TCombobox*Listbox*selectForeground", ACCENT)
+        self.root.option_add("*TCombobox*Listbox*selectBackground", PRIMARY_BG)
+        self.root.option_add("*TCombobox*Listbox*selectForeground", PRIMARY_FG)
 
         style = ttk.Style()
         style.theme_use("default")
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background="#1A1A1A", foreground=FG_MUTED,
-                        font=FONT_MONO_BOLD, padding=[14, 5])
+        style.configure("TNotebook.Tab", background=PANEL_BG, foreground=FG_MUTED,
+                        font=FONT_MONO_BOLD, padding=[16, 7])
         style.map("TNotebook.Tab",
-                  background=[("selected", "#2A2A2A"), ("active", "#222222")],
-                  foreground=[("selected", ACCENT), ("active", FG)])
+                  background=[("selected", PRIMARY_BG), ("active", "#262D39")],
+                  foreground=[("selected", PRIMARY_FG), ("active", FG)])
         style.configure("TFrame", background=BG)
         style.configure("TLabel", background=BG, foreground=FG, font=FONT_MONO)
-        style.configure("TButton", background="#1A1A1A", foreground=FG,
-                        font=FONT_MONO_SM, borderwidth=1, focusthickness=0, padding=[8, 4])
+        style.configure("TButton", background="#262D39", foreground=FG,
+                        font=FONT_MONO_SM, borderwidth=0, relief="flat", focusthickness=0, padding=[12, 6])
         style.map("TButton",
-                  background=[("active", "#2A2A2A"), ("pressed", "#333333")],
-                  foreground=[("active", ACCENT)])
+                  background=[("active", "#323B4B"), ("pressed", "#3E495C")],
+                  foreground=[("active", PRIMARY)])
+        style.configure("TCombobox", fieldbackground=INPUT_BG, background="#262D39", foreground=FG, arrowcolor=PRIMARY)
         style.configure("Green.TButton", background="#002B00", foreground="#00FF00",
                         font=FONT_MONO_BOLD, borderwidth=1, relief="solid", padding=[8, 4])
         style.map("Green.TButton",
@@ -469,7 +482,7 @@ class AirSpeakerApp:
         style.map("Red.TButton",
                   background=[("active", "#550000"), ("pressed", "#220000")],
                   foreground=[("active", "#FFFFFF")])
-        style.configure("Cyan.TButton", background="#001822", foreground="#00EEEE",
+        style.configure("Cyan.TButton", background="#001822", foreground=PRIMARY,
                         font=FONT_MONO_BOLD, borderwidth=1, relief="solid", padding=[8, 4])
         style.map("Cyan.TButton",
                   background=[("active", "#003344"), ("pressed", "#001018")],
@@ -479,13 +492,13 @@ class AirSpeakerApp:
         style.map("Dark.TButton",
                   background=[("active", "#333333"), ("pressed", "#111111")],
                   foreground=[("active", ACCENT)])
-        style.configure("TCombobox", fieldbackground="#141414", background="#222222",
+        style.configure("TCombobox", fieldbackground=CARD_BG, background="#222222",
                         foreground=FG, arrowcolor=ACCENT, font=FONT_MONO_SM)
         style.map("TCombobox",
-                  fieldbackground=[("readonly", "#141414")],
-                  selectbackground=[("readonly", "#141414")],
+                  fieldbackground=[("readonly", CARD_BG)],
+                  selectbackground=[("readonly", CARD_BG)],
                   selectforeground=[("readonly", FG)])
-        style.configure("TEntry", fieldbackground="#141414", foreground=FG, font=FONT_MONO)
+        style.configure("TEntry", fieldbackground=CARD_BG, foreground=FG, font=FONT_MONO)
         style.configure("TScale", background=BG, troughcolor="#222222")
 
     def _build_tabs(self) -> None:
@@ -512,7 +525,7 @@ class AirSpeakerApp:
         # Update notification banner (packed dynamically right under title banner when update detected)
         self.update_bar_frame = tk.Frame(self.root, bg="#0B1A14", bd=1, relief="solid")
         self.update_bar_label = tk.Label(
-            self.update_bar_frame, text="", bg="#0B1A14", fg="#00EEEE", font=FONT_MONO_BOLD
+            self.update_bar_frame, text="", bg="#0B1A14", fg=PRIMARY, font=FONT_MONO_BOLD
         )
         self.update_bar_label.pack(side="left", padx=8, pady=3)
         self.update_now_btn = StudioButton(
@@ -521,7 +534,7 @@ class AirSpeakerApp:
         )
         self.update_now_btn.pack(side="left", padx=4, pady=2)
         self.skip_update_btn = StudioButton(
-            self.update_bar_frame, text="Skip", bg="#1A1A1A", fg=FG_MUTED,
+            self.update_bar_frame, text="Skip", bg=INPUT_BG, fg=FG_MUTED,
             font=FONT_MONO_SM, padx=6, pady=2, command=self._on_click_skip_update
         )
         self.skip_update_btn.pack(side="left", padx=4, pady=2)
@@ -561,7 +574,7 @@ class AirSpeakerApp:
 
         # 1. Receiver Device & Status Frame
         rx_card = tk.LabelFrame(
-            f, text=" Audio Receiver (UDP Port 5004) ", bg="#12161A", fg="#38B6FF",
+            f, text=" Audio Receiver (UDP Port 5004) ", bg="#12161A", fg=PRIMARY,
             font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4
         )
         rx_card.pack(fill="x", padx=8, pady=(4, 3))
@@ -577,7 +590,7 @@ class AirSpeakerApp:
         # 2. Main Action Button: Play Receiver (5004)
         self.play_rx_btn = StudioButton(
             f, text="▶  START AUDIO RECEIVER (PORT 5004)",
-            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
+            bg=ACCENT_BG, fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
             relief="raised", bd=2, padx=8, pady=5, cursor="hand2",
             command=self._toggle_audio_receiver,
@@ -612,7 +625,7 @@ class AirSpeakerApp:
         dg_frame = tk.LabelFrame(f, text=" Live Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
         dg_frame.pack(fill="x", **pad)
 
-        tk.Label(dg_frame, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
+        tk.Label(dg_frame, textvariable=self.delay_header_var, bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
         self._delay_canvas = tk.Canvas(dg_frame, width=480, height=65, bg="#080808", highlightthickness=1, highlightbackground="#333333")
         self._delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 3))
 
@@ -638,7 +651,7 @@ class AirSpeakerApp:
             ("LATE PACKETS:", self.play_late_var),
         ]
         for row_idx, (lbl, var) in enumerate(rows):
-            r_frame = tk.Frame(tf, bg="#0A0A0A" if row_idx % 2 == 0 else "#0F0F0F")
+            r_frame = tk.Frame(tf, bg=PANEL_BG if row_idx % 2 == 0 else "#0F0F0F")
             r_frame.pack(fill="x", padx=2, pady=1)
             tk.Label(r_frame, text=lbl, bg=r_frame["bg"], fg=FG_MUTED, font=FONT_MONO_SM, width=20, anchor="w").pack(side="left", padx=4)
             tk.Label(r_frame, textvariable=var, bg=r_frame["bg"], fg=ACCENT if row_idx < 4 else FG, font=FONT_MONO_SM, anchor="e").pack(side="right", padx=6)
@@ -653,7 +666,7 @@ class AirSpeakerApp:
 
         # 1. Connections Card (Phone Model, IP, Volume Bar & Mute Icon)
         conn_card = tk.LabelFrame(
-            f, text=" Connections ", bg="#12161A", fg="#38B6FF",
+            f, text=" Connections ", bg="#12161A", fg=PRIMARY,
             font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4
         )
         conn_card.pack(fill="x", padx=8, pady=(4, 3))
@@ -661,7 +674,7 @@ class AirSpeakerApp:
         conn_top = tk.Frame(conn_card, bg="#12161A")
         conn_top.pack(fill="x", padx=6, pady=(2, 2))
 
-        tk.Label(conn_top, text="📱", bg="#12161A", fg="#38B6FF", font=(_MONO_FAMILY, 16)).pack(side="left", padx=(0, 8))
+        tk.Label(conn_top, text="📱", bg="#12161A", fg=PRIMARY, font=(_MONO_FAMILY, 16)).pack(side="left", padx=(0, 8))
         conn_info = tk.Frame(conn_top, bg="#12161A")
         conn_info.pack(side="left", fill="x", expand=True)
 
@@ -679,15 +692,15 @@ class AirSpeakerApp:
         self.conn_vol_slider = tk.Scale(
             vol_bar_row, from_=0.0, to=2.0, resolution=0.02, orient="horizontal",
             variable=self.volume_gain_var, showvalue=False,
-            bg="#12161A", fg="#38B6FF", troughcolor="#223344",
-            activebackground="#38B6FF", highlightthickness=0, bd=0,
+            bg="#12161A", fg=PRIMARY, troughcolor="#223344",
+            activebackground=PRIMARY, highlightthickness=0, bd=0,
             command=self._on_gain_slider_changed
         )
         self.conn_vol_slider.pack(side="left", fill="x", expand=True, padx=(2, 8))
 
         self.conn_vol_pct_label = tk.Label(
             vol_bar_row, text=f"{int(self.volume_gain_var.get() * 100)}%",
-            bg="#12161A", fg="#38B6FF", font=FONT_MONO_BOLD, width=5, anchor="e"
+            bg="#12161A", fg=PRIMARY, font=FONT_MONO_BOLD, width=5, anchor="e"
         )
         self.conn_vol_pct_label.pack(side="left", padx=(0, 6))
 
@@ -721,12 +734,12 @@ class AirSpeakerApp:
         ip_row = tk.Frame(nf, bg=BG)
         ip_row.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
         self.ip_var = tk.StringVar(value=self.cfg.get("phone_ip", ""))
-        self.ip_entry = tk.Entry(ip_row, textvariable=self.ip_var, width=16, bg="#141414", fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM)
+        self.ip_entry = tk.Entry(ip_row, textvariable=self.ip_var, width=16, bg=CARD_BG, fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM)
         self.ip_entry.pack(side="left")
         self.ip_entry.bind("<Return>", self._on_manual_ip_applied)
         tk.Label(ip_row, text=" : ", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
         self.ip_port_var = tk.StringVar(value=str(self.cfg.get("phone_port", AUDIO_PORT)))
-        self.port_entry = tk.Entry(ip_row, textvariable=self.ip_port_var, width=6, bg="#141414", fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM)
+        self.port_entry = tk.Entry(ip_row, textvariable=self.ip_port_var, width=6, bg=CARD_BG, fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM)
         self.port_entry.pack(side="left")
         self.port_entry.bind("<Return>", self._on_manual_ip_applied)
         ttk.Button(ip_row, text="Apply IP", command=self._on_manual_ip_applied).pack(side="left", padx=(6, 0))
@@ -736,7 +749,7 @@ class AirSpeakerApp:
         btn_container.pack(fill="x", padx=8, pady=4)
         self.start_btn = StudioButton(
             btn_container, text="▶  START SERVING AUDIO (PC → PHONE :5004)",
-            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
+            bg=ACCENT_BG, fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
             relief="raised", bd=2, padx=8, pady=6, cursor="hand2",
             command=self._toggle_streaming,
@@ -779,7 +792,7 @@ class AirSpeakerApp:
         self.bitrate_combo_tab1.bind("<<ComboboxSelected>>", lambda e: self._on_bitrate_changed())
         tk.Label(cb_row, text="kbps", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
 
-        tk.Label(qf_tab1, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
+        tk.Label(qf_tab1, textvariable=self.expected_delay_var, bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
 
         self._build_target_buffer_card(f, " Target Buffer (Synced to Receiver) ").pack(fill="x", **pad)
 
@@ -798,7 +811,7 @@ class AirSpeakerApp:
         self._level_canvas.pack(side="left", fill="x", expand=True, padx=(6, 0))
         self._level_bar = self._level_canvas.create_rectangle(0, 0, 0, 12, fill=ACCENT, outline="")
 
-        sg = tk.Frame(status_frame, bg="#0A0A0A", bd=1, relief="solid")
+        sg = tk.Frame(status_frame, bg=PANEL_BG, bd=1, relief="solid")
         sg.pack(fill="x", padx=4, pady=3)
         sg.columnconfigure(0, weight=1, uniform="stat")
         sg.columnconfigure(1, weight=1, uniform="stat")
@@ -809,13 +822,13 @@ class AirSpeakerApp:
         self.phone_ip_var = tk.StringVar(value="Destination: --")
 
         for i, var in enumerate([self.pps_var, self.phone_ip_var, self.latency_var, self.loss_var]):
-            tk.Label(sg, textvariable=var, bg="#0A0A0A", fg=FG, font=FONT_MONO_SM, anchor="w", padx=6, pady=2).grid(
+            tk.Label(sg, textvariable=var, bg=PANEL_BG, fg=FG, font=FONT_MONO_SM, anchor="w", padx=6, pady=2).grid(
                 row=i // 2, column=i % 2, sticky="ew"
             )
 
         dg_serve = tk.LabelFrame(status_frame, text=" Live Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=2)
         dg_serve.pack(fill="both", expand=True, padx=4, pady=(3, 2))
-        tk.Label(dg_serve, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
+        tk.Label(dg_serve, textvariable=self.delay_header_var, bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
         self._serve_delay_canvas = tk.Canvas(dg_serve, width=480, height=55, bg="#080808", highlightthickness=1, highlightbackground="#333333")
         self._serve_delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 2))
 
@@ -835,7 +848,7 @@ class AirSpeakerApp:
 
         chooser_card = tk.LabelFrame(
             self.party_chooser_frame, text=" 🎉 PARTY MODE — MULTI-DEVICE WIRELESS AUDIO ",
-            bg=BG, fg="#38B6FF", font=FONT_MONO_BOLD, bd=1, relief="solid", padx=16, pady=16
+            bg=BG, fg=PRIMARY, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=16, pady=16
         )
         chooser_card.pack(fill="both", expand=True, padx=16, pady=16)
 
@@ -848,7 +861,7 @@ class AirSpeakerApp:
         btn_choose_host = StudioButton(
             chooser_card,
             text="👑  HOST A PARTY\n(Generate Host IP & QR Code • Broadcast PC Sound to Multiple Phones)",
-            bg="#002B00", fg="#00FF00", font=FONT_MONO_BOLD,
+            bg=ACCENT_BG, fg=ACCENT_FG, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground="#00FF00",
             relief="raised", bd=2, padx=12, pady=16, cursor="hand2",
             command=self._enter_party_host_mode
@@ -858,8 +871,8 @@ class AirSpeakerApp:
         btn_choose_join = StudioButton(
             chooser_card,
             text="🎧  JOIN A PARTY\n(Scan for Hosts on Wi-Fi / Hotspot • Listen & Optionally Extend via Hotspot)",
-            bg="#001822", fg="#00EEEE", font=FONT_MONO_BOLD,
-            activebackground="#002D3F", activeforeground="#00EEEE",
+            bg="#001822", fg=PRIMARY, font=FONT_MONO_BOLD,
+            activebackground="#002D3F", activeforeground=PRIMARY,
             relief="raised", bd=2, padx=12, pady=16, cursor="hand2",
             command=self._enter_party_join_mode
         )
@@ -881,37 +894,37 @@ class AirSpeakerApp:
         host_top_bar = tk.Frame(self.party_host_frame, bg=BG)
         host_top_bar.pack(fill="x", padx=8, pady=(4, 2))
         ttk.Button(host_top_bar, text="← Back to Party Menu", command=self._back_to_party_chooser).pack(side="left")
-        tk.Label(host_top_bar, text="👑 Party Host Mode (Broadcasting to Multiple Devices)", bg=BG, fg="#00FF00", font=FONT_MONO_BOLD).pack(side="left", padx=8)
+        tk.Label(host_top_bar, text="👑 Party Host Mode (Broadcasting to Multiple Devices)", bg=BG, fg=ACCENT_FG, font=FONT_MONO_BOLD).pack(side="left", padx=8)
         self._build_eq_corner_button(host_top_bar, "party_host", "Party Host Equalizer").pack(side="right")
 
         # Host Banner & Host Info + Live QR Code
         banner = tk.LabelFrame(
             self.party_host_frame, text=" 👑 Host Controls & Live QR Code ",
-            bg="#101820", fg="#00EEEE", font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=6
+            bg=INPUT_BG, fg=PRIMARY, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=6
         )
         banner.pack(fill="x", **pad)
 
-        top_host_frame = tk.Frame(banner, bg="#101820")
+        top_host_frame = tk.Frame(banner, bg=INPUT_BG)
         top_host_frame.pack(fill="x", pady=2)
 
-        host_info_left = tk.Frame(top_host_frame, bg="#101820")
+        host_info_left = tk.Frame(top_host_frame, bg=INPUT_BG)
         host_info_left.pack(side="left", fill="both", expand=True)
 
         self.party_host_ip_label = tk.Label(
             host_info_left, text="HOST IP ADDRESS: Loading...",
-            bg="#101820", fg="#00FF00", font=FONT_MONO_BOLD, anchor="w"
+            bg=INPUT_BG, fg=ACCENT_FG, font=FONT_MONO_BOLD, anchor="w"
         )
         self.party_host_ip_label.pack(fill="x")
 
         tk.Label(
             host_info_left,
             text="Any phone on your Wi-Fi, PC Hotspot, or USB Tether can join\nthis party to hear PC sound in real-time sync with other phones!",
-            bg="#101820", fg=FG, font=FONT_MONO_SM, justify="left", anchor="w"
+            bg=INPUT_BG, fg=FG, font=FONT_MONO_SM, justify="left", anchor="w"
         ).pack(fill="x", pady=(2, 6))
 
         self.party_start_btn = StudioButton(
             host_info_left, text="👑  START PARTY BROADCAST (HOST)",
-            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
+            bg=ACCENT_BG, fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
             relief="raised", bd=2, padx=8, pady=5, cursor="hand2",
             command=self._toggle_party_broadcast,
@@ -919,11 +932,11 @@ class AirSpeakerApp:
         self.party_start_btn.pack(fill="x", pady=(2, 2))
 
         # QR Code frame on the right
-        qr_frame = tk.Frame(top_host_frame, bg="#101820", padx=6)
+        qr_frame = tk.Frame(top_host_frame, bg=INPUT_BG, padx=6)
         qr_frame.pack(side="right")
         self.party_qr_label = tk.Label(qr_frame, bg="#FFFFFF", width=120, height=120)
         self.party_qr_label.pack()
-        tk.Label(qr_frame, text="Scan with Phone\n(Click to copy link)", bg="#101820", fg=FG_MUTED, font=FONT_MONO_SM).pack(pady=(2, 0))
+        tk.Label(qr_frame, text="Scan with Phone\n(Click to copy link)", bg=INPUT_BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(pady=(2, 0))
 
         # Live Joined Party Devices List
         lf = tk.LabelFrame(
@@ -934,7 +947,7 @@ class AirSpeakerApp:
 
         tk.Label(
             lf, textvariable=self.party_status_var,
-            bg="#0D151A", fg="#38B6FF", font=FONT_MONO_BOLD, anchor="w", padx=6, pady=4
+            bg="#0D151A", fg=PRIMARY, font=FONT_MONO_BOLD, anchor="w", padx=6, pady=4
         ).pack(fill="x", pady=(0, 4))
 
         list_frame = tk.Frame(lf, bg=BG)
@@ -944,7 +957,7 @@ class AirSpeakerApp:
         scrollbar.pack(side="right", fill="y")
 
         self.party_listbox = tk.Listbox(
-            list_frame, bg="#0A0A0A", fg=ACCENT, selectbackground="#1E3A5F",
+            list_frame, bg=PANEL_BG, fg=ACCENT, selectbackground="#1E3A5F",
             selectforeground="#FFFFFF", font=FONT_MONO, height=5, bd=1, relief="solid",
             yscrollcommand=scrollbar.set
         )
@@ -970,7 +983,7 @@ class AirSpeakerApp:
         self.party_add_ip_var = tk.StringVar(value="")
         self.party_add_ip_entry = tk.Entry(
             add_row, textvariable=self.party_add_ip_var, width=18,
-            bg="#141414", fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
+            bg=CARD_BG, fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
         )
         self.party_add_ip_entry.pack(side="left", padx=(0, 6))
         self.party_add_ip_entry.bind("<Return>", self._on_add_party_device_manual)
@@ -979,7 +992,7 @@ class AirSpeakerApp:
         self.party_add_name_var = tk.StringVar(value="")
         tk.Entry(
             add_row, textvariable=self.party_add_name_var, width=14,
-            bg="#141414", fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
+            bg=CARD_BG, fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
         ).pack(side="left", padx=(0, 6))
 
         ttk.Button(add_row, text="+ Add to Party", command=self._on_add_party_device_manual).pack(side="left")
@@ -989,7 +1002,7 @@ class AirSpeakerApp:
         # Live Party Delay Graph for Host
         dg_phost = tk.LabelFrame(self.party_host_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
         dg_phost.pack(fill="x", **pad)
-        tk.Label(dg_phost, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
+        tk.Label(dg_phost, textvariable=self.delay_header_var, bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
         self._party_host_delay_canvas = tk.Canvas(dg_phost, width=480, height=55, bg="#080808", highlightthickness=1, highlightbackground="#333333")
         self._party_host_delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 2))
 
@@ -1015,13 +1028,13 @@ class AirSpeakerApp:
         join_top_bar = tk.Frame(self.party_join_frame, bg=BG)
         join_top_bar.pack(fill="x", padx=8, pady=(4, 2))
         ttk.Button(join_top_bar, text="← Back to Party Menu", command=self._back_to_party_chooser).pack(side="left")
-        tk.Label(join_top_bar, text="🎧 Party Joiner Mode (Listen to Host)", bg=BG, fg="#00EEEE", font=FONT_MONO_BOLD).pack(side="left", padx=8)
+        tk.Label(join_top_bar, text="🎧 Party Joiner Mode (Listen to Host)", bg=BG, fg=PRIMARY, font=FONT_MONO_BOLD).pack(side="left", padx=8)
         self._build_eq_corner_button(join_top_bar, "party_join", "Party Join Equalizer").pack(side="right")
 
         # Discovered Hosts Section
         jf_disc = tk.LabelFrame(
             self.party_join_frame, text=" 📡 Discovered Party Hosts on Network (Auto-Found on Wi-Fi / Hotspot) ",
-            bg=BG, fg="#00EEEE", font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=6
+            bg=BG, fg=PRIMARY, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=6
         )
         jf_disc.pack(fill="both", expand=True, **pad)
 
@@ -1037,7 +1050,7 @@ class AirSpeakerApp:
         disc_scrollbar.pack(side="right", fill="y")
 
         self.party_join_discovered_listbox = tk.Listbox(
-            disc_list_frame, bg="#0A0A0A", fg="#00EEEE", selectbackground="#1E3A5F",
+            disc_list_frame, bg=PANEL_BG, fg=PRIMARY, selectbackground="#1E3A5F",
             selectforeground="#FFFFFF", font=FONT_MONO, height=5, bd=1, relief="solid",
             yscrollcommand=disc_scrollbar.set
         )
@@ -1064,14 +1077,14 @@ class AirSpeakerApp:
         tk.Label(addr_row, text="Host IP:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left", padx=(0, 4))
         self.party_join_host_ip_entry = tk.Entry(
             addr_row, textvariable=self.party_join_host_ip_var, width=18,
-            bg="#141414", fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
+            bg=CARD_BG, fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
         )
         self.party_join_host_ip_entry.pack(side="left", padx=(0, 6))
 
         tk.Label(addr_row, text="Port:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left", padx=(0, 4))
         self.party_join_port_entry = tk.Entry(
             addr_row, textvariable=self.party_join_port_var, width=6,
-            bg="#141414", fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
+            bg=CARD_BG, fg=FG, insertbackground=FG, relief="solid", bd=1, font=FONT_MONO_SM
         )
         self.party_join_port_entry.pack(side="left", padx=(0, 6))
 
@@ -1080,7 +1093,7 @@ class AirSpeakerApp:
         # Join Action Button & Status
         self.party_join_btn = StudioButton(
             self.party_join_frame, text="🎧  JOIN PARTY STREAM (LISTEN TO HOST)",
-            bg="#002B00", fg=ACCENT, font=FONT_MONO_BOLD,
+            bg=ACCENT_BG, fg=ACCENT, font=FONT_MONO_BOLD,
             activebackground="#004400", activeforeground=ACCENT,
             relief="raised", bd=2, padx=8, pady=6, cursor="hand2",
             command=self._toggle_party_join,
@@ -1089,7 +1102,7 @@ class AirSpeakerApp:
 
         self.party_join_status_label = tk.Label(
             self.party_join_frame, textvariable=self.party_join_status_var,
-            bg="#0D151A", fg="#38B6FF", font=FONT_MONO_BOLD, anchor="w", padx=8, pady=6, bd=1, relief="solid"
+            bg="#0D151A", fg=PRIMARY, font=FONT_MONO_BOLD, anchor="w", padx=8, pady=6, bd=1, relief="solid"
         )
         self.party_join_status_label.pack(fill="x", padx=8, pady=(0, 4))
 
@@ -1098,14 +1111,14 @@ class AirSpeakerApp:
         # Live Party Delay Graph for Joiner
         dg_pjoin = tk.LabelFrame(self.party_join_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
         dg_pjoin.pack(fill="x", padx=8, pady=(0, 4))
-        tk.Label(dg_pjoin, textvariable=self.delay_header_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
+        tk.Label(dg_pjoin, textvariable=self.delay_header_var, bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 1))
         self._party_join_delay_canvas = tk.Canvas(dg_pjoin, width=480, height=55, bg="#080808", highlightthickness=1, highlightbackground="#333333")
         self._party_join_delay_canvas.pack(fill="both", expand=True, padx=4, pady=(1, 2))
 
         # 4. POST-JOIN EXTEND PARTY CARD (Hidden until successfully joined a host!)
         self.party_extend_card = tk.LabelFrame(
             self.party_join_frame, text=" 📡 Extend This Party (Hotspot Repeater) ",
-            bg=BG, fg="#00EEEE", font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=6
+            bg=BG, fg=PRIMARY, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=6
         )
         # Hidden initially! Packed when user has joined a party!
 
@@ -1119,8 +1132,8 @@ class AirSpeakerApp:
         self.btn_party_extend = StudioButton(
             self.party_extend_card,
             text="[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR & IP) ]",
-            bg="#002B00", fg="#00EEEE", font=FONT_MONO_BOLD,
-            activebackground="#004400", activeforeground="#00EEEE",
+            bg=ACCENT_BG, fg=PRIMARY, font=FONT_MONO_BOLD,
+            activebackground="#004400", activeforeground=PRIMARY,
             relief="raised", bd=2, padx=8, pady=5, cursor="hand2",
             command=self._toggle_party_extend_pc
         )
@@ -1177,10 +1190,10 @@ class AirSpeakerApp:
         self.frame_combo_tab2.bind("<<ComboboxSelected>>", lambda e: self._on_frame_ms_changed())
 
         # Expected delay label
-        tk.Label(qf, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+        tk.Label(qf, textvariable=self.expected_delay_var, bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w").grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=2)
 
         # Universal Device Equalizer Frame
-        uf = tk.LabelFrame(f, text=" Universal Device Equalizer (Master TX / RX Curve) ", bg=BG, fg="#00EEEE", font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
+        uf = tk.LabelFrame(f, text=" Universal Device Equalizer (Master TX / RX Curve) ", bg=BG, fg=PRIMARY, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
         uf.pack(fill="x", **pad)
         u_ctx = self._eq_manager.get_context("universal")
         self.univ_eq_tx_var = tk.BooleanVar(value=bool(u_ctx.get("apply_tx", False)))
@@ -1215,7 +1228,7 @@ class AirSpeakerApp:
         af = tk.LabelFrame(f, text=" Available Network Adapter IPs ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
         af.pack(fill="both", expand=True, **pad)
 
-        self.adapter_listbox = tk.Listbox(af, bg="#0A0A0A", fg="#00EEEE", font=FONT_MONO_SM, height=6, bd=1, relief="solid")
+        self.adapter_listbox = tk.Listbox(af, bg=PANEL_BG, fg=PRIMARY, font=FONT_MONO_SM, height=6, bd=1, relief="solid")
         self.adapter_listbox.pack(fill="both", expand=True, padx=4, pady=2)
 
         # Sync Actions Row
@@ -1293,7 +1306,7 @@ class AirSpeakerApp:
         # Detected Virtual Endpoints Listbox
         df = tk.LabelFrame(f, text=" Detected Virtual Audio Endpoints ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
         df.pack(fill="both", expand=True, **pad)
-        self.virt_listbox = tk.Listbox(df, bg="#0A0A0A", fg="#00EEEE", font=FONT_MONO_SM, height=4, bd=1, relief="solid")
+        self.virt_listbox = tk.Listbox(df, bg=PANEL_BG, fg=PRIMARY, font=FONT_MONO_SM, height=4, bd=1, relief="solid")
         self.virt_listbox.pack(fill="both", expand=True, padx=4, pady=2)
 
         # Firewall & System Options
@@ -1320,7 +1333,7 @@ class AirSpeakerApp:
         ).pack(side="left", padx=4)
 
         self.btn_check_updates = StudioButton(
-            ver_row, text="🔄 Check for Updates", bg="#15222E", fg="#00EEEE",
+            ver_row, text="🔄 Check for Updates", bg="#15222E", fg=PRIMARY,
             font=FONT_MONO_BOLD, padx=8, pady=2, command=self._on_check_updates_manual
         )
         self.btn_check_updates.pack(side="right", padx=4)
@@ -1726,7 +1739,7 @@ class AirSpeakerApp:
             if hasattr(self, "btn_party_extend"):
                 self.btn_party_extend.config(
                     text="[ ■ STOP EXTENDING PARTY ]",
-                    bg="#330000", fg=ERROR_COLOR,
+                    bg=ERROR_BG, fg=ERROR_COLOR,
                     activebackground="#550000", activeforeground=ERROR_COLOR
                 )
             self._refresh_party_extend_qr()
@@ -1742,8 +1755,8 @@ class AirSpeakerApp:
             if hasattr(self, "btn_party_extend"):
                 self.btn_party_extend.config(
                     text="[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR & IP) ]",
-                    bg="#002B00", fg="#00EEEE",
-                    activebackground="#004400", activeforeground="#00EEEE"
+                    bg=ACCENT_BG, fg=PRIMARY,
+                    activebackground="#004400", activeforeground=PRIMARY
                 )
         self._refresh_party_ui()
 
@@ -2029,7 +2042,7 @@ class AirSpeakerApp:
                 raise RuntimeError(f"Could not bind UDP port {port} or open audio output device")
             self._on_eq_changed()
             if hasattr(self, "party_join_status_label"):
-                self.party_join_status_label.config(fg="#38B6FF")
+                self.party_join_status_label.config(fg=PRIMARY)
         except Exception as exc:
             messagebox.showerror("Party Mode", f"Failed to start party audio receiver on port {port}:\n{exc}")
             self._party_join_receiver = None
@@ -2054,7 +2067,7 @@ class AirSpeakerApp:
             pass
 
         self.party_join_btn.config(
-            text="🛑  LEAVE PARTY STREAM", bg="#330000", fg=ERROR_COLOR,
+            text="🛑  LEAVE PARTY STREAM", bg=ERROR_BG, fg=ERROR_COLOR,
             activebackground="#550000", activeforeground=ERROR_COLOR
         )
         self.party_join_status_var.set(f"🎧 Connected to Host {host_ip}:{port} • Receiving party sound...")
@@ -2095,7 +2108,7 @@ class AirSpeakerApp:
             self._party_relay_sock = None
         if hasattr(self, "party_join_btn"):
             self.party_join_btn.config(
-                text="🎧  JOIN PARTY STREAM (LISTEN TO HOST)", bg="#002B00", fg=ACCENT,
+                text="🎧  JOIN PARTY STREAM (LISTEN TO HOST)", bg=ACCENT_BG, fg=ACCENT,
                 activebackground="#004400", activeforeground=ACCENT
             )
         self._party_joined_active = False
@@ -2109,12 +2122,12 @@ class AirSpeakerApp:
         if hasattr(self, "btn_party_extend"):
             self.btn_party_extend.config(
                 text="[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR & IP) ]",
-                bg="#002B00", fg="#00EEEE",
-                activebackground="#004400", activeforeground="#00EEEE"
+                bg=ACCENT_BG, fg=PRIMARY,
+                activebackground="#004400", activeforeground=PRIMARY
             )
         self.party_join_status_var.set("🎧 Joiner Standby: Select an active host above or paste a party link")
         if hasattr(self, "party_join_status_label"):
-            self.party_join_status_label.config(fg="#38B6FF")
+            self.party_join_status_label.config(fg=PRIMARY)
         logger.info("Left party stream")
 
     def _on_party_join_stats(self, pps: int) -> None:
@@ -2715,13 +2728,13 @@ class AirSpeakerApp:
                 self._control_listener.set_party_mode(True)
             if hasattr(self, "party_start_btn"):
                 self.party_start_btn.config(
-                    text="■  STOP PARTY BROADCAST", bg="#330000", fg=ERROR_COLOR,
+                    text="■  STOP PARTY BROADCAST", bg=ERROR_BG, fg=ERROR_COLOR,
                     activebackground="#550000", activeforeground=ERROR_COLOR
                 )
         else:
             self._normal_streaming = True
             self.start_btn.config(
-                text="■  STOP SERVING AUDIO", bg="#330000", fg=ERROR_COLOR,
+                text="■  STOP SERVING AUDIO", bg=ERROR_BG, fg=ERROR_COLOR,
                 activebackground="#550000", activeforeground=ERROR_COLOR
             )
 
@@ -2745,7 +2758,7 @@ class AirSpeakerApp:
             if hasattr(self, "party_start_btn"):
                 self.party_start_btn.config(
                     text="👑  START PARTY BROADCAST (HOST)",
-                    bg="#002B00", fg=ACCENT,
+                    bg=ACCENT_BG, fg=ACCENT,
                     activebackground="#004400", activeforeground=ACCENT
                 )
             if self._normal_streaming and self._udp_sender:
@@ -2753,7 +2766,7 @@ class AirSpeakerApp:
         else:
             self._normal_streaming = False
             self.start_btn.config(
-                text="▶  START SERVING AUDIO (PC → PHONE :5004)", bg="#002B00", fg=ACCENT,
+                text="▶  START SERVING AUDIO (PC → PHONE :5004)", bg=ACCENT_BG, fg=ACCENT,
                 activebackground="#004400", activeforeground=ACCENT
             )
             if self._party_streaming and self._udp_sender:
@@ -2831,7 +2844,7 @@ class AirSpeakerApp:
         if hasattr(self, "play_rx_btn"):
             self.play_rx_btn.config(
                 text="■  STOP AUDIO RECEIVER (PORT 5004)",
-                bg="#330000", fg=ERROR_COLOR,
+                bg=ERROR_BG, fg=ERROR_COLOR,
                 activebackground="#550000", activeforeground=ERROR_COLOR
             )
         if hasattr(self, "play_rx_pps_var"):
@@ -2846,7 +2859,7 @@ class AirSpeakerApp:
         if hasattr(self, "play_rx_btn"):
             self.play_rx_btn.config(
                 text="▶  START AUDIO RECEIVER (PORT 5004)",
-                bg="#002B00", fg=ACCENT,
+                bg=ACCENT_BG, fg=ACCENT,
                 activebackground="#004400", activeforeground=ACCENT
             )
         if hasattr(self, "play_rx_pps_var"):
@@ -2917,16 +2930,16 @@ class AirSpeakerApp:
                 h = 60
 
             c.delete("all")
-            c.create_rectangle(0, 0, w, h, fill="#080808", outline="")
+            c.create_rectangle(0, 0, w, h, fill=PANEL_BG, outline="")
 
             for ms in [50.0, 100.0, 150.0]:
                 y = max(1.0, min(float(h - 1), h - (ms / max_ms) * h))
-                c.create_line(0, y, w, y, fill="#222222", width=1)
+                c.create_line(0, y, w, y, fill="#262D39", width=1)
 
             c.create_text(8, 10, text="LIVE DELAY GRAPH (0 - 160 ms)", fill="#555555", anchor="w", font=FONT_MONO_SM)
 
             target_y = max(2.0, min(float(h - 2), h - (min(target_buf, max_ms) / max_ms) * h))
-            c.create_line(0, target_y, w, target_y, fill="#888888", width=1, dash=(4, 4))
+            c.create_line(0, target_y, w, target_y, fill=FG_MUTED, width=1, dash=(4, 4))
 
             points = []
             step_x = float(w) / max(1, n_pts - 1)
@@ -3521,7 +3534,7 @@ class AirSpeakerApp:
         scrollbar.pack(side="right", fill="y")
 
         guide_text = tk.Text(
-            text_frame, bg="#0A0A0A", fg=FG, insertbackground=FG,
+            text_frame, bg=PANEL_BG, fg=FG, insertbackground=FG,
             font=FONT_MONO_SM, wrap="word", yscrollcommand=scrollbar.set,
             padx=10, pady=10, bd=1, relief="solid"
         )

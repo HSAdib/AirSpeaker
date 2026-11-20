@@ -43,6 +43,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.hasan.airspeaker.databinding.ActivityMainBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
 import org.json.JSONObject
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -342,7 +344,7 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFF0A0A0A.toInt())
         }
 
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Air Speaker v1 Studio Guide")
             .setView(scroll)
             .setPositiveButton("Close", null)
@@ -487,19 +489,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateEqButtonLabels() {
         val prefs = getSharedPreferences("AirSpeakerEQ", MODE_PRIVATE)
+        val onBg = ContextCompat.getColor(this, R.color.m3_tertiary_container)
+        val onFg = ContextCompat.getColor(this, R.color.m3_on_tertiary_container)
+        val offBg = ContextCompat.getColor(this, R.color.m3_secondary_container)
+        val offFg = ContextCompat.getColor(this, R.color.m3_on_secondary_container)
+
         fun styleCornerEqButton(btn: MaterialButton, ctx: String) {
             val en = prefs.getBoolean("${ctx}_enabled", false)
-            if (en) {
-                btn.text = "≡ EQ ON"
-                btn.setTextColor(0xFF00FF00.toInt())
-                btn.strokeColor = ColorStateList.valueOf(0xFF00FF00.toInt())
-                btn.backgroundTintList = ColorStateList.valueOf(0xFF002B00.toInt())
-            } else {
-                btn.text = "≡ EQ"
-                btn.setTextColor(0xFF00EEEE.toInt())
-                btn.strokeColor = ColorStateList.valueOf(0xFF00EEEE.toInt())
-                btn.backgroundTintList = ColorStateList.valueOf(0xFF101820.toInt())
-            }
+            btn.text = if (en) "EQ On" else "EQ"
+            btn.setTextColor(if (en) onFg else offFg)
+            btn.strokeWidth = 0
+            btn.backgroundTintList = ColorStateList.valueOf(if (en) onBg else offBg)
         }
         styleCornerEqButton(binding.btnEqualizerPlay, "play")
         styleCornerEqButton(binding.btnEqualizerServe, "serve")
@@ -526,7 +526,7 @@ class MainActivity : AppCompatActivity() {
         // Title
         val tvTitle = TextView(this).apply {
             text = "🎛️ ${title.uppercase()}"
-            setTextColor(Color.parseColor("#00FF88"))
+            setTextColor(Color.parseColor("#7BDCA8"))
             textSize = 14f
             typeface = android.graphics.Typeface.MONOSPACE
             setPadding(0, 0, 0, 16)
@@ -534,7 +534,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(tvTitle)
 
         // Switch
-        val swEnable = SwitchMaterial(this).apply {
+        val swEnable = MaterialSwitch(this).apply {
             text = "Enable Equalizer"
             setTextColor(Color.WHITE)
             isChecked = currentEnabled
@@ -571,7 +571,7 @@ class MainActivity : AppCompatActivity() {
         if (!allPresetNames.contains("Custom")) allPresetNames.add("Custom")
 
         val spinnerPresets = Spinner(this).apply {
-            setBackgroundColor(Color.parseColor("#18222C"))
+            setBackgroundColor(Color.parseColor("#171B22"))
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, allPresetNames)
             setAdapter(adapter)
             val selIdx = allPresetNames.indexOf(currentPreset).coerceAtLeast(0)
@@ -586,7 +586,7 @@ class MainActivity : AppCompatActivity() {
         }
         val btnSavePreset = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
             text = "💾 Save Preset"
-            setTextColor(Color.parseColor("#00EEEE"))
+            setTextColor(Color.parseColor("#A8C7FA"))
             textSize = 11f
             typeface = android.graphics.Typeface.MONOSPACE
         }
@@ -619,7 +619,7 @@ class MainActivity : AppCompatActivity() {
             }
             val lblName = TextView(this).apply {
                 text = EQ_BAND_LABELS[i]
-                setTextColor(Color.parseColor("#38B6FF"))
+                setTextColor(Color.parseColor("#A8C7FA"))
                 textSize = 11f
                 typeface = android.graphics.Typeface.MONOSPACE
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
@@ -630,13 +630,13 @@ class MainActivity : AppCompatActivity() {
                 stepSize = 0.5f
                 value = currentBands[i].coerceIn(-12f, 12f)
                 thumbTintList = ColorStateList.valueOf(Color.WHITE)
-                trackActiveTintList = ColorStateList.valueOf(Color.parseColor("#00FF88"))
+                trackActiveTintList = ColorStateList.valueOf(Color.parseColor("#7BDCA8"))
                 trackInactiveTintList = ColorStateList.valueOf(Color.parseColor("#444444"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 3f)
             }
             val lblVal = TextView(this).apply {
                 text = String.format(java.util.Locale.US, "%+.1f dB", slider.value)
-                setTextColor(Color.parseColor("#00FF88"))
+                setTextColor(Color.parseColor("#7BDCA8"))
                 textSize = 11f
                 typeface = android.graphics.Typeface.MONOSPACE
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
@@ -778,7 +778,7 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(Color.WHITE)
                 setHintTextColor(Color.GRAY)
             }
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setTitle("Save Custom Preset")
                 .setView(input)
                 .setPositiveButton("Save") { _, _ ->
@@ -828,7 +828,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setView(sv)
             .setPositiveButton("✔ Done") { dialog, _ ->
                 saveDialogState()
@@ -1084,7 +1084,7 @@ class MainActivity : AppCompatActivity() {
             addView(input)
         }
 
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Party Host Address / QR Link")
             .setMessage("Paste a Party QR link (airspeaker://join?host=...) or Host IP address:")
             .setView(container)
@@ -1131,16 +1131,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         val tabs = listOf(binding.tabBtnPlayer, binding.tabBtnServer, binding.tabBtnParty, binding.tabBtnSettings)
+        val activeBg = ContextCompat.getColor(this, R.color.m3_primary_container)
+        val activeFg = ContextCompat.getColor(this, R.color.m3_on_primary_container)
+        val inactiveFg = ContextCompat.getColor(this, R.color.m3_on_surface_variant)
         for ((i, btn) in tabs.withIndex()) {
             val active = (i == index)
-            btn.setTextColor(if (active) 0xFF00FF00.toInt() else 0xFF888888.toInt())
-            btn.strokeColor = android.content.res.ColorStateList.valueOf(
-                if (active) 0xFF00FF00.toInt() else 0xFF444444.toInt()
-            )
-            btn.strokeWidth = if (active) 4 else 2
-            btn.backgroundTintList = android.content.res.ColorStateList.valueOf(
-                if (active) 0xFF0F220F.toInt() else 0xFF000000.toInt()
-            )
+            btn.setTextColor(if (active) activeFg else inactiveFg)
+            btn.strokeWidth = 0
+            btn.backgroundTintList = ColorStateList.valueOf(if (active) activeBg else Color.TRANSPARENT)
         }
     }
 
@@ -1196,13 +1194,14 @@ class MainActivity : AppCompatActivity() {
         for (h in hosts) {
             val btn = MaterialButton(this).apply {
                 val tag = if (h.isExtended) "[EXTENDED] " else "👑 "
-                text = "$tag${h.name} • ${h.ip}:${h.port}  [ TAP TO JOIN ]"
-                setTextColor(0xFF00EEEE.toInt())
-                strokeColor = ColorStateList.valueOf(0xFF00EEEE.toInt())
-                strokeWidth = 2
-                backgroundTintList = ColorStateList.valueOf(0xFF001822.toInt())
+                text = "$tag${h.name} • ${h.ip}:${h.port}  (Tap to Join)"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_secondary_container))
+                strokeWidth = 0
+                cornerRadius = (18 * resources.displayMetrics.density).toInt()
+                backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.m3_secondary_container))
                 textSize = 12f
                 isAllCaps = false
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 setPadding(16, 12, 16, 12)
                 val params = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1236,8 +1235,8 @@ class MainActivity : AppCompatActivity() {
             override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 val v = super.getView(position, convertView, parent)
                 if (v is android.widget.TextView) {
-                    v.setTextColor(0xFFFFFFFF.toInt())
-                    v.setBackgroundColor(0xFF111111.toInt())
+                    v.setTextColor(0xFFE3E6EE.toInt())
+                    v.setBackgroundColor(0xFF1D222B.toInt())
                 }
                 return v
             }
@@ -1245,8 +1244,8 @@ class MainActivity : AppCompatActivity() {
             override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 val v = super.getDropDownView(position, convertView, parent)
                 if (v is android.widget.TextView) {
-                    v.setTextColor(0xFFFFFFFF.toInt())
-                    v.setBackgroundColor(0xFF111111.toInt())
+                    v.setTextColor(0xFFE3E6EE.toInt())
+                    v.setBackgroundColor(0xFF1D222B.toInt())
                 }
                 return v
             }
@@ -1262,16 +1261,16 @@ class MainActivity : AppCompatActivity() {
             override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 val v = super.getView(position, convertView, parent)
                 if (v is android.widget.TextView) {
-                    v.setTextColor(0xFFFFFFFF.toInt())
-                    v.setBackgroundColor(0xFF111111.toInt())
+                    v.setTextColor(0xFFE3E6EE.toInt())
+                    v.setBackgroundColor(0xFF1D222B.toInt())
                 }
                 return v
             }
             override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 val v = super.getDropDownView(position, convertView, parent)
                 if (v is android.widget.TextView) {
-                    v.setTextColor(0xFFFFFFFF.toInt())
-                    v.setBackgroundColor(0xFF111111.toInt())
+                    v.setTextColor(0xFFE3E6EE.toInt())
+                    v.setBackgroundColor(0xFF1D222B.toInt())
                 }
                 return v
             }
@@ -1583,8 +1582,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.rgOutputEngine.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
-        binding.switchAudioFx.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
+        binding.rgOutputEngine.setOnCheckedChangeListener { _, checkedId ->
+            if (!suppressSync) {
+                val engine = if (checkedId == R.id.rbEngineAudioTrack) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY"
+                AudioStreamService.instance?.updateOutputEngineLive(engine, binding.switchAudioFx.isChecked)
+                onLocalSettingChanged()
+            }
+        }
+        binding.switchAudioFx.setOnCheckedChangeListener { _, isChecked ->
+            if (!suppressSync) {
+                val engine = if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY"
+                AudioStreamService.instance?.updateOutputEngineLive(engine, isChecked)
+                onLocalSettingChanged()
+            }
+        }
         binding.rgExclusiveMode.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
         binding.switchHeadsetDisconnect.setOnCheckedChangeListener { _, _ -> if (!suppressSync) onLocalSettingChanged() }
 
@@ -1863,7 +1874,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 val hostList = hosts.toList()
                 val items = hostList.map { "${if (it.isExtended) "[EXTENDED] " else ""}${it.name} — ${it.ip}:${it.port}" }.toTypedArray()
-                AlertDialog.Builder(this)
+                MaterialAlertDialogBuilder(this)
                     .setTitle("Select Discovered Party Host")
                     .setItems(items) { _, which ->
                         val selected = hostList[which]
@@ -1914,7 +1925,7 @@ class MainActivity : AppCompatActivity() {
             override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 return (super.getDropDownView(position, convertView, parent) as TextView).apply {
                     setTextColor(0xFFFFFFFF.toInt())
-                    setBackgroundColor(0xFF1A1A1A.toInt())
+                    setBackgroundColor(0xFF1D222B.toInt())
                     textSize = 12f
                     typeface = android.graphics.Typeface.MONOSPACE
                 }
@@ -2068,7 +2079,7 @@ class MainActivity : AppCompatActivity() {
             } else if (isManual) {
                 binding.tvUpdateStatus.visibility = View.VISIBLE
                 binding.tvUpdateStatus.text = "Air Speaker is up to date."
-                androidx.appcompat.app.AlertDialog.Builder(this, com.google.android.material.R.style.ThemeOverlay_MaterialComponents_Dialog_Alert)
+                MaterialAlertDialogBuilder(this)
                     .setTitle("Up to Date")
                     .setMessage("Air Speaker v${BuildConfig.VERSION_NAME} is currently up to date.")
                     .setPositiveButton("OK", null)
@@ -2079,7 +2090,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUpdateDialog(info: UpdateChecker.UpdateInfo) {
         if (isFinishing || isDestroyed) return
-        val builder = androidx.appcompat.app.AlertDialog.Builder(this, com.google.android.material.R.style.ThemeOverlay_MaterialComponents_Dialog_Alert)
+        val builder = MaterialAlertDialogBuilder(this)
         builder.setTitle("⬆ Update Available")
         builder.setMessage("Air Speaker ${info.displayVersion} is now available!\n\nWould you like to download and install this update?")
         builder.setPositiveButton("Download Update") { _, _ ->
@@ -2346,78 +2357,98 @@ class MainActivity : AppCompatActivity() {
         val hostBroadcastActive = isPartyHostBroadcastActive &&
             (AudioStreamService.isStreaming || AudioStreamService.isServing)
 
+        val errBg = ContextCompat.getColor(this, R.color.m3_error_container)
+        val errFg = ContextCompat.getColor(this, R.color.m3_on_error_container)
+        val priBg = ContextCompat.getColor(this, R.color.m3_primary_container)
+        val priFg = ContextCompat.getColor(this, R.color.m3_on_primary_container)
+        val terBg = ContextCompat.getColor(this, R.color.m3_tertiary_container)
+        val terFg = ContextCompat.getColor(this, R.color.m3_on_tertiary_container)
+
         if (AudioStreamService.isStreaming) {
-            binding.btnToggleStream.text = "[ ■ STOP SPEAKER PLAYER (PORT 5004) ]"
-            binding.btnToggleStream.setTextColor(0xFFFF4444.toInt())
-            binding.btnTogglePartyStream.text = "[ ■ LEAVE / STOP PARTY STREAM ]"
-            binding.btnTogglePartyStream.setTextColor(0xFFFF4444.toInt())
-            binding.btnTogglePartyStream.backgroundTintList = ColorStateList.valueOf(0xFF330000.toInt())
+            binding.btnToggleStream.text = "Stop Speaker Player"
+            binding.btnToggleStream.setTextColor(errFg)
+            binding.btnToggleStream.backgroundTintList = ColorStateList.valueOf(errBg)
+            binding.btnToggleStream.strokeWidth = 0
+            binding.btnTogglePartyStream.text = "Leave / Stop Party Stream"
+            binding.btnTogglePartyStream.setTextColor(errFg)
+            binding.btnTogglePartyStream.backgroundTintList = ColorStateList.valueOf(errBg)
+            binding.btnTogglePartyStream.strokeWidth = 0
             if (!hostBroadcastActive) {
                 binding.btnTogglePartyJoin.text = if (isPartyExtendedActive || binding.switchExtendParty.isChecked) {
-                    "[ ■ STOP EXTENDING & LEAVE PARTY ]"
+                    "Stop Extending & Leave Party"
                 } else {
-                    "[ ■ LEAVE PARTY STREAM ]"
+                    "Leave Party"
                 }
-                binding.btnTogglePartyJoin.setTextColor(0xFFFF4444.toInt())
-                binding.btnTogglePartyJoin.backgroundTintList = ColorStateList.valueOf(0xFF330000.toInt())
-                binding.btnTogglePartyJoin.strokeColor = ColorStateList.valueOf(0xFFFF4444.toInt())
+                binding.btnTogglePartyJoin.setTextColor(errFg)
+                binding.btnTogglePartyJoin.backgroundTintList = ColorStateList.valueOf(errBg)
+                binding.btnTogglePartyJoin.strokeWidth = 0
             }
         } else {
-            binding.btnToggleStream.text = "[ ▶ START SPEAKER PLAYER (PORT 5004) ]"
-            binding.btnToggleStream.setTextColor(0xFF00FF00.toInt())
-            binding.btnTogglePartyStream.text = "[ 🎉 START / JOIN PARTY STREAM (PORT 5004) ]"
-            binding.btnTogglePartyStream.setTextColor(0xFF00FF00.toInt())
-            binding.btnTogglePartyStream.backgroundTintList = ColorStateList.valueOf(0xFF002B00.toInt())
-            binding.btnTogglePartyJoin.text = if (isPartyExtendedActive || binding.switchExtendParty.isChecked) "[ 📡 JOIN & EXTEND PARTY ]" else "[ 🎧 JOIN PARTY STREAM ]"
-            binding.btnTogglePartyJoin.setTextColor(0xFF00FF00.toInt())
-            binding.btnTogglePartyJoin.backgroundTintList = ColorStateList.valueOf(0xFF002B00.toInt())
-            binding.btnTogglePartyJoin.strokeColor = ColorStateList.valueOf(0xFF00FF00.toInt())
+            binding.btnToggleStream.text = "Start Speaker Player"
+            binding.btnToggleStream.setTextColor(priFg)
+            binding.btnToggleStream.backgroundTintList = ColorStateList.valueOf(priBg)
+            binding.btnToggleStream.strokeWidth = 0
+            binding.btnTogglePartyStream.text = "Start / Join Party Stream"
+            binding.btnTogglePartyStream.setTextColor(priFg)
+            binding.btnTogglePartyStream.backgroundTintList = ColorStateList.valueOf(priBg)
+            binding.btnTogglePartyStream.strokeWidth = 0
+            binding.btnTogglePartyJoin.text = if (isPartyExtendedActive || binding.switchExtendParty.isChecked) "Join & Extend Party" else "Join Party Stream"
+            binding.btnTogglePartyJoin.setTextColor(priFg)
+            binding.btnTogglePartyJoin.backgroundTintList = ColorStateList.valueOf(priBg)
+            binding.btnTogglePartyJoin.strokeWidth = 0
         }
 
         if (hostBroadcastActive || isPartyHostBroadcastActive) {
-            binding.btnTogglePartyHost.text = "[ ■ STOP PARTY BROADCAST (HOST) ]"
-            binding.btnTogglePartyHost.setTextColor(0xFFFF4444.toInt())
-            binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(0xFF330000.toInt())
-            binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(0xFFFF4444.toInt())
+            binding.btnTogglePartyHost.text = "Stop Party Broadcast"
+            binding.btnTogglePartyHost.setTextColor(errFg)
+            binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(errBg)
+            binding.btnTogglePartyHost.strokeWidth = 0
         } else {
-            binding.btnTogglePartyHost.text = "[ 👑 START PARTY BROADCAST (HOST) ]"
-            binding.btnTogglePartyHost.setTextColor(0xFF00FF00.toInt())
-            binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(0xFF002B00.toInt())
-            binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(0xFF00FF00.toInt())
+            binding.btnTogglePartyHost.text = "Start Party Broadcast"
+            binding.btnTogglePartyHost.setTextColor(priFg)
+            binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(priBg)
+            binding.btnTogglePartyHost.strokeWidth = 0
         }
 
         if (AudioStreamService.isServing) {
-            binding.btnToggleServe.text = "[ ■ STOP SERVING AUDIO ]"
-            binding.btnToggleServe.setTextColor(0xFFFF4444.toInt())
-            binding.tvServeStatus.text = "STREAMING INTERNAL AUDIO (PORT 5004)"
-            binding.tvServeStatus.setTextColor(0xFF00FF00.toInt())
+            binding.btnToggleServe.text = "Stop Serving Audio"
+            binding.btnToggleServe.setTextColor(errFg)
+            binding.btnToggleServe.backgroundTintList = ColorStateList.valueOf(errBg)
+            binding.btnToggleServe.strokeWidth = 0
+            binding.tvServeStatus.text = "Streaming Internal Audio (Port 5004)"
+            binding.tvServeStatus.setTextColor(terFg)
             val pps = AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0
             binding.tvServePps.text = "TX PPS: $pps pps"
             val peak = AudioStreamService.internalAudioStreamerInstance?.peakLevel?.get() ?: 0.0f
             binding.pbServeLevel.progress = (peak * 100).toInt().coerceIn(0, 100)
         } else {
-            binding.btnToggleServe.text = "[ 📡 START SERVING AUDIO (PORT 5004) ]"
-            binding.btnToggleServe.setTextColor(0xFF00FF88.toInt())
-            binding.tvServeStatus.text = "AUDIO SENDER: READY (PORT 5004)"
-            binding.tvServeStatus.setTextColor(0xFF888888.toInt())
+            binding.btnToggleServe.text = "Start Serving Audio"
+            binding.btnToggleServe.setTextColor(terFg)
+            binding.btnToggleServe.backgroundTintList = ColorStateList.valueOf(terBg)
+            binding.btnToggleServe.strokeWidth = 0
+            binding.tvServeStatus.text = "Audio Sender: Ready (Port 5004)"
+            binding.tvServeStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_on_surface_variant))
             binding.tvServePps.text = "TX PPS: 0 pps"
             binding.pbServeLevel.progress = 0
         }
 
         val statusParts = mutableListOf<String>()
-        if (AudioStreamService.isStreaming) statusParts.add("PLAY: ON (5004)")
-        if (AudioStreamService.isServing) statusParts.add("SERVE: ON (5004)")
+        if (AudioStreamService.isStreaming) {
+            val backendTag = AudioStreamService.activeBackendLabel
+            statusParts.add("Play ($backendTag)")
+        }
+        if (AudioStreamService.isServing) statusParts.add("Serve (Port 5004)")
         if (statusParts.isEmpty()) {
             if (pcStreamingHintActive) {
-                binding.tvStatus.text = "PC IS STREAMING — TAP START SPEAKER PLAYER"
-                binding.tvStatus.setTextColor(0xFF00EEEE.toInt())
+                binding.tvStatus.text = "PC is streaming — Tap Start Speaker Player"
+                binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_primary))
             } else {
-                binding.tvStatus.text = "STATUS: STOPPED"
-                binding.tvStatus.setTextColor(0xFF888888.toInt())
+                binding.tvStatus.text = "Ready • Port 5004"
+                binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_on_surface_variant))
             }
         } else {
-            binding.tvStatus.text = "ACTIVE: " + statusParts.joinToString(" | ")
-            binding.tvStatus.setTextColor(0xFF00FF00.toInt())
+            binding.tvStatus.text = "Active • " + statusParts.joinToString(" | ")
+            binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_tertiary))
         }
     }
 

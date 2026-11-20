@@ -4,7 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="@color/m3_bg">
 
     <com.journeyapps.barcodescanner.BarcodeView
         android:id="@+id/barcodeView"
@@ -33,7 +33,7 @@
         android:layout_marginTop="36dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:src="@android:drawable/ic_menu_close_clear_cancel"
-        android:tint="#FFFFFF"
+        android:tint="@color/m3_on_surface"
         android:contentDescription="Close Scanner"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
@@ -42,11 +42,11 @@
         android:id="@+id/cardTopBadge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        app:cardCornerRadius="16dp"
-        app:cardBackgroundColor="#88000000"
+        app:cardCornerRadius="20dp"
+        app:cardBackgroundColor="#CC1D222B"
         app:cardElevation="0dp"
         app:strokeWidth="1dp"
-        app:strokeColor="#44FFFFFF"
+        app:strokeColor="@color/m3_outline_variant"
         app:layout_constraintTop_toTopOf="@id/btnClose"
         app:layout_constraintBottom_toBottomOf="@id/btnClose"
         app:layout_constraintStart_toStartOf="parent"
@@ -56,9 +56,9 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Scan Party QR Code"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/m3_on_surface"
             android:textSize="14sp"
-            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium"
             android:paddingHorizontal="16dp"
             android:paddingVertical="6dp" />
     </com.google.android.material.card.MaterialCardView>
@@ -70,10 +70,10 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="40dp"
         app:cardCornerRadius="28dp"
-        app:cardBackgroundColor="#CC141414"
+        app:cardBackgroundColor="#E61D222B"
         app:cardElevation="6dp"
         app:strokeWidth="1dp"
-        app:strokeColor="#33FFFFFF"
+        app:strokeColor="@color/m3_outline_variant"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -87,46 +87,49 @@
             android:paddingVertical="8dp">
 
             <!-- Torch Button -->
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnTorch"
                 android:layout_width="wrap_content"
                 android:layout_height="44dp"
                 android:text="🔦 Flash"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="13sp"
-                style="@style/Widget.MaterialComponents.Button.TextButton" />
+                android:textAllCaps="false"
+                style="@style/Widget.Material3.Button.TextButton" />
 
             <View
                 android:layout_width="1dp"
                 android:layout_height="24dp"
-                android:background="#33FFFFFF"
+                android:background="@color/m3_outline_variant"
                 android:layout_marginHorizontal="4dp" />
 
             <!-- Gallery Button -->
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnGallery"
                 android:layout_width="wrap_content"
                 android:layout_height="44dp"
                 android:text="🖼 Photo"
-                android:textColor="#00FFCC"
+                android:textColor="@color/m3_primary"
                 android:textSize="13sp"
-                style="@style/Widget.MaterialComponents.Button.TextButton" />
+                android:textAllCaps="false"
+                style="@style/Widget.Material3.Button.TextButton" />
 
             <View
                 android:layout_width="1dp"
                 android:layout_height="24dp"
-                android:background="#33FFFFFF"
+                android:background="@color/m3_outline_variant"
                 android:layout_marginHorizontal="4dp" />
 
             <!-- Paste Button -->
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPaste"
                 android:layout_width="wrap_content"
                 android:layout_height="44dp"
                 android:text="📋 Paste"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="13sp"
-                style="@style/Widget.MaterialComponents.Button.TextButton" />
+                android:textAllCaps="false"
+                style="@style/Widget.Material3.Button.TextButton" />
 
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

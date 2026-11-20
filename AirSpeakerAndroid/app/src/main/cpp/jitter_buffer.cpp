@@ -176,21 +176,28 @@ void JitterBuffer::decodeWorkerLoop() {
     int16_t decoded_buf[960 * 2]; // Scratch buffer for up to 20ms at 48kHz stereo
 
     while (mIsRunning.load(std::memory_order_acquire)) {
-        {
-            std::unique_lock<std::mutex> lock(mConditionMutex);
-            mCondition.wait_for(lock, std::chrono::milliseconds(3), [this] {
-                if (!mIsRunning.load(std::memory_order_relaxed)) return true;
-                return mQueuedPacketCount.load(std::memory_order_relaxed) > 0;
-            });
-        }
-
+        bool didWork = processPackets(decoded_buf);
         if (!mIsRunning.load(std::memory_order_relaxed)) break;
 
-        processPackets(decoded_buf);
+        if (!didWork) {
+            std::unique_lock<std::mutex> lock(mConditionMutex);
+            if (mQueuedPacketCount.load(std::memory_order_relaxed) == 0) {
+                mCondition.wait_for(lock, std::chrono::milliseconds(5), [this] {
+                    return !mIsRunning.load(std::memory_order_relaxed) ||
+                           mQueuedPacketCount.load(std::memory_order_relaxed) > 0;
+                });
+            } else {
+                // Ring buffer is already full or still prebuffering — sleep 2ms instead of 100% CPU spin
+                mCondition.wait_for(lock, std::chrono::milliseconds(2), [this] {
+                    return !mIsRunning.load(std::memory_order_relaxed) ||
+                           mStreamResetPending.load(std::memory_order_acquire);
+                });
+            }
+        }
     }
 }
 
-void JitterBuffer::processPackets(int16_t* decoded_buf) {
+bool JitterBuffer::processPackets(int16_t* decoded_buf) {
     int64_t nowMs = getNowMs();
     int64_t sinceLastRxMs = nowMs - mLastPacketRecvTimeMs.load(std::memory_order_relaxed);
 
@@ -207,7 +214,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             mPcmRingBuffer.reset();
         }
         std::lock_guard<std::mutex> lock(mPacketMutex);
-        if (mPacketMap.empty()) return;
+        if (mPacketMap.empty()) return false;
 
         if (resetReq && wasStarted && mPacketMap.size() > 6) {
             auto keepFrom = mPacketMap.end();
@@ -273,7 +280,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
     // CRITICAL BLUETOOTH FIX:
     // Bluetooth A2DP callbacks request 960..2880+ frames per burst.
     // Keep ring buffer high enough (>= 2x observed callback burst + headroom) so onAudioReady NEVER starves.
-    const size_t baseLowWaterFrames = btMode ? ((sampleRate * 40) / 1000) : ((sampleRate * 15) / 1000);
+    const size_t baseLowWaterFrames = btMode ? ((sampleRate * 50) / 1000) : ((sampleRate * 15) / 1000);
     const size_t burstSafeFrames = (obsFrames * 2) + (btMode ? 480 : 240);
     const size_t lowWaterFrames = std::clamp<size_t>(
         std::max(baseLowWaterFrames, burstSafeFrames),
@@ -282,7 +289,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
     );
     const float lowWaterMs = (static_cast<float>(lowWaterFrames) * 1000.0f) / static_cast<float>(sampleRate);
     const float minEffectiveTarget = btMode
-        ? std::max(90.0f, lowWaterMs + 35.0f)
+        ? std::max(100.0f, lowWaterMs + 40.0f)
         : std::max(10.0f, lowWaterMs + 5.0f);
     const float effectiveTargetMs = std::clamp(std::max(mLocalTargetBufferMs, minEffectiveTarget), 10.0f, 200.0f);
 
@@ -299,7 +306,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         float startThreshold = effectiveTargetMs;
         int minPackets = std::max(2, static_cast<int>(std::ceil(startThreshold / pktDurMs)));
         if (totalQueuedMs < startThreshold || static_cast<int>(packetQueueSize) < minPackets) {
-            return;
+            return false;
         }
         mIsPrebuffering = false;
         mConsecutiveLosses = 0;
@@ -310,7 +317,8 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         }
     }
 
-    const float driftHeadroomMs = btMode ? 25.0f : 15.0f;
+    const float driftHeadroomMs = btMode ? 35.0f : 15.0f;
+    bool decodedAny = false;
 
     // Decode packets and push PCM to the SPSC ring buffer while space permits (up to 960 frames = 20ms)
     while (mPcmRingBuffer.getOccupiedFrames() < lowWaterFrames &&
@@ -436,6 +444,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             if (total_frames > 0) {
                 mLastValidFrame.assign(decoded_buf, decoded_buf + total_frames * 2);
                 mPcmRingBuffer.writeFrames(decoded_buf, total_frames);
+                decodedAny = true;
             }
 
             mConsecutiveLosses = 0;
@@ -488,6 +497,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             if (total_frames > 0) {
                 mLastValidFrame.assign(decoded_buf, decoded_buf + total_frames * 2);
                 mPcmRingBuffer.writeFrames(decoded_buf, total_frames);
+                decodedAny = true;
             }
 
             mConsecutiveLosses++;
@@ -500,6 +510,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             }
         }
     }
+    return decodedAny;
 }
 
 void JitterBuffer::concealPcmGap(int frames, int16_t* out_buf) {

@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000"
+    android:background="@color/m3_bg"
     android:fillViewport="true">
 
     <LinearLayout
@@ -23,24 +23,24 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="AIR SPEAKER v1"
-                android:textColor="#FFFFFF"
+                android:text="Air Speaker"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="18sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <TextView
                 android:id="@+id/tvSyncRev"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="REV: 1"
-                android:textColor="#888888"
+                android:textColor="@color/m3_on_surface_variant"
                 android:textSize="11sp"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnHelp"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="42dp"
                 android:layout_height="36dp"
                 android:layout_marginStart="8dp"
@@ -48,10 +48,10 @@
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:text="?"
-                android:textColor="#00FF00"
-                app:strokeColor="#00FF00"
+                android:textColor="@color/m3_tertiary"
+                app:strokeColor="@color/m3_outline"
                 app:strokeWidth="1dp"
-                android:fontFamily="monospace"
+                android:fontFamily="sans-serif"
                 android:textStyle="bold"
                 android:textSize="14sp" />
         </LinearLayout>
@@ -62,71 +62,74 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:text="STATUS: STOPPED"
-            android:textColor="#888888"
+            android:textColor="@color/m3_on_surface_variant"
             android:textSize="12sp"
-            android:fontFamily="monospace" />
+            android:fontFamily="sans-serif" />
 
         <!-- Tab Bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
+            android:background="@drawable/bg_m3_pill_bar"
+            android:padding="4dp"
             android:layout_marginTop="10dp"
-            android:layout_marginBottom="10dp">
+            android:layout_marginBottom="12dp">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tabBtnPlayer"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="PLAY"
-                android:textColor="#FFFFFF"
-                app:strokeColor="#FFFFFF"
-                app:strokeWidth="2dp"
-                android:fontFamily="monospace"
+                app:cornerRadius="22dp"
+                android:textAllCaps="false"
+                android:text="Play"
+                android:textColor="@color/m3_on_surface"
+                app:strokeWidth="0dp"
+                android:fontFamily="sans-serif-medium"
                 android:textSize="12sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tabBtnServer"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="SERVE"
-                android:textColor="#888888"
-                app:strokeColor="#444444"
-                app:strokeWidth="1dp"
-                android:fontFamily="monospace"
+                app:cornerRadius="22dp"
+                android:textAllCaps="false"
+                android:text="Serve"
+                android:textColor="@color/m3_on_surface_variant"
+                app:strokeWidth="0dp"
+                android:fontFamily="sans-serif-medium"
                 android:textSize="12sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tabBtnParty"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="PARTY"
-                android:textColor="#888888"
-                app:strokeColor="#444444"
-                app:strokeWidth="1dp"
-                android:fontFamily="monospace"
+                app:cornerRadius="22dp"
+                android:textAllCaps="false"
+                android:text="Party"
+                android:textColor="@color/m3_on_surface_variant"
+                app:strokeWidth="0dp"
+                android:fontFamily="sans-serif-medium"
                 android:textSize="12sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tabBtnSettings"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
-                android:text="SETTINGS"
-                android:textColor="#888888"
-                app:strokeColor="#444444"
-                app:strokeWidth="1dp"
-                android:fontFamily="monospace"
+                app:cornerRadius="22dp"
+                android:textAllCaps="false"
+                android:text="Settings"
+                android:textColor="@color/m3_on_surface_variant"
+                app:strokeWidth="0dp"
+                android:fontFamily="sans-serif-medium"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -145,7 +148,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:background="#1A2630"
+                android:background="@color/m3_surface_container"
                 android:padding="10dp"
                 android:layout_marginBottom="10dp">
 
@@ -166,10 +169,10 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="💻 Connected PC: Searching..."
-                            android:textColor="#38B6FF"
+                            android:textColor="@color/m3_primary"
                             android:textSize="14sp"
                             android:textStyle="bold"
-                            android:fontFamily="monospace" />
+                            android:fontFamily="sans-serif" />
 
                         <TextView
                             android:id="@+id/tvConnectedDeviceSub"
@@ -177,14 +180,14 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
                             android:text="📱 This Phone: Detecting..."
-                            android:textColor="#99AABB"
+                            android:textColor="@color/m3_on_surface_variant"
                             android:textSize="12sp"
-                            android:fontFamily="monospace" />
+                            android:fontFamily="sans-serif" />
                     </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnEqualizerPlay"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="34dp"
                         android:layout_marginStart="6dp"
@@ -194,11 +197,11 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:text="≡ EQ"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         app:backgroundTint="#101820"
-                        app:strokeColor="#00EEEE"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -215,8 +218,8 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="PC IP: "
-                        android:textColor="#38B6FF"
-                        android:fontFamily="monospace"
+                        android:textColor="@color/m3_primary"
+                        android:fontFamily="sans-serif"
                         android:textStyle="bold" />
 
                     <EditText
@@ -224,45 +227,45 @@
                         android:layout_width="0dp"
                         android:layout_height="42dp"
                         android:layout_weight="1"
-                        android:background="#101820"
-                        android:textColor="#FFFFFF"
+                        android:background="@drawable/bg_m3_input"
+                        android:textColor="@color/m3_on_surface"
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:hint="Auto-Detecting PC..."
                         android:textColorHint="#557788"
                         android:textSize="13sp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:singleLine="true"
                         android:imeOptions="actionDone"
                         android:inputType="textUri" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnConnectPcIp"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="42dp"
                         android:layout_marginStart="6dp"
                         android:text="SET IP"
-                        android:textColor="#38B6FF"
-                        app:strokeColor="#38B6FF"
+                        android:textColor="@color/m3_primary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnToggleStream"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:backgroundTint="#002200"
-                app:strokeColor="#00FF00"
+                app:strokeColor="@color/m3_outline"
                 app:strokeWidth="2dp"
                 android:text="[ ▶ START SPEAKER PLAYER (PORT 5004) ]"
-                android:textColor="#00FF00"
+                android:textColor="@color/m3_tertiary"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <!-- Audio Focus / Profiles -->
             <TextView
@@ -270,10 +273,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:text="SOUND MODE (QUALITY vs LOW DELAY):"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgAudioProfile"
@@ -288,9 +291,9 @@
                     android:layout_height="wrap_content"
                     android:checked="true"
                     android:text="Balanced (Auto)"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbProfileGaming"
@@ -298,9 +301,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
                     android:text="Gaming"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbProfileQuality"
@@ -308,9 +311,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
                     android:text="Best Quality"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbProfileCustom"
@@ -318,9 +321,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
                     android:text="Custom"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <!-- Codec & Bitrate Quick Controls -->
@@ -329,10 +332,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:text="CODEC &amp; BITRATE:"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgPlayerCodec"
@@ -346,8 +349,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Opus"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbPlayerCodecPcm"
@@ -356,8 +359,8 @@
                     android:layout_marginStart="16dp"
                     android:checked="true"
                     android:text="Lossless PCM16"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <LinearLayout
@@ -372,8 +375,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="BITRATE: "
-                    android:textColor="#888888"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface_variant"
+                    android:fontFamily="sans-serif" />
 
                 <Spinner
                     android:id="@+id/spPlayerBitrate"
@@ -392,9 +395,9 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="Expected Delay: ~55 ms"
-                android:textColor="#00EEEE"
+                android:textColor="@color/m3_primary"
                 android:textSize="12sp"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <!-- Buffer Preset Selector -->
             <TextView
@@ -402,10 +405,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
                 android:text="STABILITY / DELAY BUFFER:"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgBufferMode"
@@ -419,9 +422,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="20ms"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -429,9 +432,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="40ms"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -439,9 +442,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="80ms"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -450,9 +453,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:checked="true"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="Auto"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -460,9 +463,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1.2"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="Custom"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
             </RadioGroup>
 
@@ -478,16 +481,16 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="TARGET BUFFER:"
-                    android:textColor="#888888"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface_variant"
+                    android:fontFamily="sans-serif" />
 
                 <TextView
                     android:id="@+id/tvTargetBufferValue"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="30 ms"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </LinearLayout>
 
             <com.google.android.material.slider.Slider
@@ -514,16 +517,16 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="STREAM VOLUME (RELATIVE TO PHONE):"
-                    android:textColor="#888888"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface_variant"
+                    android:fontFamily="sans-serif" />
 
                 <TextView
                     android:id="@+id/tvGainValue"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="100%"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </LinearLayout>
 
             <LinearLayout
@@ -544,15 +547,15 @@
                     app:trackColorActive="#FFFFFF"
                     app:trackColorInactive="#444444" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnMuteToggle"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
                     android:layout_height="38dp"
                     android:text="MUTE"
-                    android:textColor="#FFFFFF"
-                    app:strokeColor="#FFFFFF"
-                    android:fontFamily="monospace"
+                    android:textColor="@color/m3_on_surface"
+                    app:strokeColor="@color/m3_outline"
+                    android:fontFamily="sans-serif"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -569,10 +572,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:text="LIVE TELEMETRY (5 Hz)"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <TableLayout
                 android:layout_width="match_parent"
@@ -584,32 +587,32 @@
                 android:stretchColumns="1">
 
                 <TableRow android:padding="2dp">
-                    <TextView android:text="BUFFER LEVEL:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvBufferLevel" android:text="0.0 ms" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="BUFFER LEVEL:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvBufferLevel" android:text="0.0 ms" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
                 <TableRow android:padding="2dp">
-                    <TextView android:text="ACTIVE TARGET:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvActiveTarget" android:text="30.0 ms" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="ACTIVE TARGET:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvActiveTarget" android:text="30.0 ms" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
                 <TableRow android:padding="2dp">
-                    <TextView android:text="CODEC:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvCodec" android:text="PCM16" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="CODEC:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvCodec" android:text="PCM16" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
                 <TableRow android:padding="2dp">
-                    <TextView android:text="RX PACKETS / SEC:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvPps" android:text="0 pps" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="RX PACKETS / SEC:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvPps" android:text="0 pps" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
                 <TableRow android:padding="2dp">
-                    <TextView android:text="UNDERRUNS:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvUnderruns" android:text="0" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="UNDERRUNS:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvUnderruns" android:text="0" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
                 <TableRow android:padding="2dp">
-                    <TextView android:text="LOST PACKETS:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvLostPackets" android:text="0" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="LOST PACKETS:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvLostPackets" android:text="0" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
                 <TableRow android:padding="2dp">
-                    <TextView android:text="LATE PACKETS:" android:textColor="#888888" android:fontFamily="monospace" />
-                    <TextView android:id="@+id/tvLatePackets" android:text="0" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
+                    <TextView android:text="LATE PACKETS:" android:textColor="@color/m3_on_surface_variant" android:fontFamily="sans-serif" />
+                    <TextView android:id="@+id/tvLatePackets" android:text="0" android:textColor="@color/m3_on_surface" android:fontFamily="monospace" android:gravity="end" android:paddingEnd="8dp" />
                 </TableRow>
             </TableLayout>
         </LinearLayout>
@@ -635,14 +638,14 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="INTERNAL SYSTEM AUDIO SENDER (PORT 5004):"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnEqualizerServe"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
                     android:layout_height="34dp"
                     android:layout_marginStart="6dp"
@@ -652,11 +655,11 @@
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:text="≡ EQ"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     app:backgroundTint="#101820"
-                    app:strokeColor="#00EEEE"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -675,8 +678,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="TARGET: "
-                    android:textColor="#38B6FF"
-                    android:fontFamily="monospace"
+                    android:textColor="@color/m3_primary"
+                    android:fontFamily="sans-serif"
                     android:textStyle="bold"
                     android:textSize="12sp" />
 
@@ -686,26 +689,26 @@
                     android:layout_height="38dp"
                     android:layout_weight="1"
                     android:background="#1A2228"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
                     android:hint="255.255.255.255 (Broadcast)"
                     android:textColorHint="#557788"
                     android:textSize="12sp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:singleLine="true" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSetServeTargetIp"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
                     android:layout_height="38dp"
                     android:layout_marginStart="6dp"
                     android:text="SET IP"
-                    android:textColor="#38B6FF"
-                    app:strokeColor="#38B6FF"
+                    android:textColor="@color/m3_primary"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -715,10 +718,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="SOUND MODE PROFILE:"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="11sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgServeSoundMode"
@@ -734,9 +737,9 @@
                     android:layout_weight="1"
                     android:checked="true"
                     android:text="Balanced"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbServeGaming"
@@ -744,9 +747,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Gaming"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbServeQuality"
@@ -754,9 +757,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Quality"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbServeCustom"
@@ -764,9 +767,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Custom"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <!-- Codec Selector -->
@@ -775,10 +778,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="AUDIO CODEC:"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="11sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgServeCodec"
@@ -792,18 +795,18 @@
                     android:layout_height="wrap_content"
                     android:checked="true"
                     android:text="Lossless PCM16 (0 ms delay / 0% quality loss) [Default]"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbServeCodecOpus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Opus Compressed (High Efficiency)"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <!-- Bitrate Picker -->
@@ -818,9 +821,9 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="BITRATE: "
-                    android:textColor="#888888"
+                    android:textColor="@color/m3_on_surface_variant"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <Spinner
                     android:id="@+id/spinnerServeBitrate"
@@ -831,8 +834,8 @@
             </LinearLayout>
 
             <LinearLayout android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_width="match_parent" android:orientation="horizontal">
-                <TextView android:fontFamily="monospace" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="TARGET BUFFER (SERVE):" android:textColor="#888888" android:textSize="11sp"/>
-                <TextView android:fontFamily="monospace" android:id="@+id/tvServeTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
+                <TextView android:fontFamily="sans-serif" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="TARGET BUFFER (SERVE):" android:textColor="@color/m3_on_surface_variant" android:textSize="11sp"/>
+                <TextView android:fontFamily="sans-serif" android:id="@+id/tvServeTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="@color/m3_on_surface" android:textSize="11sp"/>
             </LinearLayout>
 
             <RadioGroup
@@ -847,9 +850,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="20ms"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -857,9 +860,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="40ms"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -867,9 +870,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="80ms"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -878,9 +881,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:checked="true"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="Auto"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
 
                 <RadioButton
@@ -888,9 +891,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1.2"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="Custom"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="11sp" />
             </RadioGroup>
 
@@ -903,7 +906,7 @@
                 android:stepSize="2.5"
                 android:value="30.0"
                 app:thumbColor="#FFFFFF"
-                app:trackColorActive="#00FF88"
+                app:trackColorActive="@color/m3_primary"
                 app:trackColorInactive="#444444" />
 
             <!-- Audio Level Meter -->
@@ -912,9 +915,9 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="AUDIO LEVEL METER:"
-                android:textColor="#888888"
+                android:textColor="@color/m3_on_surface_variant"
                 android:textSize="11sp"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <ProgressBar
                 android:id="@+id/pbServeLevel"
@@ -928,19 +931,19 @@
                 android:progressBackgroundTint="#222222" />
 
             <!-- Main Serve Button -->
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnToggleServe"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:layout_marginTop="12dp"
                 android:backgroundTint="#002211"
-                app:strokeColor="#00FF88"
+                app:strokeColor="@color/m3_outline"
                 app:strokeWidth="2dp"
                 android:text="[ 📡 START SERVING AUDIO (PORT 5004) ]"
-                android:textColor="#00FF88"
+                android:textColor="@color/m3_tertiary"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <!-- Status Readout -->
             <TextView
@@ -949,8 +952,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="AUDIO SENDER: READY (PORT 5004)"
-                android:textColor="#888888"
-                android:fontFamily="monospace" />
+                android:textColor="@color/m3_on_surface_variant"
+                android:fontFamily="sans-serif" />
 
             <TextView
                 android:id="@+id/tvServePps"
@@ -958,8 +961,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="TX PPS: 0 pps"
-                android:textColor="#888888"
-                android:fontFamily="monospace" />
+                android:textColor="@color/m3_on_surface_variant"
+                android:fontFamily="sans-serif" />
 
             <com.hasan.airspeaker.LatencyGraphView
                 android:id="@+id/latencyGraphServe"
@@ -976,7 +979,7 @@
                 android:text="Captures internal device playback (YouTube, Spotify, Games, System) via Android AudioPlaybackCapture (MediaProjection) and streams pristine 48 kHz stereo PCM16 directly to PC / Party Listeners on UDP 5004."
                 android:textColor="#8899AA"
                 android:textSize="11sp"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
         </LinearLayout>
 
         <!-- ============================================================= -->
@@ -1005,10 +1008,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="🎉 PARTY MODE — MULTI-DEVICE WIRELESS AUDIO"
-                    android:textColor="#38B6FF"
+                    android:textColor="@color/m3_primary"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:gravity="center" />
 
                 <TextView
@@ -1016,9 +1019,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:text="Independent from Normal 1-to-1 Mode.&#10;Choose how you want to use Party Mode:"
-                    android:textColor="#888888"
+                    android:textColor="@color/m3_on_surface_variant"
                     android:textSize="11sp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:gravity="center" />
 
                 <com.google.android.material.button.MaterialButton
@@ -1027,12 +1030,12 @@
                     android:layout_height="72dp"
                     android:layout_marginTop="16dp"
                     android:text="[ 👑 HOST A PARTY ]&#10;Create Host IP &amp; QR Code to Broadcast Sound"
-                    android:textColor="#00FF00"
+                    android:textColor="@color/m3_tertiary"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     app:backgroundTint="#002200"
-                    app:strokeColor="#00FF00"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="2dp"
                     app:cornerRadius="8dp" />
 
@@ -1042,12 +1045,12 @@
                     android:layout_height="72dp"
                     android:layout_marginTop="12dp"
                     android:text="[ 🎧 JOIN A PARTY ]&#10;Scan for Hosts or Scan QR Code to Listen"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     app:backgroundTint="#001822"
-                    app:strokeColor="#00EEEE"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="2dp"
                     app:cornerRadius="8dp" />
 
@@ -1056,9 +1059,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="💡 Tip: Normal Mode (PLAYER tab) streams directly PC ↔ Phone.&#10;Party Mode connects multiple devices concurrently."
-                    android:textColor="#666666"
+                    android:textColor="@color/m3_on_surface_variant"
                     android:textSize="10sp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:gravity="center" />
             </LinearLayout>
 
@@ -1083,14 +1086,14 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnPartyHostBack"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:text="[ ← BACK ]"
-                        android:textColor="#00FF00"
-                        app:strokeColor="#00FF00"
+                        android:textColor="@color/m3_tertiary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
 
                     <TextView
@@ -1099,14 +1102,14 @@
                         android:layout_weight="1"
                         android:layout_marginStart="8dp"
                         android:text="👑 HOST PARTY MODE"
-                        android:textColor="#00FF00"
+                        android:textColor="@color/m3_tertiary"
                         android:textSize="12sp"
                         android:textStyle="bold"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="sans-serif" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnEqualizerPartyHost"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:layout_marginStart="6dp"
@@ -1116,11 +1119,11 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:text="≡ EQ"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         app:backgroundTint="#101820"
-                        app:strokeColor="#00EEEE"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -1130,13 +1133,13 @@
                     android:id="@+id/tvPartyHostIpBanner"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="#101820"
+                    android:background="@drawable/bg_m3_input"
                     android:padding="10dp"
                     android:text="👑 HOST IP: Loading..."
-                    android:textColor="#00FF00"
+                    android:textColor="@color/m3_tertiary"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <TextView
                     android:layout_width="match_parent"
@@ -1145,7 +1148,7 @@
                     android:text="Other phones or PCs connect to your Hotspot / Wi-Fi and join using this IP or by scanning the QR code below:"
                     android:textColor="#AAAAAA"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <!-- QR Code View -->
                 <LinearLayout
@@ -1170,21 +1173,21 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
                         android:text="Scan with another phone • Tap QR to copy link"
-                        android:textColor="#38B6FF"
+                        android:textColor="@color/m3_primary"
                         android:textSize="11sp"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="sans-serif" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRefreshHostIpQr"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:layout_marginTop="6dp"
                         android:text="↻ REFRESH HOST IP &amp; QR"
-                        android:textColor="#00EEEE"
-                        app:strokeColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -1195,9 +1198,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:text="Broadcast this phone's audio"
-                    android:textColor="#38B6FF"
+                    android:textColor="@color/m3_primary"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <TextView
                     android:id="@+id/tvPartyHostModeHint"
@@ -1205,9 +1208,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="Relay mode: stream from PC to this phone's IP to feed the party."
-                    android:textColor="#888888"
+                    android:textColor="@color/m3_on_surface_variant"
                     android:textSize="10sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnTogglePartyHost"
@@ -1215,12 +1218,12 @@
                     android:layout_height="52dp"
                     android:layout_marginTop="10dp"
                     android:text="[ 👑 START PARTY BROADCAST (HOST) ]"
-                    android:textColor="#00FF00"
+                    android:textColor="@color/m3_tertiary"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     app:backgroundTint="#002B00"
-                    app:strokeColor="#00FF00"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
                     app:cornerRadius="0dp" />
 
@@ -1229,7 +1232,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:background="#101820"
+                    android:background="@drawable/bg_m3_input"
                     android:orientation="vertical"
                     android:padding="8dp">
 
@@ -1237,10 +1240,10 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="STREAM QUALITY &amp; BANDWIDTH:"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         android:textSize="11sp"
                         android:textStyle="bold"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="sans-serif" />
 
                     <!-- Codec Radio Group -->
                     <RadioGroup
@@ -1255,9 +1258,9 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="Lossless PCM16"
-                            android:textColor="#FFFFFF"
+                            android:textColor="@color/m3_on_surface"
                             android:textSize="11sp"
-                            android:fontFamily="monospace"
+                            android:fontFamily="sans-serif"
                             android:checked="true" />
 
                         <RadioButton
@@ -1266,9 +1269,9 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="16dp"
                             android:text="Opus"
-                            android:textColor="#FFFFFF"
+                            android:textColor="@color/m3_on_surface"
                             android:textSize="11sp"
-                            android:fontFamily="monospace" />
+                            android:fontFamily="sans-serif" />
                     </RadioGroup>
 
                     <!-- Bitrate Row -->
@@ -1284,22 +1287,22 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="MUSIC BITRATE: "
-                            android:textColor="#888888"
+                            android:textColor="@color/m3_on_surface_variant"
                             android:textSize="11sp"
-                            android:fontFamily="monospace" />
+                            android:fontFamily="sans-serif" />
 
                         <Spinner
                             android:id="@+id/spinnerPartyHostBitrate"
                             android:layout_width="wrap_content"
                             android:layout_height="38dp"
                             android:minWidth="120dp"
-                            android:background="#1A1A1A" />
+                            android:background="@drawable/bg_m3_input" />
                     </LinearLayout>
                 </LinearLayout>
 
                 <LinearLayout android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_width="match_parent" android:orientation="horizontal">
-                    <TextView android:fontFamily="monospace" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="PARTY HOST TARGET BUFFER:" android:textColor="#888888" android:textSize="11sp"/>
-                    <TextView android:fontFamily="monospace" android:id="@+id/tvPartyHostTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="#FFFFFF" android:textSize="11sp"/>
+                    <TextView android:fontFamily="sans-serif" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="PARTY HOST TARGET BUFFER:" android:textColor="@color/m3_on_surface_variant" android:textSize="11sp"/>
+                    <TextView android:fontFamily="sans-serif" android:id="@+id/tvPartyHostTargetBufferValue" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:textColor="@color/m3_on_surface" android:textSize="11sp"/>
                 </LinearLayout>
 
                 <RadioGroup
@@ -1314,9 +1317,9 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="20ms"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
 
                     <RadioButton
@@ -1324,9 +1327,9 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="40ms"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
 
                     <RadioButton
@@ -1334,9 +1337,9 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="80ms"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
 
                     <RadioButton
@@ -1345,9 +1348,9 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:checked="true"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="Auto"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
 
                     <RadioButton
@@ -1355,9 +1358,9 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1.2"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="Custom"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
                 </RadioGroup>
 
@@ -1379,21 +1382,21 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="CONNECTED JOINERS (ONLY ACTIVE MEMBERS):"
-                    android:textColor="#888888"
+                    android:textColor="@color/m3_on_surface_variant"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <TextView
                     android:id="@+id/tvPartyHostPeersList"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:background="#111111"
+                    android:background="@color/m3_surface_container"
                     android:padding="8dp"
                     android:text="Waiting for other devices to join..."
                     android:textColor="#CCCCCC"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <!-- Manual Peer Add Bar -->
                 <LinearLayout
@@ -1408,39 +1411,39 @@
                         android:layout_height="44dp"
                         android:layout_weight="1"
                         android:layout_marginEnd="6dp"
-                        android:background="#1A1A1A"
+                        android:background="@drawable/bg_m3_input"
                         android:hint="Add Peer IP (e.g. 192.168.43.105)"
                         android:textColorHint="#555555"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="12sp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:inputType="textUri"
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnAddPartyPeer"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="44dp"
                         android:layout_marginEnd="4dp"
                         android:text="ADD IP"
-                        android:textColor="#00FF00"
-                        app:strokeColor="#00FF00"
+                        android:textColor="@color/m3_tertiary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnClearPartyPeers"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="44dp"
                         android:text="CLEAR"
-                        android:textColor="#FF4444"
-                        app:strokeColor="#FF4444"
+                        android:textColor="@color/m3_error"
+                        app:strokeColor="@color/m3_error"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -1472,14 +1475,14 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnPartyJoinBack"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:text="[ ← BACK ]"
-                        android:textColor="#00EEEE"
-                        app:strokeColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
 
                     <TextView
@@ -1488,26 +1491,26 @@
                         android:layout_weight="1"
                         android:layout_marginStart="8dp"
                         android:text="🎧 JOIN PARTY"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         android:textSize="12sp"
                         android:textStyle="bold"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="sans-serif" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnScanPartyQrCamera"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:text="📷 SCAN"
-                        android:textColor="#00FF00"
-                        app:strokeColor="#00FF00"
+                        android:textColor="@color/m3_tertiary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnEqualizerPartyJoin"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:layout_marginStart="6dp"
@@ -1517,11 +1520,11 @@
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:text="≡ EQ"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         app:backgroundTint="#101820"
-                        app:strokeColor="#00EEEE"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="11sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -1533,12 +1536,12 @@
                     android:layout_height="56dp"
                     android:layout_marginBottom="12dp"
                     android:text="📷  SCAN PARTY QR CODE"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     android:textSize="14sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     app:backgroundTint="#002233"
-                    app:strokeColor="#00EEEE"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
                     app:cornerRadius="0dp" />
 
@@ -1554,21 +1557,21 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="📡 ACTIVE PARTY HOSTS ON NETWORK:"
-                        android:textColor="#888888"
+                        android:textColor="@color/m3_on_surface_variant"
                         android:textSize="11sp"
                         android:textStyle="bold"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="sans-serif" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRescanPartyHosts"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="34dp"
                         android:text="↻ SCAN"
-                        android:textColor="#00EEEE"
-                        app:strokeColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:textSize="10sp" />
                 </LinearLayout>
 
@@ -1577,12 +1580,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:background="#101820"
+                    android:background="@drawable/bg_m3_input"
                     android:padding="8dp"
                     android:text="Waiting for party hosts... Tap a host below to connect:"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     android:textSize="11sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <!-- Dynamic Clickable Host Buttons Container -->
                 <LinearLayout
@@ -1598,12 +1601,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:background="#111111"
+                    android:background="@color/m3_surface_container"
                     android:padding="10dp"
                     android:text="PARTY JOINER: Standby (Scan QR or tap an active host above)"
-                    android:textColor="#00FF00"
+                    android:textColor="@color/m3_tertiary"
                     android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <!-- Join / Leave Action Button -->
                 <com.google.android.material.button.MaterialButton
@@ -1612,13 +1615,13 @@
                     android:layout_height="50dp"
                     android:layout_marginTop="6dp"
                     android:text="[ ■ LEAVE PARTY ]"
-                    android:textColor="#FF4444"
+                    android:textColor="@color/m3_error"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:visibility="gone"
                     app:backgroundTint="#330000"
-                    app:strokeColor="#FF4444"
+                    app:strokeColor="@color/m3_error"
                     app:strokeWidth="1dp"
                     app:cornerRadius="0dp" />
 
@@ -1634,27 +1637,27 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="20ms"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
                     <RadioButton
                         android:id="@+id/rbPartyJoinMed"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="40ms"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
                     <RadioButton
                         android:id="@+id/rbPartyJoinHigh"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="80ms"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
                     <RadioButton
                         android:id="@+id/rbPartyJoinAuto"
@@ -1662,18 +1665,18 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:checked="true"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="Auto"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
                     <RadioButton
                         android:id="@+id/rbPartyJoinCustom"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1.2"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="Custom"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@color/m3_on_surface"
                         android:textSize="11sp" />
                 </RadioGroup>
 
@@ -1687,15 +1690,15 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="TARGET BUFFER:"
-                        android:textColor="#888888"
-                        android:fontFamily="monospace" />
+                        android:textColor="@color/m3_on_surface_variant"
+                        android:fontFamily="sans-serif" />
                     <TextView
                         android:id="@+id/tvTargetBufferPartyJoin"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="30 ms"
-                        android:textColor="#FFFFFF"
-                        android:fontFamily="monospace" />
+                        android:textColor="@color/m3_on_surface"
+                        android:fontFamily="sans-serif" />
                 </LinearLayout>
 
                 <com.google.android.material.slider.Slider
@@ -1707,7 +1710,7 @@
                     android:stepSize="2.5"
                     android:value="30.0"
                     app:thumbColor="#FFFFFF"
-                    app:trackColorActive="#00EEEE"
+                    app:trackColorActive="@color/m3_primary"
                     app:trackColorInactive="#444444" />
 
                 <com.hasan.airspeaker.LatencyGraphView
@@ -1733,9 +1736,9 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="📡 EXTEND THIS PARTY (HOTSPOT REPEATER)"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
@@ -1743,7 +1746,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         android:text="You have joined the party! Turn on your Mobile Hotspot and tap Extend below to generate your own Extended Host IP &amp; QR code so other people can connect to you:"
                         android:textColor="#AABBCC"
                         android:textSize="11sp" />
@@ -1754,12 +1757,12 @@
                         android:layout_height="48dp"
                         android:layout_marginTop="8dp"
                         android:text="[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR &amp; IP) ]"
-                        android:textColor="#00EEEE"
+                        android:textColor="@color/m3_primary"
                         android:textSize="12sp"
                         android:textStyle="bold"
-                        android:fontFamily="monospace"
+                        android:fontFamily="sans-serif"
                         app:backgroundTint="#002222"
-                        app:strokeColor="#00EEEE"
+                        app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
                         app:cornerRadius="4dp" />
 
@@ -1777,10 +1780,10 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:background="#102418"
-                            android:fontFamily="monospace"
+                            android:fontFamily="sans-serif"
                             android:padding="10dp"
                             android:text="📡 EXTENDED HOST IP: Detecting Hotspot / Wi-Fi IP..."
-                            android:textColor="#00FF00"
+                            android:textColor="@color/m3_tertiary"
                             android:textSize="13sp"
                             android:textStyle="bold" />
 
@@ -1804,23 +1807,23 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="4dp"
-                                android:fontFamily="monospace"
+                                android:fontFamily="sans-serif"
                                 android:text="Friends scan this QR to join YOUR extended party • Tap to copy"
-                                android:textColor="#00EEEE"
+                                android:textColor="@color/m3_primary"
                                 android:textSize="11sp" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRefreshExtendIp"
-                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="match_parent"
                             android:layout_height="40dp"
                             android:layout_marginTop="8dp"
                             android:text="↻ REFRESH HOTSPOT IP &amp; QR CODE"
-                            android:textColor="#00EEEE"
-                            app:strokeColor="#00EEEE"
+                            android:textColor="@color/m3_primary"
+                            app:strokeColor="@color/m3_outline"
                             app:strokeWidth="1dp"
-                            android:fontFamily="monospace"
+                            android:fontFamily="sans-serif"
                             android:textSize="11sp" />
 
                         <TextView
@@ -1829,7 +1832,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
                             android:background="#081018"
-                            android:fontFamily="monospace"
+                            android:fontFamily="sans-serif"
                             android:padding="8dp"
                             android:text="Extended Party Peers: Waiting for friends to scan your QR..."
                             android:textColor="#CCCCCC"
@@ -1839,7 +1842,7 @@
             </LinearLayout>
 
             <!-- Hidden legacy elements for complete code compatibility -->
-            <com.google.android.material.switchmaterial.SwitchMaterial
+            <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/switchPartyMode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -1866,7 +1869,7 @@
                     android:layout_height="wrap_content"
                     android:visibility="gone" />
             </RadioGroup>
-            <com.google.android.material.switchmaterial.SwitchMaterial
+            <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/switchExtendParty"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -1904,10 +1907,10 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="AUDIO QUALITY (SYNCED WITH PC):"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgCodec"
@@ -1920,8 +1923,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Compressed (Opus — Recommended)"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbCodecPcm"
@@ -1929,8 +1932,8 @@
                     android:layout_height="wrap_content"
                     android:checked="true"
                     android:text="Uncompressed (Lossless PCM16 48 kHz)"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <!-- Opus Bitrate Spinner / Chips -->
@@ -1939,15 +1942,15 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="OPUS BITRATE:"
-                android:textColor="#888888"
-                android:fontFamily="monospace" />
+                android:textColor="@color/m3_on_surface_variant"
+                android:fontFamily="sans-serif" />
 
             <Spinner
                 android:id="@+id/spinnerBitrate"
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
-                android:background="#111111"
-                android:fontFamily="monospace" />
+                android:background="@color/m3_surface_container"
+                android:fontFamily="sans-serif" />
 
             <!-- Output Engine -->
             <TextView
@@ -1955,10 +1958,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
                 android:text="AUDIO OUTPUT ENGINE:"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgOutputEngine"
@@ -1972,27 +1975,27 @@
                     android:layout_height="wrap_content"
                     android:checked="true"
                     android:text="Oboe / AAudio (Low-Latency MMAP)"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbEngineAudioTrack"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="AudioTrack Standard Output"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <!-- Audio Effects / Loudness -->
-            <com.google.android.material.switchmaterial.SwitchMaterial
+            <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/switchAudioFx"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="Enable Audio Effects / Equalizer"
-                android:textColor="#FFFFFF"
-                android:fontFamily="monospace"
+                android:textColor="@color/m3_on_surface"
+                android:fontFamily="sans-serif"
                 app:useMaterialThemeColors="false"
                 app:thumbTint="#FFFFFF"
                 app:trackTint="#666666" />
@@ -2008,15 +2011,15 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:text="UNIVERSAL DEVICE EQUALIZER (MASTER EQ):"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnEqualizerUniversal"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
                     android:layout_height="34dp"
                     android:layout_marginStart="6dp"
@@ -2026,18 +2029,18 @@
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:text="≡ EQ"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     app:backgroundTint="#101820"
-                    app:strokeColor="#00EEEE"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <CheckBox android:fontFamily="monospace" android:id="@+id/cbUniversalEqServeHost" android:layout_height="wrap_content" android:layout_width="match_parent" android:text="Apply Universal EQ to Hosting &amp; Serving (SERVE / HOST)" android:textColor="#FFFFFF" android:textSize="11sp"/>
+            <CheckBox android:fontFamily="sans-serif" android:id="@+id/cbUniversalEqServeHost" android:layout_height="wrap_content" android:layout_width="match_parent" android:text="Apply Universal EQ to Hosting &amp; Serving (SERVE / HOST)" android:textColor="@color/m3_on_surface" android:textSize="11sp"/>
 
-            <CheckBox android:fontFamily="monospace" android:id="@+id/cbUniversalEqPlayJoin" android:layout_height="wrap_content" android:layout_width="match_parent" android:text="Apply Universal EQ to Playing &amp; Joining (PLAY / JOIN)" android:textColor="#FFFFFF" android:textSize="11sp"/>
+            <CheckBox android:fontFamily="sans-serif" android:id="@+id/cbUniversalEqPlayJoin" android:layout_height="wrap_content" android:layout_width="match_parent" android:text="Apply Universal EQ to Playing &amp; Joining (PLAY / JOIN)" android:textColor="@color/m3_on_surface" android:textSize="11sp"/>
 
             <!-- Exclusive Audio Mode -->
             <TextView
@@ -2045,10 +2048,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:text="EXCLUSIVE AUDIO (AUDIO FOCUS):"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <RadioGroup
                 android:id="@+id/rgExclusiveMode"
@@ -2062,51 +2065,51 @@
                     android:layout_height="wrap_content"
                     android:checked="true"
                     android:text="Mix With Others (Listen simultaneously)"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbFocusExclusive"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Activated (Mute on other app playback)"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
 
                 <RadioButton
                     android:id="@+id/rbFocusAlways"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Always Play (Continue during calls)"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </RadioGroup>
 
             <!-- Headset disconnect switch -->
-            <com.google.android.material.switchmaterial.SwitchMaterial
+            <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/switchHeadsetDisconnect"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="Pause stream on headset disconnection"
-                android:textColor="#FFFFFF"
-                android:fontFamily="monospace"
+                android:textColor="@color/m3_on_surface"
+                android:fontFamily="sans-serif"
                 app:useMaterialThemeColors="false"
                 app:thumbTint="#FFFFFF"
                 app:trackTint="#666666" />
 
             <!-- Battery Optimization -->
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnBatteryOpt"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 app:strokeColor="#666666"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/m3_on_surface"
                 android:text="CHECK BATTERY OPTIMIZATION"
                 android:textSize="12sp"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <!-- Local IPs Section -->
             <LinearLayout
@@ -2121,31 +2124,31 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="AVAILABLE ADAPTER IPS:"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnRefreshIps"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="REFRESH"
-                    android:textColor="#FFFFFF"
-                    android:fontFamily="monospace" />
+                    android:textColor="@color/m3_on_surface"
+                    android:fontFamily="sans-serif" />
             </LinearLayout>
 
             <TextView
                 android:id="@+id/tvIpList"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="#111111"
+                android:background="@color/m3_surface_container"
                 android:padding="8dp"
                 android:text="Scanning interfaces..."
                 android:textColor="#CCCCCC"
                 android:textSize="12sp"
-                android:fontFamily="monospace" />
+                android:fontFamily="sans-serif" />
 
             <!-- App Version & GitHub Updates -->
             <LinearLayout
@@ -2161,22 +2164,22 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Air Speaker v1.0.0"
-                    android:textColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
                     android:textSize="12sp"
                     android:textStyle="bold"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="sans-serif" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnCheckForUpdates"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
                     android:layout_height="44dp"
                     android:layout_marginTop="8dp"
                     android:text="🔄 CHECK FOR UPDATES"
-                    android:textColor="#00EEEE"
-                    app:strokeColor="#00EEEE"
+                    android:textColor="@color/m3_primary"
+                    app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:textSize="12sp" />
 
                 <TextView
@@ -2185,9 +2188,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:text=""
-                    android:textColor="#888888"
+                    android:textColor="@color/m3_on_surface_variant"
                     android:textSize="11sp"
-                    android:fontFamily="monospace"
+                    android:fontFamily="sans-serif"
                     android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>

@@ -19,6 +19,7 @@ static std::vector<std::string> gSavedPartyPeers;
 static bool gSavedEqEnabled = false;
 static float gSavedEqBands[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static bool gSavedBluetoothRoute = false;
+static bool gSavedUseExternalOutput = false;
 
 extern "C" {
 
@@ -37,8 +38,8 @@ Java_com_hasan_airspeaker_AudioNative_nativeStart(JNIEnv* /*env*/, jobject /*thi
     gAudioEngine->setPartyRelayEnabled(gSavedPartyRelay);
     gAudioEngine->setPartyPeers(gSavedPartyPeers);
     gAudioEngine->setEqualizerBands(gSavedEqEnabled, gSavedEqBands[0], gSavedEqBands[1], gSavedEqBands[2], gSavedEqBands[3], gSavedEqBands[4]);
-    gAudioEngine->setBluetoothRouteActive(gSavedBluetoothRoute);
-    return gAudioEngine->start(port) ? JNI_TRUE : JNI_FALSE;
+    gAudioEngine->setBluetoothRouteActive(gSavedBluetoothRoute, false);
+    return gAudioEngine->start(port, gSavedUseExternalOutput) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -290,6 +291,44 @@ Java_com_hasan_airspeaker_AudioNative_nativeGetSenderIp(JNIEnv* env, jobject /*t
         }
     }
     return nullptr;
+}
+
+JNIEXPORT void JNICALL
+Java_com_hasan_airspeaker_AudioNative_nativeSetUseExternalOutput(JNIEnv* /*env*/, jobject /*thiz*/, jboolean useExternal) {
+    std::lock_guard<std::mutex> lock(gEngineMutex);
+    gSavedUseExternalOutput = (useExternal == JNI_TRUE);
+    if (gAudioEngine) {
+        gAudioEngine->setUseExternalOutput(gSavedUseExternalOutput);
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_hasan_airspeaker_AudioNative_nativeReadExternalPcm(JNIEnv* env, jobject /*thiz*/, jshortArray outBuffer, jint numFrames) {
+    if (!outBuffer || numFrames <= 0) return 0;
+    jsize len = env->GetArrayLength(outBuffer);
+    if (len < numFrames * 2) return 0;
+
+    NativeAudioEngine* engine = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(gEngineMutex);
+        engine = gAudioEngine;
+    }
+    if (!engine) return 0;
+
+    jshort* elems = env->GetShortArrayElements(outBuffer, nullptr);
+    if (!elems) return 0;
+    int32_t rendered = engine->renderExternalAudio(reinterpret_cast<int16_t*>(elems), numFrames);
+    env->ReleaseShortArrayElements(outBuffer, elems, 0);
+    return rendered;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_hasan_airspeaker_AudioNative_nativeGetOutputBackend(JNIEnv* /*env*/, jobject /*thiz*/) {
+    std::lock_guard<std::mutex> lock(gEngineMutex);
+    if (gAudioEngine) {
+        return gAudioEngine->getOutputBackendType();
+    }
+    return 0;
 }
 
 } // extern "C"

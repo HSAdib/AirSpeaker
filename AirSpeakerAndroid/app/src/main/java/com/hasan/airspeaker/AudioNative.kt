@@ -54,6 +54,9 @@ object AudioNative {
     external fun nativeSetPartyPeers(peers: Array<String>)
     external fun nativeSetEqBands(enabled: Boolean, gainsDb: FloatArray)
     external fun nativeGetAudioSessionId(): Int
+    external fun nativeSetUseExternalOutput(useExternal: Boolean)
+    external fun nativeReadExternalPcm(outBuffer: ShortArray, numFrames: Int): Int
+    external fun nativeGetOutputBackend(): Int
     external fun nativeGetStats(): FloatArray?
     external fun nativeGetAdvancedStats(): DoubleArray?
     external fun nativeGetSenderIp(): String?

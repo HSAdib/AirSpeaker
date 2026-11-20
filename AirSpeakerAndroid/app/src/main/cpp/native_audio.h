@@ -38,10 +38,15 @@ public:
     ~NativeAudioEngine();
 
     // Section 5: Transactional start with reverse rollback on failure
-    bool start(int audio_port = 5004);
+    bool start(int audio_port = 5004, bool useExternalOutput = false);
 
     // Section 6: Idempotent and race-safe stop
     void stop();
+
+    void setUseExternalOutput(bool useExternal);
+    bool isUsingExternalOutput() const;
+    int32_t renderExternalAudio(int16_t* output, int32_t numFrames);
+    int32_t getOutputBackendType() const; // 0=STOPPED, 1=OBOE_AAUDIO, 2=OBOE_OPENSLES, 3=AUDIOTRACK
 
     void setTargetBufferMs(float target_ms);
     float getTargetBufferMs();
@@ -80,6 +85,8 @@ private:
     void stopAndCloseOboeStream();
     void scheduleStreamReopen();
     void socketReceiverLoop();
+    void processOutputBlock(int16_t* output, int32_t numFrames);
+    std::atomic<bool> mUseExternalOutput{false};
 
     int mAudioPort{5004};
     std::mutex mStartStopMutex;

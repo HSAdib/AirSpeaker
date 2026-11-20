@@ -9,6 +9,25 @@
 import SwiftUI
 import UIKit
 
+private enum M3 {
+    static let bg = Color(red: 0.063, green: 0.075, blue: 0.094)               // #101318
+    static let surfaceLow = Color(red: 0.090, green: 0.106, blue: 0.133)       // #171B22
+    static let surface = Color(red: 0.114, green: 0.133, blue: 0.169)          // #1D222B
+    static let surfaceHigh = Color(red: 0.149, green: 0.176, blue: 0.224)      // #262D39
+    static let outline = Color(red: 0.173, green: 0.200, blue: 0.251)          // #2C3340
+    static let primary = Color(red: 0.659, green: 0.780, blue: 0.980)          // #A8C7FA
+    static let primaryContainer = Color(red: 0.031, green: 0.259, blue: 0.627) // #0842A0
+    static let onPrimaryContainer = Color(red: 0.827, green: 0.890, blue: 0.992)
+    static let secondaryContainer = Color(red: 0.169, green: 0.204, blue: 0.271)
+    static let onSecondaryContainer = Color(red: 0.855, green: 0.886, blue: 0.976)
+    static let tertiary = Color(red: 0.482, green: 0.863, blue: 0.659)         // #7BDCA8
+    static let tertiaryContainer = Color(red: 0.051, green: 0.275, blue: 0.184)
+    static let errorContainer = Color(red: 0.576, green: 0.000, blue: 0.039)   // #93000A
+    static let onErrorContainer = Color(red: 1.000, green: 0.855, blue: 0.839) // #FFDAD6
+    static let onSurface = Color(red: 0.890, green: 0.902, blue: 0.933)        // #E3E6EE
+    static let onSurfaceVariant = Color(red: 0.608, green: 0.639, blue: 0.706) // #9BA3B4
+}
+
 public struct ContentView: View {
     @StateObject private var engine = AirSpeakerEngine.shared
     @State private var selectedTab: Int = 0
@@ -16,7 +35,7 @@ public struct ContentView: View {
 
     public var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            M3.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Top Studio Header
@@ -37,11 +56,11 @@ public struct ContentView: View {
                         }) {
                             Text("?")
                                 .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .foregroundColor(M3.tertiary)
                                 .frame(width: 38, height: 32)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(M3.tertiary, lineWidth: 1)
                                 )
                         }
                     }
@@ -60,7 +79,7 @@ public struct ContentView: View {
                         }()
                         Text(statusText)
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(engine.isAudioPlaying || engine.isInternalAudioServing ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+                            .foregroundColor(engine.isAudioPlaying || engine.isInternalAudioServing ? M3.tertiary : Color(white: 0.55))
                         Spacer()
                     }
                 }
@@ -80,7 +99,7 @@ public struct ContentView: View {
                                 UIApplication.shared.open(url)
                             }
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                            .foregroundColor(M3.tertiary)
                         }
                         Button("[ ✕ ]") {
                             engine.dismissUpdateBanner(skip: true)
@@ -91,7 +110,7 @@ public struct ContentView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color(red: 0.05, green: 0.15, blue: 0.1))
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.8, blue: 0.5), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.0, green: 0.8, blue: 0.5), lineWidth: 1))
                     .padding(.horizontal, 14)
                     .padding(.bottom, 4)
                 }
@@ -140,14 +159,11 @@ struct StudioTabButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isSelected ? M3.onPrimaryContainer : M3.onSurfaceVariant)
                 .frame(maxWidth: .infinity, minHeight: 38)
-                .background(isSelected ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color.black)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: isSelected ? 2 : 1)
-                )
+                .background(isSelected ? M3.primaryContainer : Color.clear)
+                .clipShape(Capsule())
         }
     }
 }
@@ -158,18 +174,16 @@ struct StudioEQCornerButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(enabled ? "≡ EQ ON" : "≡ EQ")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(red: 0.0, green: 0.93, blue: 0.93))
-                .padding(.horizontal, 8)
+            Text(enabled ? "EQ On" : "EQ")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(enabled ? M3.onTertiaryContainer : M3.onSecondaryContainer)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(enabled ? Color(red: 0.0, green: 0.17, blue: 0.0) : Color(red: 0.06, green: 0.09, blue: 0.13))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1)
-                )
+                .background(enabled ? M3.tertiaryContainer : M3.secondaryContainer)
+                .clipShape(Capsule())
         }
     }
+}
 }
 
 // MARK: - Tab 1: PLAYER STUDIO TAB
@@ -188,7 +202,7 @@ struct PlayerStudioTab: View {
                             let hostDisplay = engine.connectedServerIp.isEmpty ? "Waiting for PC connection..." : "\(engine.connectedServerName) (\(engine.connectedServerIp))"
                             Text("💻 Connected to: \(hostDisplay)")
                                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .foregroundColor(M3.primary)
 
                             Text("📱 This Phone: \(engine.deviceName)")
                                 .font(.system(size: 11, design: .monospaced))
@@ -206,15 +220,15 @@ struct PlayerStudioTab: View {
                     HStack(spacing: 6) {
                         Text("PC IP:")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                            .foregroundColor(M3.primary)
 
                         TextField(engine.connectedServerIp.isEmpty ? "Auto-Detecting PC..." : engine.connectedServerIp, text: $pcIpInput)
                             .font(.system(size: 12, design: .monospaced))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
-                            .background(Color(red: 0.06, green: 0.09, blue: 0.13))
+                            .background(M3.surfaceHigh)
                             .foregroundColor(.white)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
                         Button(action: {
                             let trimmed = pcIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -226,17 +240,17 @@ struct PlayerStudioTab: View {
                         }) {
                             Text("SET IP")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .foregroundColor(M3.primary)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.22, green: 0.71, blue: 1.0), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
                         }
                     }
                     .padding(.top, 4)
                 }
                 .padding(10)
-                .background(Color(red: 0.10, green: 0.15, blue: 0.19))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                .background(M3.surface)
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                 // Main Action Button
                 Button(action: {
@@ -249,10 +263,10 @@ struct PlayerStudioTab: View {
                 }) {
                     Text(engine.isAudioPlaying ? "[ ■ STOP SPEAKER PLAYER (PORT 5004) ]" : "[ ▶ START SPEAKER PLAYER (PORT 5004) ]")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .foregroundColor(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary)
                         .frame(maxWidth: .infinity, minHeight: 46)
                         .background(engine.isAudioPlaying ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.13, blue: 0.0))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary, lineWidth: 2))
                 }
 
                 // Sound Mode
@@ -312,7 +326,7 @@ struct PlayerStudioTab: View {
                     let expDelay = Int(engine.latencyMs + 25.0)
                     Text("Expected Delay: ~\(expDelay) ms")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                        .foregroundColor(M3.primary)
                 }
 
                 // Stability / Delay Buffer
@@ -357,7 +371,7 @@ struct PlayerStudioTab: View {
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundColor(engine.isMuted ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white)
                                 .frame(width: 60, height: 32)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.isMuted ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white, lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(engine.isMuted ? Color(red: 1.0, green: 0.27, blue: 0.27) : .white, lineWidth: 1))
                         }
                     }
                 }
@@ -392,7 +406,7 @@ struct PlayerStudioTab: View {
                     }
                     .padding(8)
                     .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.15), lineWidth: 1))
                 }
             }
             .padding(14)
@@ -415,7 +429,7 @@ struct ServeStudioTab: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("📡 IN-APP AUDIO CAPTURE (REPLAYKIT — PORT 5004)")
                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .foregroundColor(M3.primary)
 
                             Text("Captures audio from this device using ReplayKit in real-time and streams to PC, Mac, Linux, or another phone.")
                                 .font(.system(size: 11, design: .monospaced))
@@ -433,15 +447,15 @@ struct ServeStudioTab: View {
                     HStack(spacing: 6) {
                         Text("TARGET IP:")
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                            .foregroundColor(M3.primary)
 
                         TextField(engine.connectedServerIp.isEmpty ? "255.255.255.255 (Broadcast)" : engine.connectedServerIp, text: $targetIpInput)
                             .font(.system(size: 11, design: .monospaced))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
-                            .background(Color(red: 0.06, green: 0.09, blue: 0.13))
+                            .background(M3.surfaceHigh)
                             .foregroundColor(.white)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
                         Button(action: {
                             let trimmed = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -451,17 +465,17 @@ struct ServeStudioTab: View {
                         }) {
                             Text("SET")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .foregroundColor(M3.primary)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.22, green: 0.71, blue: 1.0), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
                         }
                     }
                     .padding(.top, 4)
                 }
                 .padding(10)
-                .background(Color(red: 0.10, green: 0.15, blue: 0.19))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                .background(M3.surface)
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                 // Big Action Button
                 Button(action: {
@@ -470,10 +484,10 @@ struct ServeStudioTab: View {
                 }) {
                     Text(engine.isInternalAudioServing ? "[ ■ STOP IN-APP AUDIO CAPTURE ]" : "[ 📡 START IN-APP AUDIO CAPTURE (PORT 5004) ]")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .foregroundColor(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary)
                         .frame(maxWidth: .infinity, minHeight: 46)
                         .background(engine.isInternalAudioServing ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.13, blue: 0.0))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary, lineWidth: 2))
                 }
 
                 // Sound Mode Chips
@@ -531,15 +545,15 @@ struct ServeStudioTab: View {
                         Spacer()
                         Text(String(format: "%.1f dB", 20.0 * log10(max(0.0001, Double(engine.servePeakLevel)))))
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .foregroundColor(M3.primary)
                     }
 
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
+                            RoundedRectangle(cornerRadius: 14)
                                 .fill(Color(white: 0.15))
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(engine.servePeakLevel > 0.9 ? Color.red : Color(red: 0.0, green: 1.0, blue: 0.0))
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(engine.servePeakLevel > 0.9 ? Color.red : M3.tertiary)
                                 .frame(width: max(0, min(geo.size.width, geo.size.width * CGFloat(engine.servePeakLevel))))
                         }
                     }
@@ -562,12 +576,12 @@ struct ServeStudioTab: View {
                         Spacer()
                         Text(engine.connectedServerIp.isEmpty ? "255.255.255.255:5004" : "\(engine.connectedServerIp):5004")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                            .foregroundColor(M3.primary)
                     }
                 }
                 .padding(10)
                 .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.15), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("LIVE DELAY GRAPH")
@@ -602,7 +616,7 @@ struct PartyStudioTab: View {
                     VStack(alignment: .center, spacing: 12) {
                         Text("🎉 PARTY MODE — MULTI-DEVICE WIRELESS AUDIO")
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                            .foregroundColor(M3.primary)
                             .multilineTextAlignment(.center)
 
                         Text("Independent from Normal 1-to-1 Mode.\nChoose how you want to use Party Mode:")
@@ -616,14 +630,14 @@ struct PartyStudioTab: View {
                             VStack(spacing: 4) {
                                 Text("[ 👑 HOST A PARTY ]")
                                     .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                    .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                    .foregroundColor(M3.tertiary)
                                 Text("Create Host IP & QR Code to Broadcast Sound")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(Color(white: 0.7))
                             }
                             .frame(maxWidth: .infinity, minHeight: 64)
                             .background(Color(red: 0.0, green: 0.13, blue: 0.0))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(M3.tertiary, lineWidth: 1.5))
                         }
 
                         Button(action: {
@@ -632,19 +646,19 @@ struct PartyStudioTab: View {
                             VStack(spacing: 4) {
                                 Text("[ 🎧 JOIN A PARTY ]")
                                     .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                    .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                    .foregroundColor(M3.primary)
                                 Text("Scan QR or Join from Discovered Party Hosts")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(Color(white: 0.7))
                             }
                             .frame(maxWidth: .infinity, minHeight: 64)
                             .background(Color(red: 0.0, green: 0.09, blue: 0.13))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1.5))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(M3.primary, lineWidth: 1.5))
                         }
                     }
                     .padding(14)
                     .background(Color(red: 0.04, green: 0.05, blue: 0.08))
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                 } else if engine.partyScreen == "HOST" {
                     VStack(alignment: .leading, spacing: 12) {
@@ -657,7 +671,7 @@ struct PartyStudioTab: View {
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.4), lineWidth: 1))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.4), lineWidth: 1))
                             }
                             Spacer()
                             Text("👑 HOST MODE")
@@ -682,15 +696,15 @@ struct PartyStudioTab: View {
                         }) {
                             Text(engine.isPartyHostBroadcasting ? "[ ■ STOP PARTY BROADCAST (HOST) ]" : "[ 👑 START PARTY BROADCAST (HOST) ]")
                                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundColor(engine.isPartyHostBroadcasting ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .foregroundColor(engine.isPartyHostBroadcasting ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary)
                                 .frame(maxWidth: .infinity, minHeight: 46)
                                 .background(engine.isPartyHostBroadcasting ? Color(red: 0.20, green: 0.0, blue: 0.0) : Color(red: 0.0, green: 0.17, blue: 0.0))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(engine.isPartyHostBroadcasting ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1.5))
+                                .overlay(RoundedRectangle(cornerRadius: 20).stroke(engine.isPartyHostBroadcasting ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary, lineWidth: 1.5))
                         }
 
                         Text(engine.isPartyHostBroadcasting ? "PARTY STATUS: BROADCASTING (\(engine.partyMembers.count) joiner(s) active)" : "PARTY STATUS: STANDBY — Tap Start Party Broadcast")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(engine.isPartyHostBroadcasting ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.55))
+                            .foregroundColor(engine.isPartyHostBroadcasting ? M3.tertiary : Color(white: 0.55))
 
                         // Host QR & IP Card
                         let hostQrUri = engine.makePartyQrUri(isExtended: false)
@@ -714,7 +728,7 @@ struct PartyStudioTab: View {
                                     engine.broadcastBeacon()
                                 }
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                .foregroundColor(M3.primary)
 
                                 Button("📋 COPY LINK") {
                                     UIPasteboard.general.string = hostQrUri
@@ -726,7 +740,7 @@ struct PartyStudioTab: View {
                         .frame(maxWidth: .infinity)
                         .padding(10)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         // Stream Quality & Host Controls Card (Host Broadcast - Locked to PCM16)
                         VStack(alignment: .leading, spacing: 8) {
@@ -736,10 +750,10 @@ struct PartyStudioTab: View {
 
                             Text("Audio Codec: PCM16 (Uncompressed)")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .foregroundColor(M3.tertiary)
                                 .frame(maxWidth: .infinity, minHeight: 32)
                                 .background(Color(red: 0.06, green: 0.13, blue: 0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.tertiary, lineWidth: 1))
 
                             Text("Note: Party broadcast operates in relay or internal ReplayKit mode (stream PC audio to this device to feed the party, or broadcast local audio).")
                                 .font(.system(size: 9, design: .monospaced))
@@ -749,13 +763,13 @@ struct PartyStudioTab: View {
                         }
                         .padding(10)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.07))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         // Connected Members Card
                         VStack(alignment: .leading, spacing: 8) {
                             Text("👑 CONNECTED JOINERS (\(engine.partyMembers.count) active):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .foregroundColor(M3.tertiary)
 
                             if engine.partyMembers.isEmpty {
                                 Text("No phones joined yet. Friends can scan the QR code to connect.")
@@ -776,7 +790,7 @@ struct PartyStudioTab: View {
                                         .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 4)
-                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
+                                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
                                     }
                                     .padding(6)
                                     .background(Color(red: 0.07, green: 0.07, blue: 0.07))
@@ -791,7 +805,7 @@ struct PartyStudioTab: View {
                                     .padding(6)
                                     .background(Color(red: 0.07, green: 0.07, blue: 0.07))
                                     .foregroundColor(.white)
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
                                 Button("+ ADD IP") {
                                     if !manualPeerInput.isEmpty {
@@ -800,10 +814,10 @@ struct PartyStudioTab: View {
                                     }
                                 }
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                .foregroundColor(M3.primary)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
 
                                 Button("CLEAR") {
                                     engine.clearPartyPeers()
@@ -812,13 +826,13 @@ struct PartyStudioTab: View {
                                 .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
                             }
                             .padding(.top, 4)
                         }
                         .padding(10)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text("PARTY HOST LIVE DELAY GRAPH:")
@@ -844,14 +858,14 @@ struct PartyStudioTab: View {
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.4), lineWidth: 1))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.4), lineWidth: 1))
                             }
                             Spacer()
                             Button("↻ SCAN") {
                                 engine.broadcastBeacon()
                             }
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .foregroundColor(M3.primary)
 
                             StudioEQCornerButton(enabled: engine.partyJoinEQ.enabled) {
                                 showJoinEQSheet = true
@@ -871,17 +885,17 @@ struct PartyStudioTab: View {
                                 Text("[ 📷 SCAN PARTY QR CODE ]")
                                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                             }
-                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .foregroundColor(M3.primary)
                             .frame(maxWidth: .infinity, minHeight: 46)
                             .background(Color(red: 0.0, green: 0.12, blue: 0.16))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1.5))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(M3.primary, lineWidth: 1.5))
                         }
 
                         // Discovered Hosts List
                         VStack(alignment: .leading, spacing: 6) {
                             Text("DISCOVERED PARTY HOSTS (\(engine.discoveredPartyHosts.count)):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .foregroundColor(M3.primary)
 
                             if engine.discoveredPartyHosts.isEmpty {
                                 VStack(spacing: 4) {
@@ -895,7 +909,7 @@ struct PartyStudioTab: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .background(Color(red: 0.06, green: 0.06, blue: 0.08))
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.15), lineWidth: 1))
                             } else {
                                 ForEach(engine.discoveredPartyHosts) { host in
                                     Button(action: {
@@ -905,7 +919,7 @@ struct PartyStudioTab: View {
                                             VStack(alignment: .leading, spacing: 2) {
                                                 Text("👑 \(host.name)")
                                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(host.isExtended ? Color(red: 1.0, green: 0.85, blue: 0.0) : Color(red: 0.0, green: 1.0, blue: 0.0))
+                                                    .foregroundColor(host.isExtended ? Color(red: 1.0, green: 0.85, blue: 0.0) : M3.tertiary)
                                                 Text("\(host.ip):\(host.port)\(host.isExtended ? " (Repeater)" : "")")
                                                     .font(.system(size: 10, design: .monospaced))
                                                     .foregroundColor(Color(white: 0.6))
@@ -913,15 +927,15 @@ struct PartyStudioTab: View {
                                             Spacer()
                                             Text("[ TAP TO JOIN ]")
                                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                                .foregroundColor(M3.primary)
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
                                                 .background(Color(red: 0.0, green: 0.15, blue: 0.18))
-                                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+                                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
                                         }
                                         .padding(8)
                                         .background(Color(red: 0.08, green: 0.08, blue: 0.08))
-                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
                                     }
                                 }
                             }
@@ -931,7 +945,7 @@ struct PartyStudioTab: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("MANUAL PARTY HOST IP:")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                .foregroundColor(M3.primary)
 
                             HStack(spacing: 6) {
                                 TextField("Host IP (e.g. 192.168.1.100)", text: $manualJoinIp)
@@ -939,7 +953,7 @@ struct PartyStudioTab: View {
                                     .padding(6)
                                     .background(Color(red: 0.08, green: 0.08, blue: 0.08))
                                     .foregroundColor(.white)
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
                                 Button("JOIN") {
                                     let trimmed = manualJoinIp.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -948,15 +962,15 @@ struct PartyStudioTab: View {
                                     }
                                 }
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .foregroundColor(M3.tertiary)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.tertiary, lineWidth: 1))
                             }
                         }
                         .padding(10)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.07))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         // Target Buffer Control in Party Join
                         TargetBufferControlSection(engine: engine)
@@ -981,7 +995,7 @@ struct PartyStudioTab: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("PARTY JOINER ACTIVE")
                                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                            .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                            .foregroundColor(M3.tertiary)
                                         Text("Connected to \(engine.currentPartyHostIp):5004 • In sync")
                                             .font(.system(size: 10, design: .monospaced))
                                             .foregroundColor(Color(white: 0.7))
@@ -996,13 +1010,13 @@ struct PartyStudioTab: View {
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 6)
                                             .background(Color(red: 0.20, green: 0.0, blue: 0.0))
-                                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
+                                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 1.0, green: 0.27, blue: 0.27), lineWidth: 1))
                                     }
                                 }
                             }
                             .padding(10)
                             .background(Color(red: 0.06, green: 0.12, blue: 0.06))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(M3.tertiary, lineWidth: 1))
 
                             // Post-Join: Extend This Party (Hotspot Repeater)
                             VStack(alignment: .leading, spacing: 8) {
@@ -1042,7 +1056,7 @@ struct PartyStudioTab: View {
                             }
                             .padding(10)
                             .background(Color(red: 0.07, green: 0.07, blue: 0.05))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(red: 1.0, green: 0.85, blue: 0.0), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(red: 1.0, green: 0.85, blue: 0.0), lineWidth: 1))
                         }
                     }
                 }
@@ -1118,7 +1132,7 @@ struct SettingsStudioTab: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
 
                 // Universal Device Equalizer (5-Band)
                 VStack(alignment: .leading, spacing: 6) {
@@ -1140,18 +1154,18 @@ struct SettingsStudioTab: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(Color(white: 0.8))
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                    .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
 
                     Toggle(isOn: $engine.universalApplyRx) {
                         Text("Apply Universal EQ to Inbound Audio (PLAYER / JOIN)")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(Color(white: 0.8))
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                    .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
                 }
                 .padding(10)
                 .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                 // Exclusive Audio
                 VStack(alignment: .leading, spacing: 6) {
@@ -1188,7 +1202,7 @@ struct SettingsStudioTab: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
 
                 // Available Adapter IPs
                 VStack(alignment: .leading, spacing: 6) {
@@ -1201,16 +1215,16 @@ struct SettingsStudioTab: View {
                             engine.refreshAdapterIps()
                         }
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                        .foregroundColor(M3.primary)
                     }
 
                     Text(engine.availableIpListText.isEmpty ? "en0        : 127.0.0.1" : engine.availableIpListText)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .foregroundColor(M3.tertiary)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
                 }
 
                 // Application Version & Updates Section
@@ -1219,17 +1233,17 @@ struct SettingsStudioTab: View {
                     let buildStr = buildSha != "dev" ? " (\(buildSha.prefix(7)))" : ""
                     Text("Version: v\(appVersion)\(buildStr)")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                        .foregroundColor(M3.primary)
 
                     Button(action: {
                         engine.checkForUpdates(manual: true)
                     }) {
                         Text("🔄 CHECK FOR UPDATES")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                            .foregroundColor(M3.primary)
                             .frame(maxWidth: .infinity, minHeight: 38)
                             .background(Color(white: 0.08))
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
                     }
 
                     if !engine.updateStatusMessage.isEmpty {
@@ -1240,7 +1254,7 @@ struct SettingsStudioTab: View {
                 }
                 .padding(10)
                 .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
             }
             .padding(14)
         }
@@ -1259,7 +1273,7 @@ struct LiveDelayGraphView: View {
                 let estTotal = Int(currentBufMs + 35.0)
                 Text(String(format: "BUF: %.1f ms | EST: ~%d ms | TGT: %.0f ms", currentBufMs, estTotal, targetMs))
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                    .foregroundColor(M3.primary)
                 Spacer()
             }
             .padding(.horizontal, 4)
@@ -1305,10 +1319,10 @@ struct LiveDelayGraphView: View {
                                 }
                             }
                         }
-                        .stroke(currentBufMs > targetMs + 20.0 ? Color(red: 1.0, green: 0.53, blue: 0.0) : Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 2)
+                        .stroke(currentBufMs > targetMs + 20.0 ? Color(red: 1.0, green: 0.53, blue: 0.0) : M3.tertiary, lineWidth: 2)
                     }
                 }
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
             }
             .frame(height: 80)
         }
@@ -1325,11 +1339,11 @@ struct RadioChip: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 10, weight: isSelected ? .bold : .regular, design: .monospaced))
-                .foregroundColor(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.6))
+                .foregroundColor(isSelected ? M3.tertiary : Color(white: 0.6))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .background(isSelected ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.05))
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.2), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(isSelected ? M3.tertiary : Color(white: 0.2), lineWidth: 1))
         }
     }
 }
@@ -1344,7 +1358,7 @@ struct RadioLine: View {
             HStack(spacing: 6) {
                 Text(isSelected ? "[●]" : "[○]")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(isSelected ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.5))
+                    .foregroundColor(isSelected ? M3.tertiary : Color(white: 0.5))
 
                 Text(title)
                     .font(.system(size: 11, design: .monospaced))
@@ -1453,14 +1467,14 @@ struct StudioEqualizerSheetView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            M3.bg.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 12) {
                 // Header
                 HStack {
                     Text("🎛️ \(title)")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .foregroundColor(M3.tertiary)
                     Spacer()
                     Button("✕ CLOSE") {
                         presentationMode.wrappedValue.dismiss()
@@ -1477,7 +1491,7 @@ struct StudioEqualizerSheetView: View {
                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                                 .foregroundColor(.white)
                         }
-                        .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                        .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
 
                         if title == "UNIVERSAL EQUALIZER" {
                             Toggle(isOn: $engine.universalApplyTx) {
@@ -1485,14 +1499,14 @@ struct StudioEqualizerSheetView: View {
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(Color(white: 0.85))
                             }
-                            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                            .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
 
                             Toggle(isOn: $engine.universalApplyRx) {
                                 Text("Apply to Inbound (PLAYER / JOIN)")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(Color(white: 0.85))
                             }
-                            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                            .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
                         }
 
                         // Presets
@@ -1514,11 +1528,11 @@ struct StudioEqualizerSheetView: View {
                                         }) {
                                             Text(pName)
                                                 .font(.system(size: 10, weight: config.presetName == pName ? .bold : .regular, design: .monospaced))
-                                                .foregroundColor(config.presetName == pName ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                                                .foregroundColor(config.presetName == pName ? M3.tertiary : Color(white: 0.7))
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
                                                 .background(config.presetName == pName ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(config.presetName == pName ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.2), lineWidth: 1))
+                                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(config.presetName == pName ? M3.tertiary : Color(white: 0.2), lineWidth: 1))
                                         }
                                     }
                                 }
@@ -1544,7 +1558,7 @@ struct StudioEqualizerSheetView: View {
                                                 }) {
                                                     Text(cName)
                                                         .font(.system(size: 10, weight: config.presetName == cName ? .bold : .regular, design: .monospaced))
-                                                        .foregroundColor(config.presetName == cName ? Color(red: 0.22, green: 0.71, blue: 1.0) : Color(white: 0.7))
+                                                        .foregroundColor(config.presetName == cName ? M3.primary : Color(white: 0.7))
                                                 }
                                                 Button(action: {
                                                     engine.deleteCustomEQPreset(name: cName)
@@ -1557,7 +1571,7 @@ struct StudioEqualizerSheetView: View {
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 3)
                                             .background(Color(white: 0.06))
-                                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
                                         }
                                     }
                                 }
@@ -1570,7 +1584,7 @@ struct StudioEqualizerSheetView: View {
                                     .padding(6)
                                     .background(Color(white: 0.08))
                                     .foregroundColor(.white)
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
                                 Button("SAVE") {
                                     let trimmed = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1581,10 +1595,10 @@ struct StudioEqualizerSheetView: View {
                                     }
                                 }
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+                                .foregroundColor(M3.primary)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
 
                                 Button("FLAT RESET") {
                                     config.bands = [0.0, 0.0, 0.0, 0.0, 0.0]
@@ -1594,7 +1608,7 @@ struct StudioEqualizerSheetView: View {
                                 .foregroundColor(Color(white: 0.7))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.3), lineWidth: 1))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.3), lineWidth: 1))
                             }
                             .padding(.top, 4)
                         }
@@ -1610,7 +1624,7 @@ struct StudioEqualizerSheetView: View {
                                     HStack {
                                         Text(bandLabels[idx])
                                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                            .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                                            .foregroundColor(M3.primary)
                                         Spacer()
                                         Text(String(format: "%+.1f dB", idx < config.bands.count ? config.bands[idx] : 0.0))
                                             .font(.system(size: 11, design: .monospaced))
@@ -1629,7 +1643,7 @@ struct StudioEqualizerSheetView: View {
                                         in: -12.0...12.0,
                                         step: 0.5
                                     )
-                                    .accentColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                    .accentColor(M3.tertiary)
                                 }
                             }
                         }
@@ -1648,13 +1662,13 @@ struct StudioHelpModal: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            M3.bg.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("AIR SPEAKER v1 STUDIO GUIDE")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                        .foregroundColor(M3.tertiary)
                     Spacer()
                     Button("✕ CLOSE") {
                         isPresented = false

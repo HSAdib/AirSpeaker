@@ -68,7 +68,7 @@ public:
     // Runs one decode/trim cycle synchronously without starting a worker thread
     void processPacketsForTest() {
         int16_t decoded_buf[960 * 2];
-        processPackets(decoded_buf);
+        (void)processPackets(decoded_buf);
     }
     size_t getPacketMapSizeForTest() {
         std::lock_guard<std::mutex> lock(mPacketMutex);
@@ -111,7 +111,7 @@ public:
 
 private:
     void decodeWorkerLoop();
-    void processPackets(int16_t* decoded_buf);
+    bool processPackets(int16_t* decoded_buf);
     void adaptTargetBuffer();
     void concealPcmGap(int frames, int16_t* out_buf);
 
