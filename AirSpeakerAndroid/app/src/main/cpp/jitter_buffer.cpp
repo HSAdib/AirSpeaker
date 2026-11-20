@@ -200,12 +200,16 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
 
     bool resetReq = mStreamResetPending.exchange(false, std::memory_order_acq_rel);
     if (!mHasStarted || resetReq || sinceLastRxMs > 800) {
+        const bool wasStarted = mHasStarted;
         mHasStarted = false;
         mIsPrebuffering = true;
+        if (resetReq) {
+            mPcmRingBuffer.reset();
+        }
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (mPacketMap.empty()) return;
 
-        if (resetReq && mHasStarted && mPacketMap.size() > 6) {
+        if (resetReq && wasStarted && mPacketMap.size() > 6) {
             auto keepFrom = mPacketMap.end();
             std::advance(keepFrom, -4);
             mPacketMap.erase(mPacketMap.begin(), keepFrom);
@@ -278,7 +282,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
     );
     const float lowWaterMs = (static_cast<float>(lowWaterFrames) * 1000.0f) / static_cast<float>(sampleRate);
     const float minEffectiveTarget = btMode
-        ? std::max(70.0f, lowWaterMs + 20.0f)
+        ? std::max(90.0f, lowWaterMs + 35.0f)
         : std::max(10.0f, lowWaterMs + 5.0f);
     const float effectiveTargetMs = std::clamp(std::max(mLocalTargetBufferMs, minEffectiveTarget), 10.0f, 200.0f);
 

@@ -159,6 +159,7 @@ class AudioStreamService : Service() {
                 applyEffectiveMuteAndGain()
             }
             serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = hasBt) }, 150L)
+            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = hasBt) }, 700L)
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {

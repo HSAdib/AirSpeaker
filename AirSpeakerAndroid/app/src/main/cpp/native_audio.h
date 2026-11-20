@@ -55,7 +55,7 @@ public:
     bool isLowLatencyMode() const;
     void setEnableAudioEffects(bool enabled);
     bool isEnableAudioEffects() const;
-    void setBluetoothRouteActive(bool isBluetooth);
+    void setBluetoothRouteActive(bool isBluetooth, bool forceReopen = false);
     bool isBluetoothRouteActive() const;
     void setPartyRelayEnabled(bool enabled);
     bool isPartyRelayEnabled() const;
@@ -101,6 +101,7 @@ private:
     std::atomic<bool> mShuttingDown{false};
     std::mutex mReopenMutex;
     std::atomic<bool> mReopenPending{false};
+    std::atomic<bool> mReopenAgain{false};
     std::thread mReceiverThread;
     std::thread mReopenThread;
     std::shared_ptr<oboe::AudioStream> mAudioStream;

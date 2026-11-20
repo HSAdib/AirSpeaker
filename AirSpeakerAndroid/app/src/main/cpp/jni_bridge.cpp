@@ -146,7 +146,7 @@ Java_com_hasan_airspeaker_AudioNative_nativeOnAudioRouteChanged(JNIEnv* /*env*/,
     std::lock_guard<std::mutex> lock(gEngineMutex);
     gSavedBluetoothRoute = (isBluetooth == JNI_TRUE);
     if (gAudioEngine) {
-        gAudioEngine->setBluetoothRouteActive(gSavedBluetoothRoute);
+        gAudioEngine->setBluetoothRouteActive(gSavedBluetoothRoute, /*forceReopen=*/true);
     }
 }
 
