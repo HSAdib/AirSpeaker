@@ -1487,6 +1487,22 @@ struct StudioEqualizerSheetView: View {
                         }
                         .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
 
+                        if title == "UNIVERSAL EQUALIZER" {
+                            Toggle(isOn: $engine.universalApplyTx) {
+                                Text("Apply to Outbound (SERVE / HOST)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.85))
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+
+                            Toggle(isOn: $engine.universalApplyRx) {
+                                Text("Apply to Inbound (PLAYER / JOIN)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Color(white: 0.85))
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.0, green: 1.0, blue: 0.0)))
+                        }
+
                         // Presets
                         VStack(alignment: .leading, spacing: 6) {
                             Text("PRESETS:")

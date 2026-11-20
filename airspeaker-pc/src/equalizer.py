@@ -96,7 +96,14 @@ class StereoFiveBandBiquadDSP:
                 self._needs_state_reset = True
 
     def set_gains(self, gains_db: List[float], enabled: Optional[bool] = None) -> None:
-        clamped = [max(-12.0, min(12.0, float(g))) for g in (gains_db + [0.0] * 5)[:5]]
+        raw_five = (list(gains_db) + [0.0] * 5)[:5]
+        clamped: List[float] = []
+        for g in raw_five:
+            try:
+                val = float(g)
+            except (TypeError, ValueError):
+                val = 0.0
+            clamped.append(max(-12.0, min(12.0, val)) if math.isfinite(val) else 0.0)
         coeffs = [
             self._design_peaking_biquad(freq, g, self.BAND_Q, self.sample_rate)
             for freq, g in zip(self.BAND_FREQS, clamped)

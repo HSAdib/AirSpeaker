@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.isExtendingParty = false
                 AudioNative.nativeSetPartyRelay(false)
                 ControlChannel.sendPartyHostStopAnnouncement()
+                applyEffectiveEqualizerState()
             }
             Toast.makeText(this, "Internal audio capture permission denied", Toast.LENGTH_SHORT).show()
         }
@@ -510,6 +511,27 @@ class MainActivity : AppCompatActivity() {
         }
         layout.addView(swEnable)
 
+        var cbDlgUnivTx: android.widget.CheckBox? = null
+        var cbDlgUnivRx: android.widget.CheckBox? = null
+        if (contextKey == "universal") {
+            cbDlgUnivTx = android.widget.CheckBox(this).apply {
+                text = "Apply to Hosting & Serving (SERVE / HOST)"
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                typeface = android.graphics.Typeface.MONOSPACE
+                isChecked = prefs.getBoolean("universal_apply_tx", false)
+            }
+            cbDlgUnivRx = android.widget.CheckBox(this).apply {
+                text = "Apply to Playing & Joining (PLAY / JOIN)"
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                typeface = android.graphics.Typeface.MONOSPACE
+                isChecked = prefs.getBoolean("universal_apply_rx", false)
+            }
+            layout.addView(cbDlgUnivTx)
+            layout.addView(cbDlgUnivRx)
+        }
+
         // Preset selector
         val customPresets = prefs.getStringSet("custom_presets", emptySet()) ?: emptySet()
         val allPresetNames = ArrayList<String>()
@@ -597,11 +619,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         var isUpdatingUi = false
+        var suppressNextSpinnerItemSelect = false
 
         fun saveDialogState() {
             val editor = prefs.edit()
             editor.putBoolean("${contextKey}_enabled", swEnable.isChecked)
             editor.putString("${contextKey}_preset", currentPreset)
+            if (contextKey == "universal" && cbDlgUnivTx != null && cbDlgUnivRx != null) {
+                editor.putBoolean("universal_apply_tx", cbDlgUnivTx!!.isChecked)
+                editor.putBoolean("universal_apply_rx", cbDlgUnivRx!!.isChecked)
+                binding.cbUniversalEqServeHost.isChecked = cbDlgUnivTx!!.isChecked
+                binding.cbUniversalEqPlayJoin.isChecked = cbDlgUnivRx!!.isChecked
+            }
             for (idx in 0 until 5) {
                 editor.putFloat("${contextKey}_band_$idx", sliders[idx].value)
             }
@@ -609,7 +638,28 @@ class MainActivity : AppCompatActivity() {
             applyEffectiveEqualizerState()
         }
 
-        swEnable.setOnCheckedChangeListener { _, isChecked ->
+        cbDlgUnivTx?.setOnCheckedChangeListener { _, isChecked ->
+            if (!isUpdatingUi) {
+                if (isChecked && !swEnable.isChecked) {
+                    isUpdatingUi = true
+                    swEnable.isChecked = true
+                    isUpdatingUi = false
+                }
+                saveDialogState()
+            }
+        }
+        cbDlgUnivRx?.setOnCheckedChangeListener { _, isChecked ->
+            if (!isUpdatingUi) {
+                if (isChecked && !swEnable.isChecked) {
+                    isUpdatingUi = true
+                    swEnable.isChecked = true
+                    isUpdatingUi = false
+                }
+                saveDialogState()
+            }
+        }
+
+        swEnable.setOnCheckedChangeListener { _, _ ->
             if (!isUpdatingUi) {
                 saveDialogState()
             }
@@ -622,12 +672,13 @@ class MainActivity : AppCompatActivity() {
                     currentPreset = "Custom"
                     val customIdx = allPresetNames.indexOf("Custom")
                     if (customIdx >= 0 && spinnerPresets.selectedItemPosition != customIdx) {
-                        isUpdatingUi = true
+                        suppressNextSpinnerItemSelect = true
                         spinnerPresets.setSelection(customIdx)
-                        isUpdatingUi = false
                     }
                     if (!swEnable.isChecked) {
+                        isUpdatingUi = true
                         swEnable.isChecked = true
+                        isUpdatingUi = false
                     }
                     saveDialogState()
                 }
@@ -639,6 +690,10 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (isInitialSelection) {
                     isInitialSelection = false
+                    return
+                }
+                if (suppressNextSpinnerItemSelect) {
+                    suppressNextSpinnerItemSelect = false
                     return
                 }
                 if (isUpdatingUi) return
@@ -669,7 +724,10 @@ class MainActivity : AppCompatActivity() {
             isUpdatingUi = true
             currentPreset = "Flat"
             val flatIdx = allPresetNames.indexOf("Flat")
-            if (flatIdx >= 0) spinnerPresets.setSelection(flatIdx)
+            if (flatIdx >= 0 && spinnerPresets.selectedItemPosition != flatIdx) {
+                suppressNextSpinnerItemSelect = true
+                spinnerPresets.setSelection(flatIdx)
+            }
             for (b in 0 until 5) {
                 sliders[b].value = 0f
                 valLabels[b].text = "+0.0 dB"
@@ -703,9 +761,11 @@ class MainActivity : AppCompatActivity() {
                             (spinnerPresets.adapter as ArrayAdapter<String>).notifyDataSetChanged()
                         }
                         currentPreset = name
-                        isUpdatingUi = true
-                        spinnerPresets.setSelection(allPresetNames.indexOf(name))
-                        isUpdatingUi = false
+                        val targetIdx = allPresetNames.indexOf(name)
+                        if (targetIdx >= 0 && spinnerPresets.selectedItemPosition != targetIdx) {
+                            suppressNextSpinnerItemSelect = true
+                            spinnerPresets.setSelection(targetIdx)
+                        }
                         saveDialogState()
                         Toast.makeText(this, "Saved preset '$name'", Toast.LENGTH_SHORT).show()
                     }
@@ -1452,8 +1512,8 @@ class MainActivity : AppCompatActivity() {
             if (checkedId == R.id.rbServeCustom) return@setOnCheckedChangeListener
             val (frameMs, targetBufferMs, bufMode) = when (checkedId) {
                 R.id.rbServeGaming -> Triple(5, 20, "LOW")
-                R.id.rbServeBalanced -> Triple(10, 40, "MEDIUM")
-                else -> Triple(20, 80, "HIGH")
+                R.id.rbServeBalanced -> Triple(5, 40, "MEDIUM")
+                else -> Triple(5, 80, "HIGH")
             }
             getSharedPreferences("AirSpeakerPrefs", MODE_PRIVATE).edit()
                 .putInt("serve_frame_ms", frameMs)
@@ -1865,6 +1925,14 @@ class MainActivity : AppCompatActivity() {
         binding.btnToggleStream.setOnClickListener {
             if (AudioStreamService.isStreaming) {
                 userManuallyStoppedPlayer = true
+                if (isPartyHostBroadcastActive && !AudioStreamService.isServing) {
+                    isPartyHostBroadcastActive = false
+                    ControlChannel.isHostingOrExtendingParty = false
+                    ControlChannel.isExtendingParty = false
+                    AudioNative.nativeSetPartyRelay(false)
+                    ControlChannel.sendPartyHostStopAnnouncement()
+                    applyEffectiveEqualizerState()
+                }
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_STOP
                 }

@@ -895,6 +895,132 @@ void runJitterBufferTests() {
 }
 
 // ============================================================================
+// 13. 5-BAND BIQUAD EQ STABILITY, SWEEPS & NaN RECOVERY TEST
+// ============================================================================
+
+void test_biquad_eq_stability_and_nan_recovery() {
+    struct Coeffs {
+        double b0{1.0}, b1{0.0}, b2{0.0}, a1{0.0}, a2{0.0};
+        bool active{false};
+    };
+    const double freqs[5] = {60.0, 230.0, 910.0, 3600.0, 14000.0};
+    constexpr double PI = 3.14159265358979323846;
+    const double sr = 48000.0;
+    const double q = 1.15;
+
+    auto design = [&](const float rawGains[5], Coeffs out[5]) -> bool {
+        bool any = false;
+        for (int i = 0; i < 5; ++i) {
+            double g = std::isfinite(rawGains[i]) ? std::clamp(static_cast<double>(rawGains[i]), -12.0, 12.0) : 0.0;
+            if (std::abs(g) <= 0.05) {
+                out[i] = {1.0, 0.0, 0.0, 0.0, 0.0, false};
+                continue;
+            }
+            any = true;
+            double A = std::pow(10.0, g / 40.0);
+            double w0 = 2.0 * PI * freqs[i] / sr;
+            double alpha = std::sin(w0) / (2.0 * q);
+            double cos_w0 = std::cos(w0);
+            double a0 = 1.0 + alpha / A;
+            out[i] = {
+                (1.0 + alpha * A) / a0,
+                (-2.0 * cos_w0) / a0,
+                (1.0 - alpha * A) / a0,
+                (-2.0 * cos_w0) / a0,
+                (1.0 - alpha / A) / a0,
+                true
+            };
+        }
+        return any;
+    };
+
+    double z1[5][2] = {{0.0}};
+    double z2[5][2] = {{0.0}};
+    Coeffs coeffs[5];
+
+    auto processBlock = [&](std::vector<int16_t>& pcm, double gain) {
+        const int frames = static_cast<int>(pcm.size() / 2);
+        const double knee = 0.85;
+        const double inv = 1.0 / (1.0 - knee);
+        for (int n = 0; n < frames; ++n) {
+            for (int ch = 0; ch < 2; ++ch) {
+                const double dry = pcm[n * 2 + ch] / 32768.0;
+                double x = dry;
+                bool ok = true;
+                for (int b = 0; b < 5; ++b) {
+                    if (!coeffs[b].active) continue;
+                    double y = coeffs[b].b0 * x + z1[b][ch];
+                    double nz1 = coeffs[b].b1 * x - coeffs[b].a1 * y + z2[b][ch];
+                    double nz2 = coeffs[b].b2 * x - coeffs[b].a2 * y;
+                    if (!std::isfinite(y) || !std::isfinite(nz1) || !std::isfinite(nz2)) {
+                        z1[b][ch] = 0.0;
+                        z2[b][ch] = 0.0;
+                        ok = false;
+                        break;
+                    }
+                    z1[b][ch] = nz1;
+                    z2[b][ch] = nz2;
+                    x = y;
+                }
+                if (!ok) x = dry;
+                x *= gain;
+                if (x > knee) x = knee + (1.0 - knee) * std::tanh((x - knee) * inv);
+                else if (x < -knee) x = -knee - (1.0 - knee) * std::tanh((-x - knee) * inv);
+                int32_t v = static_cast<int32_t>(std::round(std::clamp(x, -1.0, 1.0) * 32767.0));
+                pcm[n * 2 + ch] = static_cast<int16_t>(std::clamp(v, -32768, 32767));
+            }
+        }
+        for (int b = 0; b < 5; ++b) {
+            for (int ch = 0; ch < 2; ++ch) {
+                if (std::abs(z1[b][ch]) < 1e-18) z1[b][ch] = 0.0;
+                if (std::abs(z2[b][ch]) < 1e-18) z2[b][ch] = 0.0;
+            }
+        }
+    };
+
+    // 1. NaN gain sanitization
+    float nanGains[5] = {NAN, INFINITY, -INFINITY, 0.0f, 0.0f};
+    TEST_ASSERT(!design(nanGains, coeffs), "NaN/Inf gains must sanitize to inactive flat bands");
+
+    // Generate 5ms multi-tone test signal
+    std::vector<int16_t> dry(240 * 2);
+    for (int i = 0; i < 240; ++i) {
+        double t = static_cast<double>(i) / sr;
+        double s = 0.25 * std::sin(2.0 * PI * 60.0 * t) + 0.25 * std::sin(2.0 * PI * 1000.0 * t);
+        int16_t v = static_cast<int16_t>(std::round(s * 32767.0));
+        dry[i * 2] = v;
+        dry[i * 2 + 1] = v;
+    }
+
+    // 2. Rapid extreme sweeps (-12dB <-> +12dB)
+    for (int step = 0; step < 40; ++step) {
+        float g = (step % 2 == 0) ? 12.0f : -12.0f;
+        float sweep[5] = {g, -g, g, -g, g};
+        TEST_ASSERT(design(sweep, coeffs), "sweep bands must be active");
+        auto buf = dry;
+        processBlock(buf, 1.0);
+        int maxAmp = 0;
+        for (int16_t s : buf) maxAmp = std::max(maxAmp, std::abs(static_cast<int>(s)));
+        TEST_ASSERT(maxAmp > 500, "rapid EQ sweep lost audio signal");
+    }
+
+    // 3. Inject NaN into filter state -> immediate dry fallback & clean next frame
+    float activeSweep[5] = {6.0f, 6.0f, 6.0f, 6.0f, 6.0f};
+    design(activeSweep, coeffs);
+    z1[0][0] = NAN;
+    auto bufNan = dry;
+    processBlock(bufNan, 1.0);
+    TEST_ASSERT(std::isfinite(z1[0][0]), "NaN state was not cleared");
+    auto bufNext = dry;
+    processBlock(bufNext, 1.0);
+    int maxNext = 0;
+    for (int16_t s : bufNext) maxNext = std::max(maxNext, std::abs(static_cast<int>(s)));
+    TEST_ASSERT(maxNext > 500, "EQ latched NaN into silence on next frame");
+
+    TEST_PASS("5-band biquad EQ NaN sanitization, sweeps & dry-fallback recovery");
+}
+
+// ============================================================================
 // Main runner
 // ============================================================================
 
@@ -915,6 +1041,7 @@ int main() {
     test_100_start_stop_cycles();
     test_auto_buffer_persists_across_packets();
     runJitterBufferTests();
+    test_biquad_eq_stability_and_nan_recovery();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Results: " << gPassCount << " PASS / " << gFailCount << " FAIL" << std::endl;

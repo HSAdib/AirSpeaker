@@ -125,7 +125,8 @@ public final class Swift5BandBiquadDSP {
         var newCoeffs = Array(repeating: Coeffs(), count: 5)
 
         for i in 0..<5 {
-            let g = i < gains.count ? Double(max(-12.0, min(12.0, gains[i]))) : 0.0
+            let raw = i < gains.count ? gains[i] : 0.0
+            let g = raw.isFinite ? Double(max(-12.0, min(12.0, raw))) : 0.0
             if abs(g) <= 0.05 {
                 newCoeffs[i] = Coeffs(b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, active: false)
                 continue
@@ -356,8 +357,18 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var partyHostEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
     @Published public var partyJoinEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
     @Published public var universalEQ = StudioEQConfig() { didSet { saveEQState(); updateEffectiveEQ() } }
-    @Published public var universalApplyTx: Bool = false { didSet { saveEQState(); updateEffectiveEQ() } }
-    @Published public var universalApplyRx: Bool = false { didSet { saveEQState(); updateEffectiveEQ() } }
+    @Published public var universalApplyTx: Bool = false {
+        didSet {
+            if universalApplyTx && !universalEQ.enabled { universalEQ.enabled = true }
+            saveEQState(); updateEffectiveEQ()
+        }
+    }
+    @Published public var universalApplyRx: Bool = false {
+        didSet {
+            if universalApplyRx && !universalEQ.enabled { universalEQ.enabled = true }
+            saveEQState(); updateEffectiveEQ()
+        }
+    }
     @Published public var customEQPresets: [String: [Float]] = [:] { didSet { saveEQState() } }
 
     public static let builtinEQPresets: [String: [Float]] = [
@@ -699,6 +710,40 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruption), name: AVAudioSession.interruptionNotification, object: nil)
+    }
+
+    @objc private func handleAudioInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeVal = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeVal) else { return }
+
+        if type == .began {
+            rxEQDSP.reset()
+            audioControlQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.isPrebufferingAudio = true
+                if self.playerNode.isPlaying {
+                    self.playerNode.pause()
+                }
+            }
+        } else if type == .ended {
+            guard isAudioPlaying else { return }
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                print("AudioSession reactivation error: \(error)")
+            }
+            rxEQDSP.reset()
+            audioControlQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.isPrebufferingAudio = true
+                if !self.audioEngine.isRunning {
+                    try? self.audioEngine.start()
+                }
+            }
+        }
     }
 
     @objc private func handleRouteChange(notification: Notification) {
@@ -716,6 +761,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func setupAudioEngine() {
+        rxEQDSP.reset()
         audioControlQueue.sync {
             audioEngine.attach(playerNode)
             audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: audioFormat)
@@ -756,6 +802,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             self.underrunCount = 0
         }
 
+        rxEQDSP.reset()
         audioControlQueue.sync {
             self.playbackSessionId &+= 1
             self.audioBufferQueueCount.reset()
@@ -774,7 +821,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             rxStateLock.lock()
             isRunningAudio = false
             rxStateLock.unlock()
-            audioControlQueue.sync {
+            rxEQDSP.reset()
+        audioControlQueue.sync {
                 self.playerNode.stop()
             }
             DispatchQueue.main.async {
@@ -810,6 +858,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         audioRxSocket = -1
         stateLock.unlock()
 
+        rxEQDSP.reset()
         audioControlQueue.sync {
             self.playbackSessionId &+= 1
             self.playerNode.stop()
@@ -1384,7 +1433,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
         }
 
-        if atomicRelayActive {
+        stateLock.lock()
+        let relayOn = self.atomicRelayActive
+        stateLock.unlock()
+
+        if relayOn {
             self.peersLock.lock()
             let peers = Array(self.partyPeerIps)
             self.peersLock.unlock()

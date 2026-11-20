@@ -472,7 +472,8 @@ void NativeAudioEngine::socketReceiverLoop() {
 }
 
 void NativeAudioEngine::setTargetBufferMs(float target_ms) {
-    mJitterBuffer.setTargetBufferMs(target_ms);
+    float safe = std::isfinite(target_ms) ? std::clamp(target_ms, 10.0f, 200.0f) : 30.0f;
+    mJitterBuffer.setTargetBufferMs(safe);
 }
 
 float NativeAudioEngine::getTargetBufferMs() {
@@ -496,7 +497,8 @@ bool NativeAudioEngine::isMuted() const {
 }
 
 void NativeAudioEngine::setVolumeGain(float gain) {
-    mVolumeGain.store(std::clamp(gain, 0.0f, 2.0f), std::memory_order_relaxed);
+    float safe = std::isfinite(gain) ? std::clamp(gain, 0.0f, 2.0f) : 1.0f;
+    mVolumeGain.store(safe, std::memory_order_relaxed);
 }
 
 float NativeAudioEngine::getVolumeGain() const {
@@ -548,12 +550,15 @@ void NativeAudioEngine::setPartyPeers(const std::vector<std::string>& peers) {
 }
 
 void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, float b2, float b3, float b4) {
+    auto sanitize = [](float v) -> float {
+        return std::isfinite(v) ? std::clamp(v, -12.0f, 12.0f) : 0.0f;
+    };
     float bands[5] = {
-        std::clamp(b0, -12.0f, 12.0f),
-        std::clamp(b1, -12.0f, 12.0f),
-        std::clamp(b2, -12.0f, 12.0f),
-        std::clamp(b3, -12.0f, 12.0f),
-        std::clamp(b4, -12.0f, 12.0f)
+        sanitize(b0),
+        sanitize(b1),
+        sanitize(b2),
+        sanitize(b3),
+        sanitize(b4)
     };
     for (int i = 0; i < 5; ++i) {
         mEqGainsDb[i].store(bands[i], std::memory_order_relaxed);

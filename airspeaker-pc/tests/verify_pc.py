@@ -875,7 +875,7 @@ def test_audio_receiver_frame_duration_buffer_math() -> None:
 # Test 19: 5-Band EQ full-load speed, rapid sweeps, silence denormals & NaN recovery
 # ---------------------------------------------------------------------------
 def test_eq_5band_stress_and_nan_recovery() -> None:
-    name = "5-Band EQ full-load speed (<0.5ms/frame), rapid sweeps & NaN recovery"
+    name = "5-Band EQ full-load speed, rapid sweeps, NaN gain & state recovery"
     try:
         from equalizer import StereoFiveBandBiquadDSP
 
@@ -890,7 +890,14 @@ def test_eq_5band_stress_and_nan_recovery() -> None:
         raw_pcm = np.rint(stereo * 32767.0).astype("<i2").tobytes()
         silence_pcm = b"\x00" * 960
 
-        # 1. All 5 bands active simultaneously (worst-case CPU load)
+        # 1. NaN/Inf gain inputs must sanitize cleanly to 0 dB (never +12 dB or NaN)
+        dsp.set_gains([float("nan"), float("inf"), float("-inf"), 0.0, 0.0], enabled=True)
+        out_nan_gain = dsp.process_pcm16(raw_pcm, 2)
+        if out_nan_gain != raw_pcm:
+            check(name, False, "non-finite gain inputs did not sanitize to flat bypass")
+            return
+
+        # 2. All 5 bands active simultaneously (worst-case CPU load)
         dsp.set_gains([6.5, 4.0, -2.5, 5.0, 7.0], enabled=True)
         t0 = time.monotonic()
         for _ in range(1000):
@@ -901,7 +908,7 @@ def test_eq_5band_stress_and_nan_recovery() -> None:
             check(name, False, f"5-band EQ too slow for 5ms real-time pacing: {per_frame_ms:.3f}ms/frame")
             return
 
-        # 2. Rapid extreme gain sweeps (-12dB <-> +12dB) must never produce silence/NaN
+        # 3. Rapid extreme gain sweeps (-12dB <-> +12dB) must never produce silence/NaN
         for step in range(40):
             g = 12.0 if (step % 2 == 0) else -12.0
             dsp.set_gains([g, -g, g, -g, g], enabled=True)
@@ -911,7 +918,7 @@ def test_eq_5band_stress_and_nan_recovery() -> None:
                 check(name, False, f"sound lost during rapid sweep step {step}")
                 return
 
-        # 3. Silence run must flush denormals cleanly and resume normal audio immediately
+        # 4. Silence run must flush denormals cleanly and resume normal audio immediately
         for _ in range(50):
             dsp.process_pcm16(silence_pcm, 2)
         out_resume = dsp.process_pcm16(raw_pcm, 2)
@@ -919,18 +926,19 @@ def test_eq_5band_stress_and_nan_recovery() -> None:
             check(name, False, "audio did not recover cleanly after silence")
             return
 
-        # 4. Inject NaN into filter state -> must auto-recover to dry audio (zero sound loss)
+        # 5. Inject NaN into filter state -> must auto-recover to dry audio AND recover next frame
         dsp._py_zi[0][0][0] = float("nan")
         dsp._scipy_zi[0, 0, 0] = float("nan")
         out_nan = dsp.process_pcm16(raw_pcm, 2)
         if out_nan != raw_pcm:
-            # Next frame after recovery must also be valid non-silent audio
-            out_next = dsp.process_pcm16(raw_pcm, 2)
-            if int(np.max(np.abs(np.frombuffer(out_next, dtype="<i2")))) < 1000:
-                check(name, False, "EQ latched NaN into permanent silence")
-                return
+            check(name, False, "NaN filter state did not immediately fall back to dry audio")
+            return
+        out_next = dsp.process_pcm16(raw_pcm, 2)
+        if int(np.max(np.abs(np.frombuffer(out_next, dtype="<i2")))) < 1000:
+            check(name, False, "EQ latched NaN into permanent silence on subsequent frame")
+            return
 
-        check(name, True, f"5-band avg={per_frame_ms:.3f}ms/frame, sweeps & NaN auto-recovery passed")
+        check(name, True, f"5-band avg={per_frame_ms:.3f}ms/frame, NaN gain/state recovery & sweeps passed")
     except Exception as exc:
         check(name, False, str(exc))
 

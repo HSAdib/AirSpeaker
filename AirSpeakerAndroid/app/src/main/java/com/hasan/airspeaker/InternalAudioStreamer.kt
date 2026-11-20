@@ -55,7 +55,8 @@ class InternalAudioStreamer {
         fun setOutboundEq(enabled: Boolean, gains: FloatArray) {
             val copy = FloatArray(5)
             for (i in 0 until minOf(5, gains.size)) {
-                copy[i] = gains[i].coerceIn(-12.0f, 12.0f)
+                val raw = gains[i]
+                copy[i] = if (raw.isFinite()) raw.coerceIn(-12.0f, 12.0f) else 0.0f
             }
             eqGainsDb = copy
 
@@ -119,13 +120,7 @@ class InternalAudioStreamer {
             return false
         }
 
-        val prefs = context?.getSharedPreferences("AirSpeakerPrefs", android.content.Context.MODE_PRIVATE)
-            ?: context?.getSharedPreferences("airspeaker_prefs", android.content.Context.MODE_PRIVATE)
-        val frameMs = when (prefs?.getInt("serve_frame_ms", 5) ?: 5) {
-            10 -> 10
-            20 -> 20
-            else -> 5
-        }
+        val frameMs = FRAME_MS
         val framesPerPacket = (SAMPLE_RATE * frameMs) / 1000
         val totalSamples = framesPerPacket * CHANNELS
         val payloadBytes = totalSamples * 2
