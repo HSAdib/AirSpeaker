@@ -198,8 +198,6 @@ class ControlChannel(
                             val aPort = json.optInt("audio_port", 5004)
                             val isExt = json.optBoolean("is_extended_host", false)
                             val isHost = json.optBoolean("is_party_host", false)
-                            val hasPartyJoin = json.has("party_join")
-                            val isPartyJoin = json.optBoolean("party_join", false)
                             val labelName = if (isExt) "$devName (Extended Host)" else if (isHost) "$devName (Party Host)" else devName
                             if (!isOwnLocalIp(senderIp)) {
                                 if (isHost || isExt) {
@@ -537,9 +535,10 @@ class ControlChannel(
             }
         }
 
-        fun sendPartyLeaveAnnouncement(hostIp: String) {
+        fun sendPartyLeaveAnnouncement(hostIp: String?) {
             isPartyJoinerActive = false
-            if (hostIp.isBlank()) return
+            val cleanIp = hostIp?.trim().orEmpty()
+            if (cleanIp.isEmpty()) return
             kotlin.concurrent.thread(name = "PartyLeaveAnnouncer", isDaemon = true) {
                 try {
                     val sock = DatagramSocket()
@@ -555,7 +554,7 @@ class ControlChannel(
                         put("audio_port", 5004)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
-                    val addr = InetAddress.getByName(hostIp)
+                    val addr = InetAddress.getByName(cleanIp)
                     val p = DatagramPacket(data, data.size, addr, 5005)
                     sock.send(p)
                     sock.close()

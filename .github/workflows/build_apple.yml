@@ -53,7 +53,12 @@ jobs:
 
       - name: Run Native Audio C++ Tests
         run: |
-          g++ -std=c++17 -O2 -pthread -I"AirSpeakerAndroid/app/src/main/cpp" "AirSpeakerAndroid/app/src/main/cpp/test_native_pipeline.cpp" -o test_pipeline
+          g++ -std=c++17 -O2 -pthread -DAIRSPEAKER_UNIT_TEST \
+            -I"AirSpeakerAndroid/app/src/main/cpp" \
+            "AirSpeakerAndroid/app/src/main/cpp/test_native_pipeline.cpp" \
+            "AirSpeakerAndroid/app/src/main/cpp/jitter_buffer.cpp" \
+            "AirSpeakerAndroid/app/src/main/cpp/opus_wrapper.cpp" \
+            -o test_pipeline
           ./test_pipeline
 
       - name: Run Android Unit Tests

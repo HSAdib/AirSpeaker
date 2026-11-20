@@ -397,6 +397,14 @@ class UDPSender:
             self._muted = bool(muted)
             self._send_enabled = bool(send_enabled)
 
+    def set_volume_gain(self, gain: float) -> None:
+        with self._lock:
+            self._volume_gain = max(0.0, min(2.0, float(gain)))
+
+    def set_muted(self, muted: bool) -> None:
+        with self._lock:
+            self._muted = bool(muted)
+
     def stop(self) -> None:
         self._running = False
         if self._thread:

@@ -703,7 +703,7 @@ struct PartyStudioTab: View {
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
-                        // Stream Quality Card (Host Broadcast) - Locked to PCM16
+                        // Stream Quality & Host Controls Card (Host Broadcast - Locked to PCM16)
                         VStack(alignment: .leading, spacing: 8) {
                             Text("STREAM QUALITY (HOST BROADCAST):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -719,10 +719,6 @@ struct PartyStudioTab: View {
                             Text("Note: Party broadcast operates in relay or internal ReplayKit mode (stream PC audio to this device to feed the party, or broadcast local audio).")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(Color(white: 0.6))
-                        }
-                        .padding(8)
-                        .background(Color(white: 0.05))
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
 
                             TargetBufferControlSection(engine: engine)
 

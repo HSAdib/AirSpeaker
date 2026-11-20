@@ -445,13 +445,15 @@ class AudioStreamService : Service() {
 
     private fun handlePartyKicked(reason: String) {
         serviceHandler.post {
-            ControlChannel.sendPartyLeaveAnnouncement(activeControlChannel?.getActivePcIp())
+            ControlChannel.sendPartyLeaveAnnouncement(activeControlChannel?.getActivePcIp().orEmpty())
             ControlChannel.isPartyJoinerActive = false
             AudioNative.nativeSetPartyRelay(false)
             ControlChannel.isHostingOrExtendingParty = false
             ControlChannel.isExtendingParty = false
-            stopStreaming()
-            notifyStateChanged()
+            stopAudioPlayer()
+            if (!isServing) {
+                stopSelf()
+            }
             android.widget.Toast.makeText(this, "Party Host: $reason", android.widget.Toast.LENGTH_LONG).show()
         }
     }

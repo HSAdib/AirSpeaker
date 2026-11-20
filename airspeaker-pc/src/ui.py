@@ -1588,6 +1588,11 @@ class AirSpeakerApp:
         if ip_to_remove:
             if self._udp_sender:
                 self._udp_sender.remove_party_target(ip_to_remove)
+            send_control_message(
+                ip_to_remove,
+                {"type": "PARTY_KICK", "target_ip": ip_to_remove, "reason": "Removed by party host"},
+                CONTROL_PORT,
+            )
             self._refresh_party_ui()
 
     def _on_party_mode_toggled(self) -> None:
@@ -1963,8 +1968,11 @@ class AirSpeakerApp:
             )
             self._party_join_receiver.set_volume_gain(self.volume_gain_var.get())
             self._party_join_receiver.set_muted(self.muted_var.get())
-            self._party_join_receiver.start()
+            if not self._party_join_receiver.start():
+                raise RuntimeError(f"Could not bind UDP port {port} or open audio output device")
             self._on_eq_changed()
+            if hasattr(self, "party_join_status_label"):
+                self.party_join_status_label.config(fg="#38B6FF")
         except Exception as exc:
             messagebox.showerror("Party Mode", f"Failed to start party audio receiver on port {port}:\n{exc}")
             self._party_join_receiver = None
@@ -2046,6 +2054,8 @@ class AirSpeakerApp:
                 activebackground="#004400", activeforeground="#00EEEE"
             )
         self.party_join_status_var.set("🎧 Joiner Standby: Select an active host above or paste a party link")
+        if hasattr(self, "party_join_status_label"):
+            self.party_join_status_label.config(fg="#38B6FF")
         logger.info("Left party stream")
 
     def _on_party_join_stats(self, pps: int) -> None:
@@ -2342,15 +2352,21 @@ class AirSpeakerApp:
         self._ui_queue.put(("config_sync", msg))
 
     def _on_party_kicked(self, msg: dict) -> None:
+        target_ip = (msg.get("target_ip") or "").strip()
+        if target_ip:
+            local_ips = {a.get("ip") for a in self._adapter_data if a.get("ip")}
+            if local_ips and target_ip not in local_ips:
+                return
         reason = msg.get("reason", "Removed by party host")
-        self.root.after(0, lambda: self._handle_party_kicked(reason))
+        self._ui_queue.put(("party_kick", reason))
 
     def _handle_party_kicked(self, reason: str) -> None:
         if self._party_join_receiver and self._party_join_receiver.is_running:
             self._stop_party_join()
+        self.party_join_status_var.set(f"KICKED: {reason}")
         if hasattr(self, "party_join_status_label"):
             try:
-                self.party_join_status_label.config(text=f"KICKED: {reason}", fg="#FF4444")
+                self.party_join_status_label.config(fg=ERROR_COLOR)
             except Exception:
                 pass
 
@@ -2445,6 +2461,8 @@ class AirSpeakerApp:
                             pass
                     if hasattr(self, "buffer_val_label"):
                         self.buffer_val_label.config(text=f"{c:.1f} ms")
+                    if hasattr(self, "play_target_var"):
+                        self.play_target_var.set(f"{c:.1f} ms")
                     if self._phone_receiver:
                         self._phone_receiver.set_target_buffer_ms(c)
                     if self._party_join_receiver:
@@ -2736,7 +2754,16 @@ class AirSpeakerApp:
         )
         self._phone_receiver.set_volume_gain(self.volume_gain_var.get())
         self._phone_receiver.set_muted(self.muted_var.get())
-        self._phone_receiver.start()
+        if not self._phone_receiver.start():
+            self._phone_receiver = None
+            self._play_active = False
+            self._status_set("AUDIO RECEIVER ERROR (PORT 5004 / OUTPUT DEVICE)", ERROR_COLOR)
+            messagebox.showerror(
+                "Audio Receiver Error",
+                f"Failed to start Audio Receiver on UDP port {AUDIO_PORT}.\n"
+                "Check that port 5004 is free and a valid output device is selected.",
+            )
+            return
         self._on_eq_changed()
         self._play_active = True
         if hasattr(self, "play_rx_btn"):
@@ -2996,7 +3023,9 @@ class AirSpeakerApp:
                     if kind in ("beacon", "stats", "config_sync"):
                         self._last_phone_seen_time = time.monotonic()
 
-                    if kind == "pps":
+                    if kind == "party_kick":
+                        self._handle_party_kicked(str(data))
+                    elif kind == "pps":
                         self.pps_var.set(f"TX Packets: {data}/s")
                     elif kind == "rx_pps":
                         self._rx_pps = data

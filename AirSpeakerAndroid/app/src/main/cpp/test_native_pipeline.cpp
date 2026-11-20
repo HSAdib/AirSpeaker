@@ -10,7 +10,9 @@
 #include <map>
 
 // Include our actual engine headers under test
+#ifndef AIRSPEAKER_UNIT_TEST
 #define AIRSPEAKER_UNIT_TEST
+#endif
 #include "pcm_ring_buffer.h"
 #include "jitter_buffer.h"
 #include "protocol.h"

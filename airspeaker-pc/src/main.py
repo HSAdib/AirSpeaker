@@ -1,14 +1,14 @@
 """
 main.py — Entry point for Air Speaker PC.
 
-Sets high process priority and 1ms timer resolution, then starts the UI.
+Sets high process priority and 1ms timer resolution on Windows, then starts the UI.
 Handles graceful shutdown on exit.
 """
 
 import ctypes
 import logging
-import sys
 import os
+import sys
 
 # Ensure src/ is on the path when running directly
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 def _elevate_priority() -> None:
     """Set this process to HIGH_PRIORITY_CLASS on Windows."""
+    if not sys.platform.startswith("win"):
+        return
     try:
         import psutil
         p = psutil.Process()
@@ -44,6 +46,8 @@ def _elevate_priority() -> None:
 
 def _set_timer_resolution(period_ms: int = 1) -> None:
     """Call timeBeginPeriod(1) for precise sleep intervals on Windows."""
+    if not sys.platform.startswith("win"):
+        return
     try:
         ctypes.windll.winmm.timeBeginPeriod(period_ms)
         logger.info("Windows timer resolution set to %dms", period_ms)
@@ -52,6 +56,8 @@ def _set_timer_resolution(period_ms: int = 1) -> None:
 
 
 def _clear_timer_resolution(period_ms: int = 1) -> None:
+    if not sys.platform.startswith("win"):
+        return
     try:
         ctypes.windll.winmm.timeEndPeriod(period_ms)
     except Exception:

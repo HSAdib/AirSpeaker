@@ -406,9 +406,14 @@ def test_phone_mic_receiver_no_drops() -> None:
         s_test.close()
 
         rx = PhoneAudioReceiver(port=test_port)
+        used_headless_sink = False
         if not rx.start():
-            check(name, False, "PhoneAudioReceiver failed to start")
-            return
+            # Headless CI runner (no physical playback device): mock audio sink so UDP burst path is still tested
+            rx._open_audio_sink = lambda: True
+            used_headless_sink = True
+            if not rx.start():
+                check(name, False, "PhoneAudioReceiver failed to start even with mocked sink")
+                return
 
         time.sleep(0.05)
 
@@ -428,7 +433,8 @@ def test_phone_mic_receiver_no_drops() -> None:
         received = rx._pps_count
         rx.stop()
 
-        check(name, received == num_packets, f"sent {num_packets}, received {received} packets")
+        extra = " (headless sink mock)" if used_headless_sink else ""
+        check(name, received == num_packets, f"sent {num_packets}, received {received} packets{extra}")
     except Exception as exc:
         check(name, False, str(exc))
 

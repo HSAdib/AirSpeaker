@@ -1431,10 +1431,11 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerServeBitrate.alpha = 0.45f
 
         binding.rgServeSoundMode.setOnCheckedChangeListener { _, checkedId ->
-            val (frameMs, targetBufferMs) = when (checkedId) {
-                R.id.rbServeGaming -> 5 to 20
-                R.id.rbServeBalanced -> 10 to 40
-                else -> 20 to 80
+            if (checkedId == R.id.rbServeCustom) return@setOnCheckedChangeListener
+            val (frameMs, targetBufferMs, bufMode) = when (checkedId) {
+                R.id.rbServeGaming -> Triple(5, 20, "LOW")
+                R.id.rbServeBalanced -> Triple(10, 40, "MEDIUM")
+                else -> Triple(20, 80, "HIGH")
             }
             getSharedPreferences("AirSpeakerPrefs", MODE_PRIVATE).edit()
                 .putInt("serve_frame_ms", frameMs)
@@ -1445,10 +1446,8 @@ class MainActivity : AppCompatActivity() {
                 .putInt("target_buffer_ms", targetBufferMs)
                 .apply()
             AudioNative.nativeSetTargetBufferMs(targetBufferMs.toFloat())
-            binding.sliderTargetBuffer.value = targetBufferMs.toFloat()
-            binding.tvTargetBufferValue.text = "$targetBufferMs ms"
-            binding.sliderPartyHostBuffer.value = targetBufferMs.toFloat()
-            binding.tvPartyHostTargetBufferValue.text = "$targetBufferMs ms"
+            syncAllTargetBufferSliders(targetBufferMs.toFloat())
+            syncAllBufferModeRadioGroups(bufMode)
             if (!suppressSync) {
                 onLocalSettingChanged()
             }
@@ -1497,6 +1496,12 @@ class MainActivity : AppCompatActivity() {
             if (AudioStreamService.isStreaming && (partyModeScreen == "HOST" || binding.rbPartyHost.isChecked)) {
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_STOP
+                }
+                startService(intent)
+            }
+            if (AudioStreamService.isServing && (partyModeScreen == "HOST" || binding.rbPartyHost.isChecked)) {
+                val intent = Intent(this, AudioStreamService::class.java).apply {
+                    action = AudioStreamService.ACTION_STOP_SERVE
                 }
                 startService(intent)
             }
@@ -1613,8 +1618,7 @@ class MainActivity : AppCompatActivity() {
                     if (!AudioStreamService.isServing) {
                         toggleServing()
                     }
-                }
-                if (!AudioStreamService.isStreaming) {
+                } else if (!AudioStreamService.isStreaming) {
                     lastServiceStartTimeMs = SystemClock.elapsedRealtime()
                     stopPreStreamDiscovery()
                     val intent = Intent(this, AudioStreamService::class.java).apply {

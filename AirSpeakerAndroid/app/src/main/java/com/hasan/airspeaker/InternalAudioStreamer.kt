@@ -225,6 +225,13 @@ class InternalAudioStreamer {
                         samplesRead += read
                     } else if (read < 0) {
                         Log.w(TAG, "AudioRecord read error: $read")
+                        if (!isRunning.get()) break
+                        try {
+                            Thread.sleep(10)
+                        } catch (_: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            break
+                        }
                         break
                     }
                 }

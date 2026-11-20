@@ -10,6 +10,7 @@
 import Foundation
 import UIKit
 import AVFoundation
+import CoreMedia
 import ReplayKit
 import Network
 import Combine
@@ -826,16 +827,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 }
 
                 let minPrebuffer = max(3, curTargetMs / 5)
-                guard isRunningAudio else { return }
+                guard isRxSessionActive(sessionId) else { break }
                 audioControlQueue.async { [weak self] in
-                    guard let self = self else { return }
-                    self.stateLock.lock()
-                    let running = self.isRunningAudio
-                    self.stateLock.unlock()
-                    guard running else { return }
+                    guard let self = self, self.isRxSessionActive(sessionId) else { return }
 
-                    let sessionId = self.playbackSessionId
+                    let playSession = self.playbackSessionId
                     if self.audioBufferQueueCount.value == 0 && !self.isPrebufferingAudio {
+                        self.atomicUnderruns.increment()
                         self.isPrebufferingAudio = true
                         if self.playerNode.isPlaying {
                             self.playerNode.pause()
@@ -845,7 +843,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     self.playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
                         guard let self = self else { return }
                         self.audioControlQueue.async {
-                            if self.playbackSessionId == sessionId {
+                            if self.playbackSessionId == playSession {
                                 self.audioBufferQueueCount.decrement()
                             }
                         }
