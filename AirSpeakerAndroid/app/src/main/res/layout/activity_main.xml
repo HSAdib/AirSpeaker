@@ -198,7 +198,7 @@
                         android:insetBottom="0dp"
                         android:text="≡ EQ"
                         android:textColor="@color/m3_primary"
-                        app:backgroundTint="#101820"
+                        app:backgroundTint="@color/m3_primary_container"
                         app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
                         android:fontFamily="sans-serif"
@@ -258,10 +258,10 @@
                 android:id="@+id/btnToggleStream"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:backgroundTint="#002200"
+                app:backgroundTint="@color/m3_primary_container"
                 app:strokeColor="@color/m3_outline"
                 app:strokeWidth="2dp"
-                android:text="[ ▶ START SPEAKER PLAYER (PORT 5004) ]"
+                android:text="Start Speaker Player"
                 android:textColor="@color/m3_tertiary"
                 android:textSize="14sp"
                 android:textStyle="bold"
@@ -385,7 +385,7 @@
                     android:minWidth="120dp"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
-                    android:background="#181818" />
+                    android:background="@color/m3_surface_container" />
             </LinearLayout>
 
             <!-- Expected Delay Display -->
@@ -581,7 +581,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:background="#0D0D0D"
+                android:background="@color/m3_surface_container"
                 android:padding="10dp"
                 android:shrinkColumns="0"
                 android:stretchColumns="1">
@@ -656,7 +656,7 @@
                     android:insetBottom="0dp"
                     android:text="≡ EQ"
                     android:textColor="@color/m3_primary"
-                    app:backgroundTint="#101820"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
                     android:fontFamily="sans-serif"
@@ -671,7 +671,7 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:layout_marginTop="8dp"
-                android:background="#12161A"
+                android:background="@color/m3_surface_container"
                 android:padding="8dp">
 
                 <TextView
@@ -688,7 +688,7 @@
                     android:layout_width="0dp"
                     android:layout_height="38dp"
                     android:layout_weight="1"
-                    android:background="#1A2228"
+                    android:background="@color/m3_surface_container"
                     android:textColor="@color/m3_on_surface"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
@@ -830,7 +830,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="38dp"
                     android:layout_marginStart="8dp"
-                    android:background="#1A2228" />
+                    android:background="@color/m3_surface_container" />
             </LinearLayout>
 
             <LinearLayout android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_width="match_parent" android:orientation="horizontal">
@@ -927,8 +927,8 @@
                 android:layout_marginTop="4dp"
                 android:max="100"
                 android:progress="0"
-                android:progressTint="#00FF00"
-                android:progressBackgroundTint="#222222" />
+                android:progressTint="@color/m3_tertiary"
+                android:progressBackgroundTint="@color/m3_surface_highest" />
 
             <!-- Main Serve Button -->
             <com.google.android.material.button.MaterialButton
@@ -936,10 +936,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:layout_marginTop="12dp"
-                android:backgroundTint="#002211"
+                app:backgroundTint="@color/m3_primary_container"
                 app:strokeColor="@color/m3_outline"
                 app:strokeWidth="2dp"
-                android:text="[ 📡 START SERVING AUDIO (PORT 5004) ]"
+                android:text="Start Serving Audio"
                 android:textColor="@color/m3_tertiary"
                 android:textSize="14sp"
                 android:textStyle="bold"
@@ -974,7 +974,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:background="#11161A"
+                android:background="@color/m3_surface_container"
                 android:padding="8dp"
                 android:text="Captures internal device playback (YouTube, Spotify, Games, System) via Android AudioPlaybackCapture (MediaProjection) and streams pristine 48 kHz stereo PCM16 directly to PC / Party Listeners on UDP 5004."
                 android:textColor="#8899AA"
@@ -1002,7 +1002,7 @@
                 android:orientation="vertical"
                 android:layout_marginTop="8dp"
                 android:padding="8dp"
-                android:background="#0A0E14">
+                android:background="@color/m3_surface_container">
 
                 <TextView
                     android:layout_width="match_parent"
@@ -1034,7 +1034,7 @@
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:fontFamily="sans-serif"
-                    app:backgroundTint="#002200"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_outline"
                     app:strokeWidth="2dp"
                     app:cornerRadius="8dp" />
@@ -1049,7 +1049,7 @@
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:fontFamily="sans-serif"
-                    app:backgroundTint="#001822"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_outline"
                     app:strokeWidth="2dp"
                     app:cornerRadius="8dp" />
@@ -1120,7 +1120,7 @@
                         android:insetBottom="0dp"
                         android:text="≡ EQ"
                         android:textColor="@color/m3_primary"
-                        app:backgroundTint="#101820"
+                        app:backgroundTint="@color/m3_primary_container"
                         app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
                         android:fontFamily="sans-serif"
@@ -1217,15 +1217,15 @@
                     android:layout_width="match_parent"
                     android:layout_height="52dp"
                     android:layout_marginTop="10dp"
-                    android:text="[ 👑 START PARTY BROADCAST (HOST) ]"
+                    android:text="Start Party Broadcast"
                     android:textColor="@color/m3_tertiary"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:fontFamily="sans-serif"
-                    app:backgroundTint="#002B00"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
-                    app:cornerRadius="0dp" />
+                    app:cornerRadius="20dp" />
 
                 <!-- Host Stream Quality & Bandwidth Card -->
                 <LinearLayout
@@ -1521,7 +1521,7 @@
                         android:insetBottom="0dp"
                         android:text="≡ EQ"
                         android:textColor="@color/m3_primary"
-                        app:backgroundTint="#101820"
+                        app:backgroundTint="@color/m3_primary_container"
                         app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
                         android:fontFamily="sans-serif"
@@ -1540,10 +1540,10 @@
                     android:textSize="14sp"
                     android:textStyle="bold"
                     android:fontFamily="sans-serif"
-                    app:backgroundTint="#002233"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
-                    app:cornerRadius="0dp" />
+                    app:cornerRadius="20dp" />
 
                 <!-- Discovered Hosts Section -->
                 <LinearLayout
@@ -1614,16 +1614,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="50dp"
                     android:layout_marginTop="6dp"
-                    android:text="[ ■ LEAVE PARTY ]"
+                    android:text="Leave Party"
                     android:textColor="@color/m3_error"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:fontFamily="sans-serif"
                     android:visibility="gone"
-                    app:backgroundTint="#330000"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_error"
                     app:strokeWidth="1dp"
-                    app:cornerRadius="0dp" />
+                    app:cornerRadius="20dp" />
 
                 <!-- Party Join Buffer Mode & EQ Controls -->
                 <RadioGroup
@@ -1728,7 +1728,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="14dp"
-                    android:background="#0D1722"
+                    android:background="@color/m3_surface_container"
                     android:orientation="vertical"
                     android:visibility="gone"
                     android:padding="12dp">
@@ -1756,15 +1756,15 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         android:layout_marginTop="8dp"
-                        android:text="[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR &amp; IP) ]"
+                        android:text="Extend Party"
                         android:textColor="@color/m3_primary"
                         android:textSize="12sp"
                         android:textStyle="bold"
                         android:fontFamily="sans-serif"
-                        app:backgroundTint="#002222"
+                        app:backgroundTint="@color/m3_primary_container"
                         app:strokeColor="@color/m3_outline"
                         app:strokeWidth="1dp"
-                        app:cornerRadius="4dp" />
+                        app:cornerRadius="20dp" />
 
                     <!-- Collapsible Extended Host IP + QR Code + Connected Downstream Peers -->
                     <LinearLayout
@@ -1779,7 +1779,7 @@
                             android:id="@+id/tvExtendedHostIpBanner"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:background="#102418"
+                            android:background="@color/m3_surface_container"
                             android:fontFamily="sans-serif"
                             android:padding="10dp"
                             android:text="📡 EXTENDED HOST IP: Detecting Hotspot / Wi-Fi IP..."
@@ -1831,7 +1831,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:background="#081018"
+                            android:background="@color/m3_surface_container"
                             android:fontFamily="sans-serif"
                             android:padding="8dp"
                             android:text="Extended Party Peers: Waiting for friends to scan your QR..."
@@ -1996,9 +1996,9 @@
                 android:text="Enable Audio Effects / Equalizer"
                 android:textColor="@color/m3_on_surface"
                 android:fontFamily="sans-serif"
-                app:useMaterialThemeColors="false"
-                app:thumbTint="#FFFFFF"
-                app:trackTint="#666666" />
+                
+                
+                 />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -2030,7 +2030,7 @@
                     android:insetBottom="0dp"
                     android:text="≡ EQ"
                     android:textColor="@color/m3_primary"
-                    app:backgroundTint="#101820"
+                    app:backgroundTint="@color/m3_primary_container"
                     app:strokeColor="@color/m3_outline"
                     app:strokeWidth="1dp"
                     android:fontFamily="sans-serif"
@@ -2094,9 +2094,9 @@
                 android:text="Pause stream on headset disconnection"
                 android:textColor="@color/m3_on_surface"
                 android:fontFamily="sans-serif"
-                app:useMaterialThemeColors="false"
-                app:thumbTint="#FFFFFF"
-                app:trackTint="#666666" />
+                
+                
+                 />
 
             <!-- Battery Optimization -->
             <com.google.android.material.button.MaterialButton
@@ -2156,7 +2156,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:layout_marginTop="16dp"
-                android:background="#0D1515"
+                android:background="@color/m3_surface_container"
                 android:padding="12dp">
 
                 <TextView

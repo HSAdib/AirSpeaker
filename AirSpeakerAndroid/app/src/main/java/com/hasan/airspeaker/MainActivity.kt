@@ -25,7 +25,6 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.switchmaterial.SwitchMaterial
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
@@ -194,9 +193,9 @@ class MainActivity : AppCompatActivity() {
 
         binding.layoutPartyExtendCard.visibility = View.VISIBLE
         binding.btnTogglePartyJoin.visibility = View.VISIBLE
-        binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
+        binding.btnTogglePartyJoin.text = "Leave Party"
         binding.tvPartyJoinStatus.text = "PARTY JOINER: Connected to $hostLabel ($cleanIp:$port) • Playing in sync"
-        binding.tvPartyJoinStatus.setTextColor(0xFF00FF00.toInt())
+        binding.tvPartyJoinStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_tertiary))
 
         if (!AudioStreamService.isStreaming) {
             lastServiceStartTimeMs = SystemClock.elapsedRealtime()
@@ -333,15 +332,15 @@ class MainActivity : AppCompatActivity() {
 
         val tv = android.widget.TextView(this).apply {
             text = guideText
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF0A0A0A.toInt())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface))
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.m3_surface_low))
             typeface = android.graphics.Typeface.MONOSPACE
             textSize = 12f
             setPadding(32, 24, 32, 24)
         }
         val scroll = android.widget.ScrollView(this).apply {
             addView(tv)
-            setBackgroundColor(0xFF0A0A0A.toInt())
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.m3_surface_low))
         }
 
         MaterialAlertDialogBuilder(this)
@@ -515,7 +514,7 @@ class MainActivity : AppCompatActivity() {
         val currentBands = FloatArray(5) { i -> prefs.getFloat("${contextKey}_band_$i", 0f) }
 
         val sv = ScrollView(this).apply {
-            setBackgroundColor(Color.parseColor("#080808"))
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.m3_surface_low))
             setPadding(32, 24, 32, 24)
         }
         val layout = LinearLayout(this).apply {
@@ -1072,7 +1071,7 @@ class MainActivity : AppCompatActivity() {
             hint = "Paste airspeaker://join link or Host IP"
             setText(clipboardText)
             setSelectAllOnFocus(true)
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface))
             setHintTextColor(0xFF666666.toInt())
             background = null
             setPadding(32, 24, 32, 24)
@@ -1183,13 +1182,13 @@ class MainActivity : AppCompatActivity() {
         if (hosts.isEmpty()) {
             binding.tvPartyDiscoveredHosts.visibility = View.VISIBLE
             binding.tvPartyDiscoveredHosts.text = "Waiting for party hosts... Tap a host below to connect:"
-            binding.tvPartyDiscoveredHosts.setTextColor(0xFF888888.toInt())
+            binding.tvPartyDiscoveredHosts.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
             return
         }
 
         binding.tvPartyDiscoveredHosts.visibility = View.VISIBLE
         binding.tvPartyDiscoveredHosts.text = "Discovered Active Hosts (${hosts.size}) — Tap to Join:"
-        binding.tvPartyDiscoveredHosts.setTextColor(0xFF00EEEE.toInt())
+        binding.tvPartyDiscoveredHosts.setTextColor(ContextCompat.getColor(this, R.color.m3_primary))
 
         for (h in hosts) {
             val btn = MaterialButton(this).apply {
@@ -1615,7 +1614,7 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.isExtendingParty = false
                 AudioNative.nativeSetPartyRelay(false)
                 ControlChannel.sendPartyHostStopAnnouncement()
-                binding.btnTogglePartyHost.text = "[ 👑 START PARTY BROADCAST (HOST) ]"
+                binding.btnTogglePartyHost.text = "Start Party Broadcast"
                 binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#002B00"))
                 binding.btnTogglePartyHost.setTextColor(Color.parseColor("#00FF00"))
                 binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#00FF00"))
@@ -1678,13 +1677,13 @@ class MainActivity : AppCompatActivity() {
                 updateExtendedQrCode()
                 binding.layoutExtendDetails.visibility = View.VISIBLE
                 binding.btnToggleExtendParty.text = "[ ■ STOP EXTENDING PARTY ]"
-                binding.btnToggleExtendParty.setTextColor(0xFFFF4444.toInt())
-                binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(0xFFFF4444.toInt())
+                binding.btnToggleExtendParty.setTextColor(ContextCompat.getColor(this, R.color.m3_error))
+                binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.m3_error))
             } else {
                 binding.layoutExtendDetails.visibility = View.GONE
-                binding.btnToggleExtendParty.text = "[ 📡 EXTEND PARTY (GENERATE HOTSPOT QR & IP) ]"
-                binding.btnToggleExtendParty.setTextColor(0xFF00EEEE.toInt())
-                binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(0xFF00EEEE.toInt())
+                binding.btnToggleExtendParty.text = "Extend Party"
+                binding.btnToggleExtendParty.setTextColor(ContextCompat.getColor(this, R.color.m3_primary))
+                binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.m3_primary))
             }
             updateStatsUI()
         }
@@ -1730,7 +1729,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     startService(intent)
                 }
-                binding.btnTogglePartyHost.text = "[ 👑 START PARTY BROADCAST (HOST) ]"
+                binding.btnTogglePartyHost.text = "Start Party Broadcast"
                 binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#002B00"))
                 binding.btnTogglePartyHost.setTextColor(Color.parseColor("#00FF00"))
                 binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#00FF00"))
@@ -1759,7 +1758,7 @@ class MainActivity : AppCompatActivity() {
                         startService(intent)
                     }
                 }
-                binding.btnTogglePartyHost.text = "[ ■ STOP PARTY BROADCAST ]"
+                binding.btnTogglePartyHost.text = "Stop Party Broadcast"
                 binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#330000"))
                 binding.btnTogglePartyHost.setTextColor(Color.parseColor("#FF4444"))
                 binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#FF4444"))
@@ -1820,7 +1819,7 @@ class MainActivity : AppCompatActivity() {
 
                 binding.layoutPartyExtendCard.visibility = View.VISIBLE
                 binding.btnTogglePartyJoin.visibility = View.VISIBLE
-                binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
+                binding.btnTogglePartyJoin.text = "Leave Party"
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Connected to $joinedHostIp:$joinedHostPort • Playing in sync"
 
                 lastServiceStartTimeMs = SystemClock.elapsedRealtime()
@@ -1917,14 +1916,14 @@ class MainActivity : AppCompatActivity() {
         ) {
             override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 return (super.getView(position, convertView, parent) as TextView).apply {
-                    setTextColor(0xFF00EEEE.toInt())
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_primary))
                     textSize = 12f
                     typeface = android.graphics.Typeface.MONOSPACE
                 }
             }
             override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 return (super.getDropDownView(position, convertView, parent) as TextView).apply {
-                    setTextColor(0xFFFFFFFF.toInt())
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface))
                     setBackgroundColor(0xFF1D222B.toInt())
                     textSize = 12f
                     typeface = android.graphics.Typeface.MONOSPACE
@@ -2427,7 +2426,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnToggleServe.backgroundTintList = ColorStateList.valueOf(terBg)
             binding.btnToggleServe.strokeWidth = 0
             binding.tvServeStatus.text = "Audio Sender: Ready (Port 5004)"
-            binding.tvServeStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_on_surface_variant))
+            binding.tvServeStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
             binding.tvServePps.text = "TX PPS: 0 pps"
             binding.pbServeLevel.progress = 0
         }
@@ -2444,7 +2443,7 @@ class MainActivity : AppCompatActivity() {
                 binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_primary))
             } else {
                 binding.tvStatus.text = "Ready • Port 5004"
-                binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_on_surface_variant))
+                binding.tvStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
             }
         } else {
             binding.tvStatus.text = "Active • " + statusParts.joinToString(" | ")
@@ -2537,17 +2536,17 @@ class MainActivity : AppCompatActivity() {
             if (AudioStreamService.isStreaming || (isPartyHostBroadcastActive && AudioStreamService.isServing)) {
                 if (isPartyHostBroadcastActive || (partyModeScreen == "HOST") || binding.rbPartyHost.isChecked || (isRelay && !isExtend)) {
                     binding.tvPartyStatusBanner.text = "PARTY STATUS: HOSTING / BROADCASTING ($partyPeers peer(s) connected)"
-                    binding.tvPartyStatusBanner.setTextColor(0xFF00FF00.toInt())
+                    binding.tvPartyStatusBanner.setTextColor(ContextCompat.getColor(this, R.color.m3_tertiary))
                 } else if (isExtend) {
                     binding.tvPartyStatusBanner.text = "PARTY STATUS: JOINED & EXTENDING ($partyPeers downstream peer(s))"
-                    binding.tvPartyStatusBanner.setTextColor(0xFF00FF00.toInt())
+                    binding.tvPartyStatusBanner.setTextColor(ContextCompat.getColor(this, R.color.m3_tertiary))
                 } else {
                     binding.tvPartyStatusBanner.text = "PARTY STATUS: JOINED & PLAYING (Shared Sound Active)"
-                    binding.tvPartyStatusBanner.setTextColor(0xFF00FF00.toInt())
+                    binding.tvPartyStatusBanner.setTextColor(ContextCompat.getColor(this, R.color.m3_tertiary))
                 }
             } else {
                 binding.tvPartyStatusBanner.text = "PARTY STATUS: STANDBY — Tap Start/Join Party Stream"
-                binding.tvPartyStatusBanner.setTextColor(0xFF888888.toInt())
+                binding.tvPartyStatusBanner.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
             }
 
             // Update Host peers list
@@ -2601,10 +2600,10 @@ class MainActivity : AppCompatActivity() {
                 val hIp = if (joinedHostIp.isNotEmpty()) joinedHostIp else displayIp
                 val extSuffix = if (isExtend) " • Re-broadcasting to extended peers" else ""
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Connected to $hIp:$joinedHostPort • Playing host sound in sync$extSuffix"
-                binding.tvPartyJoinStatus.setTextColor(0xFF00FF00.toInt())
+                binding.tvPartyJoinStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_tertiary))
                 binding.layoutPartyExtendCard.visibility = View.VISIBLE
                 binding.btnTogglePartyJoin.visibility = View.VISIBLE
-                binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
+                binding.btnTogglePartyJoin.text = "Leave Party"
             } else {
                 if (isPartyJoinedActive && !joinStarting && !AudioStreamService.isStreaming) {
                     isPartyJoinedActive = false
@@ -2622,7 +2621,7 @@ class MainActivity : AppCompatActivity() {
                     applyEffectiveEqualizerState()
                 }
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Standby (Scan QR or tap an active host above)"
-                binding.tvPartyJoinStatus.setTextColor(0xFF888888.toInt())
+                binding.tvPartyJoinStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
                 binding.btnTogglePartyJoin.visibility = View.GONE
             }
 

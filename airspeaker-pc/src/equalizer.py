@@ -594,8 +594,8 @@ def open_equalizer_dialog(
     chk_text = "Enable Equalizer (Active)" if context_key != "universal" else "Enable Universal Device Equalizer"
     tk.Checkbutton(
         top, text=chk_text, variable=enabled_var,
-        bg="#101318", fg="#E3E6EE", selectcolor="#222222",
-        activebackground="#000000", activeforeground="#00FF00",
+        bg="#101318", fg="#E3E6EE", selectcolor="#262D39",
+        activebackground="#101318", activeforeground="#A8C7FA",
         font=font_bold, command=_push_changes
     ).pack(side="right")
 
@@ -609,12 +609,12 @@ def open_equalizer_dialog(
         u_frame.pack(fill="x", padx=12, pady=(0, 6))
         tk.Checkbutton(
             u_frame, text="Apply to Hosting & Serving (SERVE + PARTY HOST Outbound TX)",
-            variable=apply_tx_var, bg="#101318", fg="#E3E6EE", selectcolor="#222222",
+            variable=apply_tx_var, bg="#101318", fg="#E3E6EE", selectcolor="#262D39",
             font=font_mono, command=_on_univ_route_toggled
         ).pack(anchor="w")
         tk.Checkbutton(
             u_frame, text="Apply to Playing & Joining (PLAY + PARTY JOIN Inbound RX)",
-            variable=apply_rx_var, bg="#101318", fg="#E3E6EE", selectcolor="#222222",
+            variable=apply_rx_var, bg="#101318", fg="#E3E6EE", selectcolor="#262D39",
             font=font_mono, command=_on_univ_route_toggled
         ).pack(anchor="w")
 

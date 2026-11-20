@@ -130,10 +130,9 @@ class AudioStreamService : Service() {
     private var audioTrackThread: Thread? = null
     @Volatile private var audioTrackRunning = false
 
-    private fun shouldUseAudioTrack(): Boolean {
-        // Use AudioTrack whenever user forces AUDIOTRACK_STANDARD or Bluetooth is active (to bypass Oboe HAL glitches)
+    private fun shouldUseAudioTrack(btConnected: Boolean = isBluetoothRouteActive): Boolean {
         val userAudioTrack = (audioOutputEngine == "AUDIOTRACK_STANDARD") || enableAudioEffects
-        return userAudioTrack || isBluetoothRouteActive
+        return userAudioTrack || btConnected
     }
 
     private fun startAudioTrackOutput() {
@@ -146,14 +145,16 @@ class AudioStreamService : Service() {
                 val sampleRate = 48000
                 val channelConfig = AudioFormat.CHANNEL_OUT_STEREO
                 val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+                val framesPerBlock = 480 // 10 ms stereo
                 val minBufSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-                // 120 ms buffer size gives rock-solid Bluetooth A2DP headroom against AudioFlinger jitter
-                val targetBufSize = (sampleRate * 2 * 2 * 120) / 1000
+                    .coerceAtLeast(framesPerBlock * 4 * 2)
+                // 120 ms AudioFlinger buffer so Bluetooth A2DP (SBC/AAC/LDAC) & BLE Audio never crackle
+                val targetBufSize = (sampleRate * 4 * 120) / 1000
                 val bufSize = maxOf(minBufSize * 2, targetBufSize)
 
                 var track: AudioTrack? = null
                 try {
-                    track = AudioTrack.Builder()
+                    val builder = AudioTrack.Builder()
                         .setAudioAttributes(
                             AudioAttributes.Builder()
                                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -169,48 +170,62 @@ class AudioStreamService : Service() {
                         )
                         .setBufferSizeInBytes(bufSize)
                         .setTransferMode(AudioTrack.MODE_STREAM)
-                        .build()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_NONE)
+                    }
+                    track = builder.build()
+                    if (track.state != AudioTrack.STATE_INITIALIZED) {
+                        Log.e(TAG, "AudioTrack failed to initialize")
+                        return@Thread
+                    }
 
-                    audioTrackInstance = track
+                    synchronized(audioTrackLock) {
+                        audioTrackInstance = track
+                    }
                     track.play()
-                    activeBackendLabel = if (isBluetoothRouteActive) "AUDIOTRACK (BT)" else "AUDIOTRACK"
-                    Log.i(TAG, "AudioTrack output started: bufSize=$bufSize bytes, minBuf=$minBufSize, label=$activeBackendLabel")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to initialize AudioTrack: ${e.message}", e)
-                    audioTrackRunning = false
-                    return@Thread
-                }
+                    activeBackendLabel = if (isBluetoothRouteActive) "BT • AudioTrack" else "AudioTrack"
+                    Log.i(TAG, "AudioTrack started: bufSize=$bufSize minBuf=$minBufSize sessionId=${track.audioSessionId} label=$activeBackendLabel")
+                    serviceHandler.post { updateAudioEffects() }
 
-                // 240 frames = 5 ms at 48 kHz stereo (480 shorts)
-                val framesPerBlock = 240
-                val shortBuf = ShortArray(framesPerBlock * 2)
-
-                while (audioTrackRunning && isStreaming) {
-                    val framesRendered = AudioNative.nativeReadExternalPcm(shortBuf, framesPerBlock)
-                    if (framesRendered > 0) {
-                        val shortsToWrite = framesRendered * 2
-                        var written = 0
-                        while (written < shortsToWrite && audioTrackRunning) {
-                            val w = track.write(shortBuf, written, shortsToWrite - written, AudioTrack.WRITE_BLOCKING)
-                            if (w <= 0) break
-                            written += w
-                        }
-                    } else {
-                        // Underflow / empty ring: sleep 2 ms to prevent CPU spin
-                        try {
+                    val shortBuf = ShortArray(framesPerBlock * 2)
+                    while (audioTrackRunning && isStreaming && !Thread.currentThread().isInterrupted) {
+                        val framesRendered = AudioNative.nativeReadExternalPcm(shortBuf, framesPerBlock)
+                        if (framesRendered > 0) {
+                            val shortsToWrite = framesRendered * 2
+                            var written = 0
+                            while (written < shortsToWrite && audioTrackRunning && isStreaming) {
+                                val w = track.write(shortBuf, written, shortsToWrite - written, AudioTrack.WRITE_BLOCKING)
+                                if (w < 0) {
+                                    Log.w(TAG, "AudioTrack write error=$w")
+                                    Thread.sleep(10)
+                                    break
+                                }
+                                if (w == 0) break
+                                written += w
+                            }
+                        } else {
                             Thread.sleep(2)
-                        } catch (_: InterruptedException) {
-                            break
                         }
                     }
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                } catch (e: Exception) {
+                    if (audioTrackRunning) {
+                        Log.e(TAG, "AudioTrack playback error: ${e.message}", e)
+                    }
+                } finally {
+                    synchronized(audioTrackLock) {
+                        if (audioTrackInstance === track) {
+                            audioTrackInstance = null
+                        }
+                        audioTrackRunning = false
+                    }
+                    try { track?.pause() } catch (_: Exception) {}
+                    try { track?.flush() } catch (_: Exception) {}
+                    try { track?.stop() } catch (_: Exception) {}
+                    try { track?.release() } catch (_: Exception) {}
+                    Log.i(TAG, "AudioTrack output stopped cleanly")
                 }
-
-                try {
-                    track.stop()
-                    track.release()
-                } catch (_: Exception) {}
-                audioTrackInstance = null
-                Log.i(TAG, "AudioTrack output stopped")
             }, "AirSpeaker-AudioTrackOut").apply {
                 isDaemon = true
                 start()
@@ -219,35 +234,34 @@ class AudioStreamService : Service() {
     }
 
     private fun stopAudioTrackOutput() {
+        val threadToJoin: Thread?
+        val trackToUnblock: AudioTrack?
         synchronized(audioTrackLock) {
             audioTrackRunning = false
-            audioTrackThread?.interrupt()
+            threadToJoin = audioTrackThread
             audioTrackThread = null
+            trackToUnblock = audioTrackInstance
+        }
+        // Unblock any blocking track.write() safely BEFORE joining; worker finally{} releases the track
+        try { trackToUnblock?.pause() } catch (_: Exception) {}
+        try { trackToUnblock?.flush() } catch (_: Exception) {}
+        threadToJoin?.interrupt()
+        if (threadToJoin != null && threadToJoin !== Thread.currentThread()) {
             try {
-                audioTrackInstance?.stop()
-                audioTrackInstance?.release()
-            } catch (_: Exception) {}
-            audioTrackInstance = null
+                threadToJoin.join(1000)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
         }
     }
 
     fun updateOutputEngineLive(engineName: String, fxEnabled: Boolean) {
         audioOutputEngine = engineName
         enableAudioEffects = fxEnabled
-        if (!isStreaming) return
-
-        val needTrack = shouldUseAudioTrack()
-        Log.i(TAG, "updateOutputEngineLive: engine=$engineName, fx=$fxEnabled, needTrack=$needTrack, bt=$isBluetoothRouteActive")
-
-        if (needTrack) {
-            AudioNative.nativeSetUseExternalOutput(true)
-            startAudioTrackOutput()
-        } else {
-            stopAudioTrackOutput()
-            AudioNative.nativeSetUseExternalOutput(false)
-            activeBackendLabel = "OBOE"
-        }
-        notifyStateChanged()
+        val lowLatency = (audioOutputEngine == "OBOE_LOW_LATENCY" && !enableAudioEffects)
+        AudioNative.nativeSetLowLatencyMode(lowLatency)
+        AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
+        syncBluetoothRouteToNative(force = true)
     }
 
     private fun isBluetoothDeviceType(type: Int): Boolean {
@@ -278,24 +292,35 @@ class AudioStreamService : Service() {
 
     private fun syncBluetoothRouteToNative(force: Boolean = false) {
         val btConnected = isBluetoothOutputConnected()
+        val wantAudioTrack = shouldUseAudioTrack(btConnected)
         isBluetoothRouteActive = btConnected
-        if (force || lastReportedBtRoute != btConnected) {
-            lastReportedBtRoute = btConnected
-            Log.i(TAG, "Audio output route updated: bluetooth=$btConnected (force=$force)")
-            AudioNative.nativeOnAudioRouteChanged(btConnected)
+        activeBackendLabel = when {
+            btConnected -> "BT • AudioTrack"
+            wantAudioTrack -> "AudioTrack"
+            else -> "Oboe"
+        }
 
+        if (force || lastReportedBtRoute != btConnected || (isStreaming && audioTrackRunning != wantAudioTrack)) {
+            lastReportedBtRoute = btConnected
+            Log.i(TAG, "Audio route sync: bluetooth=$btConnected wantAudioTrack=$wantAudioTrack streaming=$isStreaming")
             if (isStreaming) {
-                val needTrack = shouldUseAudioTrack()
-                if (needTrack) {
+                if (wantAudioTrack) {
+                    // 1. Switch native engine to external output FIRST so route change doesn't spawn an Oboe reopen
                     AudioNative.nativeSetUseExternalOutput(true)
+                    AudioNative.nativeOnAudioRouteChanged(btConnected)
                     startAudioTrackOutput()
                 } else {
+                    // 1. Stop & join AudioTrack thread FIRST before letting Oboe reopen
                     stopAudioTrackOutput()
+                    AudioNative.nativeOnAudioRouteChanged(false)
                     AudioNative.nativeSetUseExternalOutput(false)
-                    activeBackendLabel = "OBOE"
                 }
-                notifyStateChanged()
+                updateAudioEffects()
+            } else {
+                AudioNative.nativeSetUseExternalOutput(wantAudioTrack)
+                AudioNative.nativeOnAudioRouteChanged(btConnected)
             }
+            notifyStateChanged()
         }
     }
 
@@ -479,22 +504,31 @@ class AudioStreamService : Service() {
         pausedByHeadset = false
         pausedByFocus = false
         applyEffectiveMuteAndGain()
+
+        // Determine Bluetooth/AudioTrack route BEFORE setting isStreaming=true or calling nativeStart()
+        val btConnected = isBluetoothOutputConnected()
+        isBluetoothRouteActive = btConnected
+        lastReportedBtRoute = btConnected
+        val needTrack = shouldUseAudioTrack(btConnected)
+        activeBackendLabel = when {
+            btConnected -> "BT • AudioTrack"
+            needTrack -> "AudioTrack"
+            else -> "Oboe"
+        }
+
         isStreaming = true
         updateForegroundState()
-
         requestAudioFocus()
         acquireLocks()
 
         val lowLatency = (audioOutputEngine == "OBOE_LOW_LATENCY" && !enableAudioEffects)
         AudioNative.nativeSetLowLatencyMode(lowLatency)
         AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
-
-        syncBluetoothRouteToNative(force = true)
-        val needTrack = shouldUseAudioTrack()
         AudioNative.nativeSetUseExternalOutput(needTrack)
+        AudioNative.nativeOnAudioRouteChanged(btConnected)
 
         val started = AudioNative.nativeStart(port)
-        Log.d(TAG, "nativeStart result: $started on port $port (needTrack=$needTrack)")
+        Log.d(TAG, "nativeStart result: $started on port $port (needTrack=$needTrack, bt=$btConnected)")
         if (!started) {
             Log.e(TAG, "Failed to start native audio engine on port $port")
             isStreaming = false
@@ -512,8 +546,6 @@ class AudioStreamService : Service() {
 
         if (needTrack) {
             startAudioTrackOutput()
-        } else {
-            activeBackendLabel = "OBOE"
         }
 
         updateAudioEffects()
@@ -776,7 +808,8 @@ class AudioStreamService : Service() {
 
     private fun updateAudioEffects() {
         if (enableAudioEffects && isStreaming) {
-            val sessionId = AudioNative.nativeGetAudioSessionId()
+            val trackSessionId = synchronized(audioTrackLock) { audioTrackInstance?.audioSessionId ?: 0 }
+            val sessionId = if (audioTrackRunning && trackSessionId > 0) trackSessionId else AudioNative.nativeGetAudioSessionId()
             if (sessionId > 0 && (loudnessEnhancer == null || sessionId != lastAttachedSessionId)) {
                 try { loudnessEnhancer?.release() } catch (_: Exception) {}
                 loudnessEnhancer = null

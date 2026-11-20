@@ -22,6 +22,7 @@ private enum M3 {
     static let onSecondaryContainer = Color(red: 0.855, green: 0.886, blue: 0.976)
     static let tertiary = Color(red: 0.482, green: 0.863, blue: 0.659)         // #7BDCA8
     static let tertiaryContainer = Color(red: 0.051, green: 0.275, blue: 0.184)
+    static let onTertiaryContainer = Color(red: 0.651, green: 0.957, blue: 0.773) // #A6F4C5
     static let errorContainer = Color(red: 0.576, green: 0.000, blue: 0.039)   // #93000A
     static let onErrorContainer = Color(red: 1.000, green: 0.855, blue: 0.839) // #FFDAD6
     static let onSurface = Color(red: 0.890, green: 0.902, blue: 0.933)        // #E3E6EE
@@ -109,19 +110,23 @@ public struct ContentView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(red: 0.05, green: 0.15, blue: 0.1))
+                    .background(M3.surface)
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.0, green: 0.8, blue: 0.5), lineWidth: 1))
                     .padding(.horizontal, 14)
                     .padding(.bottom, 4)
                 }
 
                 // 4-Button Top Outlined Tab Bar: PLAY | SERVE | PARTY | SETTINGS
-                HStack(spacing: 6) {
-                    StudioTabButton(title: "PLAY", isSelected: selectedTab == 0) { selectedTab = 0 }
-                    StudioTabButton(title: "SERVE", isSelected: selectedTab == 1) { selectedTab = 1 }
-                    StudioTabButton(title: "PARTY", isSelected: selectedTab == 2) { selectedTab = 2 }
-                    StudioTabButton(title: "SETTINGS", isSelected: selectedTab == 3) { selectedTab = 3 }
+                HStack(spacing: 4) {
+                    StudioTabButton(title: "Play", isSelected: selectedTab == 0) { selectedTab = 0 }
+                    StudioTabButton(title: "Serve", isSelected: selectedTab == 1) { selectedTab = 1 }
+                    StudioTabButton(title: "Party", isSelected: selectedTab == 2) { selectedTab = 2 }
+                    StudioTabButton(title: "Settings", isSelected: selectedTab == 3) { selectedTab = 3 }
                 }
+                .padding(4)
+                .background(M3.surfaceLow)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(M3.outline, lineWidth: 1))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
 
@@ -183,7 +188,6 @@ struct StudioEQCornerButton: View {
                 .clipShape(Capsule())
         }
     }
-}
 }
 
 // MARK: - Tab 1: PLAYER STUDIO TAB
@@ -405,7 +409,7 @@ struct PlayerStudioTab: View {
                         TelemetryRow(label: "LATE PACKETS:", value: "0")
                     }
                     .padding(8)
-                    .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                    .background(M3.surface)
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.15), lineWidth: 1))
                 }
             }
@@ -580,7 +584,7 @@ struct ServeStudioTab: View {
                     }
                 }
                 .padding(10)
-                .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                .background(M3.surface)
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.15), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -739,7 +743,7 @@ struct PartyStudioTab: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(10)
-                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .background(M3.surface)
                         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         // Stream Quality & Host Controls Card (Host Broadcast - Locked to PCM16)
@@ -831,7 +835,7 @@ struct PartyStudioTab: View {
                             .padding(.top, 4)
                         }
                         .padding(10)
-                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .background(M3.surface)
                         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -934,7 +938,7 @@ struct PartyStudioTab: View {
                                                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
                                         }
                                         .padding(8)
-                                        .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                                        .background(M3.surfaceHigh)
                                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
                                     }
                                 }
@@ -951,7 +955,7 @@ struct PartyStudioTab: View {
                                 TextField("Host IP (e.g. 192.168.1.100)", text: $manualJoinIp)
                                     .font(.system(size: 11, design: .monospaced))
                                     .padding(6)
-                                    .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                                    .background(M3.surfaceHigh)
                                     .foregroundColor(.white)
                                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
@@ -1164,7 +1168,7 @@ struct SettingsStudioTab: View {
                     .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
                 }
                 .padding(10)
-                .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                .background(M3.surface)
                 .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                 // Exclusive Audio
@@ -1223,7 +1227,7 @@ struct SettingsStudioTab: View {
                         .foregroundColor(M3.tertiary)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .background(M3.surface)
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
                 }
 
@@ -1253,7 +1257,7 @@ struct SettingsStudioTab: View {
                     }
                 }
                 .padding(10)
-                .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                .background(M3.surface)
                 .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
             }
             .padding(14)
@@ -1284,7 +1288,7 @@ struct LiveDelayGraphView: View {
                 let maxMs: Double = 160.0
 
                 ZStack {
-                    Color(red: 0.04, green: 0.04, blue: 0.04)
+                    M3.surfaceLow
 
                     // Grid lines at 40, 80, 120 ms
                     Path { path in
