@@ -33,6 +33,7 @@ bool NativeAudioEngine::start(int audio_port) {
     std::memset(mEqZ1, 0, sizeof(mEqZ1));
     std::memset(mEqZ2, 0, sizeof(mEqZ2));
     mAudioEqSeq = 0;
+    mAudioEqEnabled = false;
 
     // 1. Create UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);

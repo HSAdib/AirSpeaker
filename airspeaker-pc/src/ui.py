@@ -2487,38 +2487,40 @@ class AirSpeakerApp:
             if "custom_buffer_ms" in msg:
                 try:
                     c = float(msg["custom_buffer_ms"])
-                    c = max(10.0, min(200.0, c))
-                    self.custom_buffer_var.set(c)
-                    for lbl in getattr(self, "_buffer_val_labels", []):
-                        try:
-                            lbl.config(text=f"{c:.1f} ms")
-                        except Exception:
-                            pass
-                    if hasattr(self, "buffer_val_label"):
-                        self.buffer_val_label.config(text=f"{c:.1f} ms")
-                    if hasattr(self, "play_target_var"):
-                        self.play_target_var.set(f"{c:.1f} ms")
-                    if self._phone_receiver:
-                        self._phone_receiver.set_target_buffer_ms(c)
-                    if self._party_join_receiver:
-                        self._party_join_receiver.set_target_buffer_ms(c)
+                    if math.isfinite(c):
+                        c = max(10.0, min(200.0, c))
+                        self.custom_buffer_var.set(c)
+                        for lbl in getattr(self, "_buffer_val_labels", []):
+                            try:
+                                lbl.config(text=f"{c:.1f} ms")
+                            except Exception:
+                                pass
+                        if hasattr(self, "buffer_val_label"):
+                            self.buffer_val_label.config(text=f"{c:.1f} ms")
+                        if hasattr(self, "play_target_var"):
+                            self.play_target_var.set(f"{c:.1f} ms")
+                        if self._phone_receiver:
+                            self._phone_receiver.set_target_buffer_ms(c)
+                        if self._party_join_receiver:
+                            self._party_join_receiver.set_target_buffer_ms(c)
                 except (ValueError, TypeError):
                     pass
 
             if "volume_gain" in msg:
                 try:
                     g = float(msg["volume_gain"])
-                    g = max(0.0, min(2.0, g))
-                    self.volume_gain_var.set(g)
-                    self.gain_val_label.config(text=f"{int(round(g * 100))}%")
-                    if hasattr(self, "conn_vol_pct_label"):
-                        self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
-                    if self._udp_sender:
-                        self._udp_sender.set_volume_gain(g)
-                    if self._phone_receiver:
-                        self._phone_receiver.set_volume_gain(g)
-                    if self._party_join_receiver:
-                        self._party_join_receiver.set_volume_gain(g)
+                    if math.isfinite(g):
+                        g = max(0.0, min(2.0, g))
+                        self.volume_gain_var.set(g)
+                        self.gain_val_label.config(text=f"{int(round(g * 100))}%")
+                        if hasattr(self, "conn_vol_pct_label"):
+                            self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
+                        if self._udp_sender:
+                            self._udp_sender.set_volume_gain(g)
+                        if self._phone_receiver:
+                            self._phone_receiver.set_volume_gain(g)
+                        if self._party_join_receiver:
+                            self._party_join_receiver.set_volume_gain(g)
                 except (ValueError, TypeError):
                     pass
 

@@ -6,6 +6,7 @@ Supports Windows (WASAPI/PyAudio) and Linux (PipeWire/PulseAudio/PyAudio).
 
 import collections
 import logging
+import math
 import shutil
 import socket
 import subprocess
@@ -348,13 +349,15 @@ class AudioReceiver:
         return min_packets, max_packets
 
     def set_target_buffer_ms(self, target_ms: float) -> None:
-        self._target_buffer_ms = max(10.0, min(200.0, float(target_ms)))
+        val = float(target_ms)
+        self._target_buffer_ms = max(10.0, min(200.0, val)) if math.isfinite(val) else 30.0
 
     def set_eq_gains(self, enabled: bool, gains_db: List[float]) -> None:
         self._rx_eq_dsp.set_gains(gains_db, enabled=enabled)
 
     def set_volume_gain(self, gain: float) -> None:
-        self._volume_gain = max(0.0, min(2.0, float(gain)))
+        val = float(gain)
+        self._volume_gain = max(0.0, min(2.0, val)) if math.isfinite(val) else 1.0
 
     @property
     def is_running(self) -> bool:

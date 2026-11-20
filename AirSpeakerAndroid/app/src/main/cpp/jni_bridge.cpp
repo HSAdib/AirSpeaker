@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <mutex>
 #include <algorithm>
+#include <cmath>
 
 static NativeAudioEngine* gAudioEngine = nullptr;
 static std::mutex gEngineMutex;
@@ -51,7 +52,7 @@ Java_com_hasan_airspeaker_AudioNative_nativeStop(JNIEnv* /*env*/, jobject /*thiz
 JNIEXPORT void JNICALL
 Java_com_hasan_airspeaker_AudioNative_nativeSetTargetBufferMs(JNIEnv* /*env*/, jobject /*thiz*/, jfloat targetMs) {
     std::lock_guard<std::mutex> lock(gEngineMutex);
-    gSavedTargetMs = std::clamp(targetMs, 10.0f, 200.0f);
+    gSavedTargetMs = std::isfinite(targetMs) ? std::clamp(targetMs, 10.0f, 200.0f) : 30.0f;
     if (gAudioEngine) {
         gAudioEngine->setTargetBufferMs(gSavedTargetMs);
     }
@@ -105,7 +106,7 @@ Java_com_hasan_airspeaker_AudioNative_nativeIsMuted(JNIEnv* /*env*/, jobject /*t
 JNIEXPORT void JNICALL
 Java_com_hasan_airspeaker_AudioNative_nativeSetVolumeGain(JNIEnv* /*env*/, jobject /*thiz*/, jfloat gain) {
     std::lock_guard<std::mutex> lock(gEngineMutex);
-    gSavedVolumeGain = std::clamp(gain, 0.0f, 2.0f);
+    gSavedVolumeGain = std::isfinite(gain) ? std::clamp(gain, 0.0f, 2.0f) : 1.0f;
     if (gAudioEngine) {
         gAudioEngine->setVolumeGain(gSavedVolumeGain);
     }
@@ -184,10 +185,13 @@ Java_com_hasan_airspeaker_AudioNative_nativeSetEqBands(JNIEnv* env, jobject /*th
     if (gainsDb != nullptr) {
         jsize len = env->GetArrayLength(gainsDb);
         jfloat* elements = env->GetFloatArrayElements(gainsDb, nullptr);
-        for (int i = 0; i < 5; ++i) {
-            gSavedEqBands[i] = (i < len) ? elements[i] : 0.0f;
+        if (elements != nullptr) {
+            for (int i = 0; i < 5; ++i) {
+                float raw = (i < len) ? elements[i] : 0.0f;
+                gSavedEqBands[i] = std::isfinite(raw) ? std::clamp(raw, -12.0f, 12.0f) : 0.0f;
+            }
+            env->ReleaseFloatArrayElements(gainsDb, elements, JNI_ABORT);
         }
-        env->ReleaseFloatArrayElements(gainsDb, elements, JNI_ABORT);
     }
     if (gAudioEngine) {
         gAudioEngine->setEqualizerBands(gSavedEqEnabled, gSavedEqBands[0], gSavedEqBands[1], gSavedEqBands[2], gSavedEqBands[3], gSavedEqBands[4]);

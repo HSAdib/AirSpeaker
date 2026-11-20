@@ -219,6 +219,7 @@ class MainActivity : AppCompatActivity() {
     private var lastSyncId = (System.currentTimeMillis() and 0x7FFFFFFF).toInt()
     private val seenSyncIds = ArrayDeque<Int>(32)
     private var suppressSync = false
+    private var suppressUnivEqCb = false
     private var currentFrameMs = 5
     private var userEditedPcIp: String? = null
     private var lastAppliedDiscoveredPcIp: String? = null
@@ -628,8 +629,13 @@ class MainActivity : AppCompatActivity() {
             if (contextKey == "universal" && cbDlgUnivTx != null && cbDlgUnivRx != null) {
                 editor.putBoolean("universal_apply_tx", cbDlgUnivTx!!.isChecked)
                 editor.putBoolean("universal_apply_rx", cbDlgUnivRx!!.isChecked)
-                binding.cbUniversalEqServeHost.isChecked = cbDlgUnivTx!!.isChecked
-                binding.cbUniversalEqPlayJoin.isChecked = cbDlgUnivRx!!.isChecked
+                suppressUnivEqCb = true
+                try {
+                    binding.cbUniversalEqServeHost.isChecked = cbDlgUnivTx!!.isChecked
+                    binding.cbUniversalEqPlayJoin.isChecked = cbDlgUnivRx!!.isChecked
+                } finally {
+                    suppressUnivEqCb = false
+                }
             }
             for (idx in 0 until 5) {
                 editor.putFloat("${contextKey}_band_$idx", sliders[idx].value)
@@ -1435,12 +1441,14 @@ class MainActivity : AppCompatActivity() {
         binding.cbUniversalEqPlayJoin.isChecked = eqPrefs.getBoolean("universal_apply_rx", false)
 
         binding.cbUniversalEqServeHost.setOnCheckedChangeListener { _, isChecked ->
+            if (suppressUnivEqCb) return@setOnCheckedChangeListener
             val ed = eqPrefs.edit().putBoolean("universal_apply_tx", isChecked)
             if (isChecked) ed.putBoolean("universal_enabled", true)
             ed.apply()
             applyEffectiveEqualizerState()
         }
         binding.cbUniversalEqPlayJoin.setOnCheckedChangeListener { _, isChecked ->
+            if (suppressUnivEqCb) return@setOnCheckedChangeListener
             val ed = eqPrefs.edit().putBoolean("universal_apply_rx", isChecked)
             if (isChecked) ed.putBoolean("universal_enabled", true)
             ed.apply()
@@ -2291,6 +2299,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshServiceButtonState() {
+        val hostStarting = (SystemClock.elapsedRealtime() - lastServiceStartTimeMs) < 2000L
+        if (isPartyHostBroadcastActive && !hostStarting &&
+            !AudioStreamService.isStreaming && !AudioStreamService.isServing
+        ) {
+            isPartyHostBroadcastActive = false
+            ControlChannel.isHostingOrExtendingParty = isPartyExtendedActive
+            ControlChannel.isExtendingParty = isPartyExtendedActive
+            AudioNative.nativeSetPartyRelay(isPartyExtendedActive)
+            ControlChannel.sendPartyHostStopAnnouncement()
+            applyEffectiveEqualizerState()
+        }
+
         val hostBroadcastActive = isPartyHostBroadcastActive &&
             (AudioStreamService.isStreaming || AudioStreamService.isServing)
 

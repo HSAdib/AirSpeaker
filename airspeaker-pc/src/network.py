@@ -5,6 +5,7 @@ network.py — UDP sender, control listener, adapter enumeration, and frame paci
 import ipaddress
 import json
 import logging
+import math
 import queue
 import re
 import socket
@@ -391,27 +392,38 @@ class UDPSender:
                     except Exception as e:
                         logger.warning("Error creating Opus encoder: %s", e)
 
+    @staticmethod
+    def _safe_gain(gain: float) -> float:
+        val = float(gain)
+        return max(0.0, min(2.0, val)) if math.isfinite(val) else 1.0
+
     def set_routing_and_gain(self, send_enabled: bool, gain: float, muted: bool) -> None:
+        safe_g = self._safe_gain(gain)
         with self._lock:
-            was_muted = self._muted
+            was_silent = self._muted or self._volume_gain <= 0.001
             self._send_enabled = bool(send_enabled)
-            self._volume_gain = max(0.0, min(2.0, float(gain)))
+            self._volume_gain = safe_g
             self._muted = bool(muted)
-        if bool(muted) and not was_muted:
+        if (bool(muted) or safe_g <= 0.001) and not was_silent:
             self._tx_eq_dsp.reset()
 
     def set_gain_and_mute(self, gain: float, muted: bool, send_enabled: bool = True) -> None:
+        safe_g = self._safe_gain(gain)
         with self._lock:
-            was_muted = self._muted
-            self._volume_gain = max(0.0, min(2.0, float(gain)))
+            was_silent = self._muted or self._volume_gain <= 0.001
+            self._volume_gain = safe_g
             self._muted = bool(muted)
             self._send_enabled = bool(send_enabled)
-        if bool(muted) and not was_muted:
+        if (bool(muted) or safe_g <= 0.001) and not was_silent:
             self._tx_eq_dsp.reset()
 
     def set_volume_gain(self, gain: float) -> None:
+        safe_g = self._safe_gain(gain)
         with self._lock:
-            self._volume_gain = max(0.0, min(2.0, float(gain)))
+            was_silent = self._muted or self._volume_gain <= 0.001
+            self._volume_gain = safe_g
+        if safe_g <= 0.001 and not was_silent:
+            self._tx_eq_dsp.reset()
 
     def set_muted(self, muted: bool) -> None:
         with self._lock:

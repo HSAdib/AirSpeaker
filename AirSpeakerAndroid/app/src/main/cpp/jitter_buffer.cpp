@@ -81,12 +81,8 @@ void JitterBuffer::reset() {
 }
 
 void JitterBuffer::pushPacket(const uint8_t* wireData, size_t size) {
-    if (!wireData || size < 12) return;
     AudioPacket pkt;
-    std::memcpy(&pkt.header, wireData, 12);
-    if (size > 12) {
-        pkt.payload.assign(wireData + 12, wireData + size);
-    }
+    if (!pkt.deserialize(wireData, size)) return;
     pushPacket(pkt);
 }
 
@@ -507,7 +503,8 @@ void JitterBuffer::adaptTargetBuffer() {
 }
 
 void JitterBuffer::setTargetBufferMs(float target_ms) {
-    mConfiguredTargetBufferMs.store(std::clamp(target_ms, 10.0f, 200.0f), std::memory_order_relaxed);
+    float safe = std::isfinite(target_ms) ? std::clamp(target_ms, 10.0f, 200.0f) : 30.0f;
+    mConfiguredTargetBufferMs.store(safe, std::memory_order_relaxed);
 }
 
 float JitterBuffer::getTargetBufferMs() const {

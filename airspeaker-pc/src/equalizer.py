@@ -481,6 +481,19 @@ class EqualizerManager:
             return True
         return False
 
+    @staticmethod
+    def _clean_bands(raw_bands: Any) -> List[float]:
+        if not isinstance(raw_bands, (list, tuple)):
+            return [0.0] * 5
+        out: List[float] = []
+        for x in (list(raw_bands) + [0.0] * 5)[:5]:
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                v = 0.0
+            out.append(v if math.isfinite(v) else 0.0)
+        return out
+
     def get_effective_tx_gains(self, is_party_host: bool = False) -> Tuple[bool, List[float]]:
         mode_key = "party_host" if is_party_host else "serve"
         mode_cfg = self._state["contexts"][mode_key]
@@ -493,12 +506,12 @@ class EqualizerManager:
 
         gains = [0.0] * 5
         if mode_on:
-            mb = mode_cfg.get("bands", [0.0] * 5)
-            gains = [gains[i] + float(mb[i]) for i in range(5)]
+            mb = self._clean_bands(mode_cfg.get("bands"))
+            gains = [gains[i] + mb[i] for i in range(5)]
         if univ_on:
-            ub = univ_cfg.get("bands", [0.0] * 5)
-            gains = [gains[i] + float(ub[i]) for i in range(5)]
-        gains = [max(-12.0, min(12.0, g)) for g in gains]
+            ub = self._clean_bands(univ_cfg.get("bands"))
+            gains = [gains[i] + ub[i] for i in range(5)]
+        gains = [max(-12.0, min(12.0, g)) if math.isfinite(g) else 0.0 for g in gains]
         return True, gains
 
     def get_effective_rx_gains(self, is_party_join: bool = False) -> Tuple[bool, List[float]]:
@@ -513,12 +526,12 @@ class EqualizerManager:
 
         gains = [0.0] * 5
         if mode_on:
-            mb = mode_cfg.get("bands", [0.0] * 5)
-            gains = [gains[i] + float(mb[i]) for i in range(5)]
+            mb = self._clean_bands(mode_cfg.get("bands"))
+            gains = [gains[i] + mb[i] for i in range(5)]
         if univ_on:
-            ub = univ_cfg.get("bands", [0.0] * 5)
-            gains = [gains[i] + float(ub[i]) for i in range(5)]
-        gains = [max(-12.0, min(12.0, g)) for g in gains]
+            ub = self._clean_bands(univ_cfg.get("bands"))
+            gains = [gains[i] + ub[i] for i in range(5)]
+        gains = [max(-12.0, min(12.0, g)) if math.isfinite(g) else 0.0 for g in gains]
         return True, gains
 
     def summary_text(self, ctx: str) -> str:
@@ -587,17 +600,22 @@ def open_equalizer_dialog(
     ).pack(side="right")
 
     if context_key == "universal":
+        def _on_univ_route_toggled() -> None:
+            if apply_tx_var.get() or apply_rx_var.get():
+                enabled_var.set(True)
+            _push_changes()
+
         u_frame = tk.LabelFrame(dlg, text=" Universal Equalizer Target Routing ", bg="#000000", fg="#00EEEE", font=font_bold, padx=8, pady=6)
         u_frame.pack(fill="x", padx=12, pady=(0, 6))
         tk.Checkbutton(
             u_frame, text="Apply to Hosting & Serving (SERVE + PARTY HOST Outbound TX)",
             variable=apply_tx_var, bg="#000000", fg="#FFFFFF", selectcolor="#222222",
-            font=font_mono, command=_push_changes
+            font=font_mono, command=_on_univ_route_toggled
         ).pack(anchor="w")
         tk.Checkbutton(
             u_frame, text="Apply to Playing & Joining (PLAY + PARTY JOIN Inbound RX)",
             variable=apply_rx_var, bg="#000000", fg="#FFFFFF", selectcolor="#222222",
-            font=font_mono, command=_push_changes
+            font=font_mono, command=_on_univ_route_toggled
         ).pack(anchor="w")
 
     # Preset Bar
@@ -649,8 +667,7 @@ def open_equalizer_dialog(
             messagebox.showwarning("Delete Preset", "Built-in presets cannot be deleted.", parent=dlg)
             return
         if eq_manager.delete_custom_preset(cur):
-            preset_var.set("Flat")
-            _on_preset_selected()
+            _reset_flat()
             _refresh_preset_list()
 
     def _reset_flat() -> None:

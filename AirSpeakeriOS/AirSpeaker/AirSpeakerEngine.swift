@@ -206,10 +206,11 @@ public final class Swift5BandBiquadDSP {
         let (isEn, localCoeffs) = snapshotAndPrepareState(channels: 2)
         guard frameCount > 0 else { return }
 
+        let safeGain: Float = gain.isFinite ? max(0.0, min(2.0, gain)) : 1.0
         let knee: Double = 0.85
         let invOneMinusKnee: Double = 1.0 / (1.0 - knee)
-        let dGain = Double(gain)
-        let applyGain = abs(gain - 1.0) > 0.001
+        let dGain = Double(safeGain)
+        let applyGain = abs(safeGain - 1.0) > 0.001
 
         if !isEn {
             if applyGain {
@@ -220,8 +221,8 @@ public final class Swift5BandBiquadDSP {
                     else if l < -knee { l = -knee - (1.0 - knee) * tanh((-l - knee) * invOneMinusKnee) }
                     if r > knee { r = knee + (1.0 - knee) * tanh((r - knee) * invOneMinusKnee) }
                     else if r < -knee { r = -knee - (1.0 - knee) * tanh((-r - knee) * invOneMinusKnee) }
-                    left[n] = Float(max(-1.0, min(1.0, l)))
-                    right[n] = Float(max(-1.0, min(1.0, r)))
+                    left[n] = l.isFinite ? Float(max(-1.0, min(1.0, l))) : 0.0
+                    right[n] = r.isFinite ? Float(max(-1.0, min(1.0, r))) : 0.0
                 }
             }
             return
@@ -278,8 +279,8 @@ public final class Swift5BandBiquadDSP {
             if xR > knee { xR = knee + (1.0 - knee) * tanh((xR - knee) * invOneMinusKnee) }
             else if xR < -knee { xR = -knee - (1.0 - knee) * tanh((-xR - knee) * invOneMinusKnee) }
 
-            left[n] = Float(max(-1.0, min(1.0, xL)))
-            right[n] = Float(max(-1.0, min(1.0, xR)))
+            left[n] = xL.isFinite ? Float(max(-1.0, min(1.0, xL))) : 0.0
+            right[n] = xR.isFinite ? Float(max(-1.0, min(1.0, xR))) : 0.0
         }
 
         // Flush denormals once per packet
@@ -401,7 +402,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     @Published public var volume: Float = 1.0 {
         didSet {
-            let clamped = min(2.0, max(0.0, volume))
+            let clamped = volume.isFinite ? min(2.0, max(0.0, volume)) : 1.0
             stateLock.lock()
             atomicVolume = clamped
             stateLock.unlock()
@@ -409,12 +410,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
     @Published public var isMuted: Bool = false {
         didSet {
+            let mutedSnapshot = isMuted
             stateLock.lock()
-            atomicMuted = isMuted
+            atomicMuted = mutedSnapshot
             stateLock.unlock()
             audioControlQueue.async { [weak self] in
                 guard let self = self else { return }
-                self.playerNode.volume = self.isMuted ? 0.0 : 1.0
+                self.playerNode.volume = mutedSnapshot ? 0.0 : 1.0
             }
         }
     }
@@ -564,6 +566,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         stopAll()
     }
 
@@ -575,9 +578,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var rxBands: [Float] = [0, 0, 0, 0, 0]
         for i in 0..<5 {
             var sum: Float = 0
-            if modeRX.enabled && i < modeRX.bands.count { sum += modeRX.bands[i] }
-            if universalEQ.enabled && universalApplyRx && i < universalEQ.bands.count { sum += universalEQ.bands[i] }
-            rxBands[i] = max(-12.0, min(12.0, sum))
+            if modeRX.enabled && i < modeRX.bands.count && modeRX.bands[i].isFinite { sum += modeRX.bands[i] }
+            if universalEQ.enabled && universalApplyRx && i < universalEQ.bands.count && universalEQ.bands[i].isFinite { sum += universalEQ.bands[i] }
+            rxBands[i] = sum.isFinite ? max(-12.0, min(12.0, sum)) : 0.0
         }
         rxEQDSP.setGains(enabled: rxEnabled, gains: rxBands)
 
@@ -587,9 +590,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var txBands: [Float] = [0, 0, 0, 0, 0]
         for i in 0..<5 {
             var sum: Float = 0
-            if modeTX.enabled && i < modeTX.bands.count { sum += modeTX.bands[i] }
-            if universalEQ.enabled && universalApplyTx && i < universalEQ.bands.count { sum += universalEQ.bands[i] }
-            txBands[i] = max(-12.0, min(12.0, sum))
+            if modeTX.enabled && i < modeTX.bands.count && modeTX.bands[i].isFinite { sum += modeTX.bands[i] }
+            if universalEQ.enabled && universalApplyTx && i < universalEQ.bands.count && universalEQ.bands[i].isFinite { sum += universalEQ.bands[i] }
+            txBands[i] = sum.isFinite ? max(-12.0, min(12.0, sum)) : 0.0
         }
         txEQDSP.setGains(enabled: txEnabled, gains: txBands)
     }
@@ -723,10 +726,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             rxEQDSP.reset()
             audioControlQueue.async { [weak self] in
                 guard let self = self else { return }
+                self.playbackSessionId &+= 1
+                self.playerNode.stop()
+                self.audioBufferQueueCount.reset()
                 self.isPrebufferingAudio = true
-                if self.playerNode.isPlaying {
-                    self.playerNode.pause()
-                }
             }
         } else if type == .ended {
             guard isAudioPlaying else { return }
@@ -738,6 +741,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             rxEQDSP.reset()
             audioControlQueue.async { [weak self] in
                 guard let self = self else { return }
+                self.playbackSessionId &+= 1
+                self.playerNode.stop()
+                self.audioBufferQueueCount.reset()
                 self.isPrebufferingAudio = true
                 if !self.audioEngine.isRunning {
                     try? self.audioEngine.start()
@@ -761,7 +767,6 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func setupAudioEngine() {
-        rxEQDSP.reset()
         audioControlQueue.sync {
             audioEngine.attach(playerNode)
             audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: audioFormat)
@@ -821,8 +826,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             rxStateLock.lock()
             isRunningAudio = false
             rxStateLock.unlock()
-            rxEQDSP.reset()
-        audioControlQueue.sync {
+            audioControlQueue.sync {
                 self.playerNode.stop()
             }
             DispatchQueue.main.async {
@@ -858,7 +862,6 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         audioRxSocket = -1
         stateLock.unlock()
 
-        rxEQDSP.reset()
         audioControlQueue.sync {
             self.playbackSessionId &+= 1
             self.playerNode.stop()
@@ -1212,6 +1215,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
         @inline(__always)
         func floatToInt16(_ v: Float) -> Int16 {
+            guard v.isFinite else { return 0 }
             let clamped = max(-1.0, min(1.0, v))
             return Int16(clamped * 32767.0)
         }
