@@ -250,7 +250,9 @@ class ControlChannel(
                         if (msgType == "PC_ANNOUNCE") {
                             activePcIp = senderIp
                             lastKnownPcIp = senderIp
-                            AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                            if (!isHostingOrExtendingParty) {
+                                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                            }
                             val pcName = json.optString("pc_name", "")
                             if (pcName.isNotBlank()) {
                                 activePcName = pcName
@@ -271,7 +273,9 @@ class ControlChannel(
                             if (allowOverwrite) {
                                 activePcIp = senderIp
                                 lastKnownPcIp = senderIp
-                                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                                if (!isHostingOrExtendingParty) {
+                                    AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                                }
                                 val pcName = json.optString("pc_name", "")
                                 if (pcName.isNotBlank()) {
                                     activePcName = pcName

@@ -41,6 +41,7 @@ class AudioStreamService : Service() {
         const val EXTRA_TARGET_IP = "target_ip"
         const val EXTRA_AUDIO_ENGINE = "extra_audio_engine"
         const val EXTRA_AUDIO_FX = "extra_audio_fx"
+        const val EXTRA_AUDIO_PORT = "extra_audio_port"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
 
@@ -70,6 +71,9 @@ class AudioStreamService : Service() {
 
         private var lastServiceConfigRev = 0
         private val seenServiceSyncIds = ArrayDeque<Int>(32)
+
+        @Synchronized
+        fun getLatestConfigRev(): Int = lastServiceConfigRev
 
         @Synchronized
         fun markLocalConfigSent(rev: Int, syncId: Int) {
@@ -194,7 +198,8 @@ class AudioStreamService : Service() {
                 if (intent.hasExtra(EXTRA_AUDIO_FX)) {
                     enableAudioEffects = intent.getBooleanExtra(EXTRA_AUDIO_FX, false)
                 }
-                if (!isStreaming) startAudioPlayer()
+                val port = intent.getIntExtra(EXTRA_AUDIO_PORT, 5004).coerceIn(1, 65535)
+                if (!isStreaming) startAudioPlayer(port)
             }
             ACTION_START_SERVE -> {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
@@ -249,8 +254,8 @@ class AudioStreamService : Service() {
         }
     }
 
-    private fun startAudioPlayer() {
-        Log.d(TAG, "startAudioPlayer entry")
+    private fun startAudioPlayer(port: Int = 5004) {
+        Log.d(TAG, "startAudioPlayer entry on port $port")
         pausedByHeadset = false
         pausedByFocus = false
         applyEffectiveMuteAndGain()
@@ -264,10 +269,10 @@ class AudioStreamService : Service() {
         AudioNative.nativeSetLowLatencyMode(lowLatency)
         AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
 
-        val started = AudioNative.nativeStart(5004)
-        Log.d(TAG, "nativeStart result: $started")
+        val started = AudioNative.nativeStart(port)
+        Log.d(TAG, "nativeStart result: $started on port $port")
         if (!started) {
-            Log.e(TAG, "Failed to start native audio engine on port 5004")
+            Log.e(TAG, "Failed to start native audio engine on port $port")
             isStreaming = false
             releaseAudioFocus()
             if (!isServing) {
@@ -345,6 +350,8 @@ class AudioStreamService : Service() {
             isServing = false
             if (!isStreaming) {
                 releaseLocks()
+                activeControlChannel?.stop()
+                activeControlChannel = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             } else {
@@ -397,6 +404,8 @@ class AudioStreamService : Service() {
             mediaProjectionCallback = null
             if (!isStreaming) {
                 releaseLocks()
+                activeControlChannel?.stop()
+                activeControlChannel = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             } else {

@@ -91,7 +91,7 @@ void JitterBuffer::pushPacket(const uint8_t* wireData, size_t size) {
 }
 
 void JitterBuffer::pushPacket(const AudioPacket& packet) {
-    if (packet.payload.empty() || packet.payload.size() > 2048) {
+    if (packet.payload.empty() || packet.payload.size() > 4096) {
         return;
     }
     mTotalRxPackets.fetch_add(1, std::memory_order_relaxed);
@@ -351,21 +351,25 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             const int pktChannels = (pkt.header.channels == 1) ? 1 : 2;
 
             if (pkt.header.codec == CODEC_PCM16) {
-                int frame_count = pkt.payload.size() / (pktChannels * sizeof(int16_t));
-                if (frame_count <= 0) frame_count = 240;
-                mLastFrameSamplesPerCh = frame_count;
-                mPacketDurationMs.store((frame_count * 1000.0f) / mSampleRate.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                total_frames = frame_count;
-
-                if (pktChannels == 2) {
-                    int copyBytes = std::min(static_cast<size_t>(frame_count * 2 * sizeof(int16_t)), pkt.payload.size());
-                    std::memcpy(decoded_buf, pkt.payload.data(), copyBytes);
+                int frame_count = static_cast<int>(pkt.payload.size() / (pktChannels * sizeof(int16_t)));
+                frame_count = std::clamp(frame_count, 0, 960);
+                if (frame_count <= 0) {
+                    total_frames = 0;
                 } else {
-                    const int16_t* monoPtr = reinterpret_cast<const int16_t*>(pkt.payload.data());
-                    int availMono = std::min(frame_count, static_cast<int>(pkt.payload.size() / sizeof(int16_t)));
-                    for (int i = 0; i < availMono; i++) {
-                        decoded_buf[i * 2] = monoPtr[i];
-                        decoded_buf[i * 2 + 1] = monoPtr[i];
+                    mLastFrameSamplesPerCh = frame_count;
+                    mPacketDurationMs.store((frame_count * 1000.0f) / mSampleRate.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                    total_frames = frame_count;
+
+                    if (pktChannels == 2) {
+                        int copyBytes = std::min(static_cast<size_t>(frame_count * 2 * sizeof(int16_t)), pkt.payload.size());
+                        std::memcpy(decoded_buf, pkt.payload.data(), copyBytes);
+                    } else {
+                        const int16_t* monoPtr = reinterpret_cast<const int16_t*>(pkt.payload.data());
+                        int availMono = std::min(frame_count, static_cast<int>(pkt.payload.size() / sizeof(int16_t)));
+                        for (int i = 0; i < availMono; i++) {
+                            decoded_buf[i * 2] = monoPtr[i];
+                            decoded_buf[i * 2 + 1] = monoPtr[i];
+                        }
                     }
                 }
             } else {

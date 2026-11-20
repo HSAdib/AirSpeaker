@@ -535,7 +535,7 @@ class AudioReceiver:
         """Dedicated non-blocking UDP socket receiver so zero mic packets are dropped."""
         while self._running:
             try:
-                data, addr = self._sock.recvfrom(2048)
+                data, addr = self._sock.recvfrom(4096)
                 if self._on_packet:
                     try:
                         self._on_packet(data, addr)
@@ -607,66 +607,66 @@ class AudioReceiver:
 
     def _render_and_write(self, pcm_data: bytes, channels: int) -> None:
         try:
-            in_ch = channels if channels in (1, 2) else 2
-            usable = (len(pcm_data) // (2 * in_ch)) * (2 * in_ch)
-            if usable == 0:
-                return
-            pcm_data = pcm_data[:usable]
+            with self._lock:
+                in_ch = channels if channels in (1, 2) else 2
+                usable = (len(pcm_data) // (2 * in_ch)) * (2 * in_ch)
+                if usable == 0:
+                    return
+                pcm_data = pcm_data[:usable]
 
-            pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, in_ch)
-            gain = self._volume_gain
-            if abs(gain - 1.0) > 0.01:
-                norm = (np.frombuffer(pcm_data, dtype="<i2").astype(np.float32) * gain) / 32767.0
-                if gain > 1.0:
-                    knee = 0.85
-                    norm = np.where(norm > knee, knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)), norm)
-                    norm = np.where(norm < -knee, -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)), norm)
-                else:
-                    norm = np.clip(norm, -1.0, 1.0)
-                pcm_data = np.rint(norm * 32767.0).astype("<i2").tobytes()
-            out_pcm = pcm_data
-            if self._dev_rate != SAMPLE_RATE or self._dev_channels != in_ch:
-                pcm_arr = np.frombuffer(pcm_data, dtype="<i2")
-                pcm_2d = pcm_arr.reshape(-1, in_ch)
-                if self._dev_channels == 1 and in_ch == 2:
-                    pcm_2d = pcm_2d.mean(axis=1, keepdims=True).astype(np.int16)
-                elif self._dev_channels == 2 and in_ch == 1:
-                    pcm_2d = np.repeat(pcm_2d, 2, axis=1)
+                pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, in_ch)
+                gain = self._volume_gain
+                if abs(gain - 1.0) > 0.01:
+                    norm = (np.frombuffer(pcm_data, dtype="<i2").astype(np.float32) * gain) / 32767.0
+                    if gain > 1.0:
+                        knee = 0.85
+                        norm = np.where(norm > knee, knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)), norm)
+                        norm = np.where(norm < -knee, -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)), norm)
+                    else:
+                        norm = np.clip(norm, -1.0, 1.0)
+                    pcm_data = np.rint(norm * 32767.0).astype("<i2").tobytes()
+                out_pcm = pcm_data
+                if self._dev_rate != SAMPLE_RATE or self._dev_channels != in_ch:
+                    pcm_arr = np.frombuffer(pcm_data, dtype="<i2")
+                    pcm_2d = pcm_arr.reshape(-1, in_ch)
+                    if self._dev_channels == 1 and in_ch == 2:
+                        pcm_2d = pcm_2d.mean(axis=1, keepdims=True).astype(np.int16)
+                    elif self._dev_channels == 2 and in_ch == 1:
+                        pcm_2d = np.repeat(pcm_2d, 2, axis=1)
 
-                if self._dev_rate != SAMPLE_RATE:
-                    if _SOXR_AVAILABLE:
-                        if self._resampler is not None:
-                            try:
-                                resampled = self._resampler.resample_chunk(pcm_2d.astype(np.float32), last=False)
-                                out_pcm = np.clip(resampled, -32768, 32767).astype("<i2").tobytes()
-                            except Exception:
+                    if self._dev_rate != SAMPLE_RATE:
+                        if _SOXR_AVAILABLE:
+                            if self._resampler is not None:
+                                try:
+                                    resampled = self._resampler.resample_chunk(pcm_2d.astype(np.float32), last=False)
+                                    out_pcm = np.clip(resampled, -32768, 32767).astype("<i2").tobytes()
+                                except Exception:
+                                    resampled = soxr.resample(
+                                        pcm_2d.astype(np.float32), SAMPLE_RATE, self._dev_rate, quality="HQ"
+                                    )
+                                    out_pcm = np.clip(resampled, -32768, 32767).astype("<i2").tobytes()
+                            else:
                                 resampled = soxr.resample(
                                     pcm_2d.astype(np.float32), SAMPLE_RATE, self._dev_rate, quality="HQ"
                                 )
                                 out_pcm = np.clip(resampled, -32768, 32767).astype("<i2").tobytes()
                         else:
-                            resampled = soxr.resample(
-                                pcm_2d.astype(np.float32), SAMPLE_RATE, self._dev_rate, quality="HQ"
-                            )
+                            in_len = len(pcm_2d)
+                            out_len = int(round(in_len * self._dev_rate / SAMPLE_RATE))
+                            x_old = np.arange(in_len, dtype=np.float32) / max(1, in_len)
+                            x_new = np.arange(out_len, dtype=np.float32) / max(1, out_len)
+                            resampled = np.zeros((out_len, self._dev_channels), dtype=np.float32)
+                            for c in range(self._dev_channels):
+                                resampled[:, c] = np.interp(x_new, x_old, pcm_2d[:, c])
                             out_pcm = np.clip(resampled, -32768, 32767).astype("<i2").tobytes()
                     else:
-                        in_len = len(pcm_2d)
-                        out_len = int(round(in_len * self._dev_rate / SAMPLE_RATE))
-                        x_old = np.arange(in_len, dtype=np.float32) / max(1, in_len)
-                        x_new = np.arange(out_len, dtype=np.float32) / max(1, out_len)
-                        resampled = np.zeros((out_len, self._dev_channels), dtype=np.float32)
-                        for c in range(self._dev_channels):
-                            resampled[:, c] = np.interp(x_new, x_old, pcm_2d[:, c])
-                        out_pcm = np.clip(resampled, -32768, 32767).astype("<i2").tobytes()
+                        out_pcm = pcm_2d.astype("<i2").tobytes()
+
+                if self._use_float32:
+                    out_write = (np.frombuffer(out_pcm, dtype="<i2").astype(np.float32) / 32768.0).tobytes()
                 else:
-                    out_pcm = pcm_2d.astype("<i2").tobytes()
+                    out_write = out_pcm
 
-            if self._use_float32:
-                out_write = (np.frombuffer(out_pcm, dtype="<i2").astype(np.float32) / 32768.0).tobytes()
-            else:
-                out_write = out_pcm
-
-            with self._lock:
                 if self._pacat_proc and self._pacat_proc.stdin:
                     self._pacat_proc.stdin.write(out_pcm)
                 elif self._stream:

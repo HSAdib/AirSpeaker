@@ -222,38 +222,45 @@ void NativeAudioEngine::stopAndCloseOboeStream() {
 }
 
 void NativeAudioEngine::scheduleStreamReopen() {
-    std::lock_guard<std::mutex> lock(mReopenMutex);
-    if (!mIsRunning.load(std::memory_order_acquire) ||
-        mShuttingDown.load(std::memory_order_acquire)) {
-        return;
-    }
-    bool expected = false;
-    if (!mReopenPending.compare_exchange_strong(expected, true)) {
-        return;
-    }
-
-    if (mReopenThread.joinable()) {
-        mReopenThread.detach(); // Previous finished reopen worker
-    }
-
-    mReopenThread = std::thread([this]() {
-        LOGI("Oboe stream reopen worker started");
-        stopAndCloseOboeStream();
-
-        for (int retry = 0; retry < 5 && mIsRunning.load() && !mShuttingDown.load(); ++retry) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
-            if (!mIsRunning.load() || mShuttingDown.load()) break;
-
-            if (openOboeStream() && startOboeStream()) {
-                LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
-                mReopenPending.store(false);
-                return;
-            }
+    std::thread oldReopenThread;
+    {
+        std::lock_guard<std::mutex> lock(mReopenMutex);
+        if (!mIsRunning.load(std::memory_order_acquire) ||
+            mShuttingDown.load(std::memory_order_acquire)) {
+            return;
+        }
+        bool expected = false;
+        if (!mReopenPending.compare_exchange_strong(expected, true)) {
+            return;
         }
 
-        mReopenPending.store(false);
-        LOGW("Failed to reopen Oboe stream after retries");
-    });
+        if (mReopenThread.joinable() &&
+            mReopenThread.get_id() != std::this_thread::get_id()) {
+            oldReopenThread = std::move(mReopenThread);
+        }
+
+        mReopenThread = std::thread([this]() {
+            LOGI("Oboe stream reopen worker started");
+            stopAndCloseOboeStream();
+
+            for (int retry = 0; retry < 5 && mIsRunning.load() && !mShuttingDown.load(); ++retry) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
+                if (!mIsRunning.load() || mShuttingDown.load()) break;
+
+                if (openOboeStream() && startOboeStream()) {
+                    LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
+                    mReopenPending.store(false);
+                    return;
+                }
+            }
+
+            mReopenPending.store(false);
+            LOGW("Failed to reopen Oboe stream after retries");
+        });
+    }
+    if (oldReopenThread.joinable()) {
+        oldReopenThread.join();
+    }
 }
 
 void NativeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result result) {
@@ -354,7 +361,7 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
 }
 
 void NativeAudioEngine::socketReceiverLoop() {
-    uint8_t buffer[2048];
+    uint8_t buffer[4096];
     struct sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
 
@@ -380,7 +387,7 @@ void NativeAudioEngine::socketReceiverLoop() {
             uint8_t rawCodec = buffer[8];
             uint8_t hopCount = (rawCodec >> 4) & 0x07;
             if (hopCount < 4) {
-                uint8_t relayBuf[2048];
+                uint8_t relayBuf[4096];
                 std::memcpy(relayBuf, buffer, static_cast<size_t>(bytes_read));
                 relayBuf[8] = (rawCodec & 0x8F) | static_cast<uint8_t>(((hopCount + 1) & 0x07) << 4);
                 std::lock_guard<std::mutex> pLock(mPartyPeersMutex);

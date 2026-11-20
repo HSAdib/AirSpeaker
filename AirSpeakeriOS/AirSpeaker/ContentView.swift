@@ -320,10 +320,16 @@ struct PlayerStudioTab: View {
                                 get: { Double(engine.volume) },
                                 set: { newVal in
                                     engine.volume = Float(newVal)
-                                    engine.sendConfigSync()
+                                    engine.scheduleConfigSync()
                                 }
                             ),
-                            in: 0.0...2.0
+                            in: 0.0...2.0,
+                            onEditingChanged: { isEditing in
+                                engine.isUserDraggingSlider = isEditing
+                                if !isEditing {
+                                    engine.sendConfigSync()
+                                }
+                            }
                         )
                         .accentColor(.white)
 
@@ -413,7 +419,7 @@ struct ServeStudioTab: View {
                         Button(action: {
                             let trimmed = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !trimmed.isEmpty {
-                                engine.connectedServerIp = trimmed
+                                engine.updateServeTargetIp(trimmed)
                             }
                         }) {
                             Text("SET")
@@ -1426,11 +1432,17 @@ struct TargetBufferControlSection: View {
                     set: { newVal in
                         engine.bufferTargetMs = Int(round(newVal))
                         engine.bufferMode = "CUSTOM"
-                        engine.sendConfigSync()
+                        engine.scheduleConfigSync()
                     }
                 ),
                 in: 10.0...200.0,
-                step: 5.0
+                step: 5.0,
+                onEditingChanged: { isEditing in
+                    engine.isUserDraggingSlider = isEditing
+                    if !isEditing {
+                        engine.sendConfigSync()
+                    }
+                }
             )
             .accentColor(.white)
         }

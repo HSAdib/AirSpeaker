@@ -1476,7 +1476,7 @@ class AirSpeakerApp:
                     ips.append(dev_ip)
         return ips
 
-    def _register_party_device(self, ip: str, name: str = "Android Phone", port: int = AUDIO_PORT, force: bool = False) -> None:
+    def _register_party_device(self, ip: str, name: str = "Android Phone", port: int = AUDIO_PORT, force: bool = False, manual: bool = False) -> None:
         ip = (ip or "").strip()
         if not ip or ip in ("0.0.0.0", "127.0.0.1", "255.255.255.255"):
             return
@@ -1486,10 +1486,13 @@ class AirSpeakerApp:
         if not force and getattr(self, "_party_view_state", "CHOOSER") != "HOST" and not getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get() and not getattr(self, "party_mode_var", tk.BooleanVar(value=False)).get():
             return
         with self._party_lock:
+            existing = self._party_devices.get(ip, {})
+            was_manual = existing.get("manual", False)
             self._party_devices[ip] = {
                 "name": name or "Android Phone",
                 "last_seen": time.monotonic(),
                 "port": int(port),
+                "manual": manual or was_manual,
             }
         if self._udp_sender:
             self._udp_sender.add_party_target(ip, int(port))
@@ -1500,7 +1503,7 @@ class AirSpeakerApp:
         with self._party_lock:
             to_prune = [
                 dev_ip for dev_ip, dev_info in self._party_devices.items()
-                if dev_ip != self._manual_ip_override and (now - dev_info["last_seen"]) > 12.0
+                if dev_ip != self._manual_ip_override and not dev_info.get("manual", False) and (now - dev_info["last_seen"]) > 12.0
             ]
             for dev_ip in to_prune:
                 self._party_devices.pop(dev_ip, None)
@@ -1527,6 +1530,7 @@ class AirSpeakerApp:
                 self.conn_device_ip_var.set(f"{first_ip}  •  PARTY ACTIVE")
 
         if hasattr(self, "party_listbox"):
+            prev_sel = self.party_listbox.curselection()
             self.party_listbox.delete(0, tk.END)
             for idx, (dev_ip, dev_info) in enumerate(snapshot, start=1):
                 age = max(0.0, now - dev_info["last_seen"])
@@ -1535,6 +1539,8 @@ class AirSpeakerApp:
                     tk.END,
                     f" #{idx}  {dev_info['name']:<20} •  {dev_ip}:{dev_info['port']}  •  {state_tag}"
                 )
+            if prev_sel and prev_sel[0] < len(snapshot):
+                self.party_listbox.selection_set(prev_sel[0])
 
         if hasattr(self, "party_extend_peers_label"):
             ext_peers = [f"{d['name']} ({ip})" for ip, d in snapshot]
@@ -1567,7 +1573,7 @@ class AirSpeakerApp:
         self._manual_ip_override = raw
         if not self.ip_var.get().strip():
             self.ip_var.set(raw)
-        self._register_party_device(raw, name, port, force=True)
+        self._register_party_device(raw, name, port, force=True, manual=True)
         self.party_add_ip_var.set("")
         self.party_add_name_var.set("")
         send_control_message(raw, self._get_current_config(), CONTROL_PORT)
@@ -1687,6 +1693,12 @@ class AirSpeakerApp:
                 )
             self._refresh_party_extend_qr()
         else:
+            if hasattr(self, "_party_relay_sock") and self._party_relay_sock:
+                try:
+                    self._party_relay_sock.close()
+                except Exception:
+                    pass
+                self._party_relay_sock = None
             if hasattr(self, "party_extend_details_frame"):
                 self.party_extend_details_frame.pack_forget()
             if hasattr(self, "btn_party_extend"):
@@ -2705,6 +2717,7 @@ class AirSpeakerApp:
                 activebackground="#004400", activeforeground=ACCENT
             )
             if self._party_streaming and self._udp_sender:
+                self._udp_sender.clear_primary_target()
                 self._udp_sender.set_party_mode(True)
 
         if not self._normal_streaming and not self._party_streaming:
@@ -3075,7 +3088,7 @@ class AirSpeakerApp:
                                 self.ip_var.set(sender_ip)
                                 if self._control_listener:
                                     self._control_listener.set_target_ip(sender_ip)
-                                if self._streaming and self._udp_sender:
+                                if self._normal_streaming and self._udp_sender:
                                     self._udp_sender.update_target(sender_ip, int(self.ip_port_var.get() or AUDIO_PORT))
                             if data.get("party_join") is True:
                                 self._register_party_device(sender_ip, data.get("device", "Phone Joiner"), data.get("audio_port", AUDIO_PORT), force=True)
@@ -3229,7 +3242,7 @@ class AirSpeakerApp:
                                 self.ip_var.set(best_ip)
                                 if self._control_listener:
                                     self._control_listener.set_target_ip(best_ip)
-                                if self._streaming and self._udp_sender:
+                                if self._normal_streaming and self._udp_sender:
                                     self._udp_sender.update_target(best_ip, int(self.ip_port_var.get() or AUDIO_PORT))
                                     self._update_combined_status()
                                 if old_ip != best_ip or not old_ip:

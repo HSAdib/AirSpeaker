@@ -350,6 +350,11 @@ class UDPSender:
         self._thread.start()
         logger.info("UDPSender started")
 
+    def clear_primary_target(self) -> None:
+        """Clear primary unicast streaming target while keeping any party targets intact."""
+        with self._lock:
+            self._target_ip = ""
+
     def update_target(self, target_ip: str, target_port: int = AUDIO_PORT) -> None:
         with self._lock:
             old_ip = self._target_ip

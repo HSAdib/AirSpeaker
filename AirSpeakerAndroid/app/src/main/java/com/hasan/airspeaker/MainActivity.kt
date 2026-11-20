@@ -178,6 +178,7 @@ class MainActivity : AppCompatActivity() {
                 action = AudioStreamService.ACTION_START
                 putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
                 putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
+                putExtra(AudioStreamService.EXTRA_AUDIO_PORT, joinedHostPort)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
@@ -766,6 +767,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        localRev = maxOf(localRev, AudioStreamService.getLatestConfigRev())
         volumeControlStream = AudioManager.STREAM_MUSIC
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -800,6 +802,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         startService(intent)
                     }
+                    handler.postDelayed({ startPreStreamDiscoveryIfNeeded() }, 500L)
                     Toast.makeText(this, "Party Host: $reason", Toast.LENGTH_LONG).show()
                 }
             }
@@ -1712,6 +1715,7 @@ class MainActivity : AppCompatActivity() {
                     action = AudioStreamService.ACTION_START
                     putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
                     putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
+                    putExtra(AudioStreamService.EXTRA_AUDIO_PORT, joinedHostPort)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(intent)
@@ -1875,6 +1879,7 @@ class MainActivity : AppCompatActivity() {
                     action = AudioStreamService.ACTION_START
                     putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
                     putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
+                    putExtra(AudioStreamService.EXTRA_AUDIO_PORT, joinedHostPort)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(intent)
@@ -2442,6 +2447,17 @@ class MainActivity : AppCompatActivity() {
                 binding.btnTogglePartyJoin.visibility = View.VISIBLE
                 binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
             } else {
+                if (isPartyJoinedActive && !joinStarting) {
+                    isPartyJoinedActive = false
+                    isPartyExtendedActive = false
+                    ControlChannel.isPartyJoinerActive = false
+                    ControlChannel.isExtendingParty = false
+                    ControlChannel.isHostingOrExtendingParty = false
+                    AudioNative.nativeSetPartyRelay(false)
+                    if (joinedHostIp.isNotEmpty()) {
+                        ControlChannel.sendPartyLeaveAnnouncement(joinedHostIp)
+                    }
+                }
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Standby (Scan QR or tap an active host above)"
                 binding.tvPartyJoinStatus.setTextColor(0xFF888888.toInt())
                 binding.btnTogglePartyJoin.visibility = View.GONE

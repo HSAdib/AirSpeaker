@@ -21,12 +21,14 @@ public struct PartyMember: Identifiable, Equatable {
     public let name: String
     public let ip: String
     public var lastSeen: Date
+    public var isManual: Bool
 
-    public init(name: String, ip: String) {
+    public init(name: String, ip: String, isManual: Bool = false) {
         self.id = "\(name)_\(ip)"
         self.name = name
         self.ip = ip
         self.lastSeen = Date()
+        self.isManual = isManual
     }
 }
 
@@ -297,6 +299,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var currentPartyHostIp: String = ""
     @Published public var statusMessage: String = "Ready"
 
+    // Slider debouncing and dragging state
+    public var isUserDraggingSlider: Bool = false
+    private var configSyncDebounceWorkItem: DispatchWorkItem?
+    private var eqSaveWorkItem: DispatchWorkItem?
+    private let eqSaveQueue = DispatchQueue(label: "com.hasan.airspeaker.eqSaveQueue", qos: .utility)
+    private var atomicFrameDurationMs: Double = 5.0
+    private var atomicServeTargetIp: String = ""
+
     // MARK: - Update Notification States
     @Published public var updateAvailableVersion: String = ""
     @Published public var updateDownloadUrl: String = ""
@@ -434,15 +444,29 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func saveEQState() {
-        let defaults = UserDefaults.standard
-        if let playData = try? JSONEncoder().encode(playEQ) { defaults.set(playData, forKey: "ps_playEQ") }
-        if let serveData = try? JSONEncoder().encode(serveEQ) { defaults.set(serveData, forKey: "ps_serveEQ") }
-        if let phData = try? JSONEncoder().encode(partyHostEQ) { defaults.set(phData, forKey: "ps_partyHostEQ") }
-        if let pjData = try? JSONEncoder().encode(partyJoinEQ) { defaults.set(pjData, forKey: "ps_partyJoinEQ") }
-        if let univData = try? JSONEncoder().encode(universalEQ) { defaults.set(univData, forKey: "ps_universalEQ") }
-        defaults.set(universalApplyTx, forKey: "ps_universalApplyTx")
-        defaults.set(universalApplyRx, forKey: "ps_universalApplyRx")
-        if let customData = try? JSONEncoder().encode(customEQPresets) { defaults.set(customData, forKey: "ps_customEQPresets") }
+        eqSaveWorkItem?.cancel()
+        let play = self.playEQ
+        let serve = self.serveEQ
+        let ph = self.partyHostEQ
+        let pj = self.partyJoinEQ
+        let univ = self.universalEQ
+        let tx = self.universalApplyTx
+        let rx = self.universalApplyRx
+        let presets = self.customEQPresets
+
+        let workItem = DispatchWorkItem {
+            let defaults = UserDefaults.standard
+            if let playData = try? JSONEncoder().encode(play) { defaults.set(playData, forKey: "ps_playEQ") }
+            if let serveData = try? JSONEncoder().encode(serve) { defaults.set(serveData, forKey: "ps_serveEQ") }
+            if let phData = try? JSONEncoder().encode(ph) { defaults.set(phData, forKey: "ps_partyHostEQ") }
+            if let pjData = try? JSONEncoder().encode(pj) { defaults.set(pjData, forKey: "ps_partyJoinEQ") }
+            if let univData = try? JSONEncoder().encode(univ) { defaults.set(univData, forKey: "ps_universalEQ") }
+            defaults.set(tx, forKey: "ps_universalApplyTx")
+            defaults.set(rx, forKey: "ps_universalApplyRx")
+            if let customData = try? JSONEncoder().encode(presets) { defaults.set(customData, forKey: "ps_customEQPresets") }
+        }
+        eqSaveWorkItem = workItem
+        eqSaveQueue.asyncAfter(deadline: .now() + 0.25, execute: workItem)
     }
 
     private func loadEQState() {
@@ -465,10 +489,33 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         stateLock.unlock()
     }
 
+    public func scheduleConfigSync(delaySeconds: Double = 0.06) {
+        configSyncDebounceWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.sendConfigSync()
+        }
+        configSyncDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds, execute: workItem)
+    }
+
+    public func updateServeTargetIp(_ ip: String) {
+        stateLock.lock()
+        atomicServeTargetIp = ip.trimmingCharacters(in: .whitespacesAndNewlines)
+        atomicConnectedServerIp = atomicServeTargetIp
+        stateLock.unlock()
+        DispatchQueue.main.async {
+            self.connectedServerIp = self.atomicServeTargetIp
+        }
+    }
+
     public func clearPartyPeers() {
         peersLock.lock()
+        let peersToKick = Array(partyPeerIps)
         partyPeerIps.removeAll()
         peersLock.unlock()
+        for p in peersToKick {
+            sendControlMessage(["type": "PARTY_KICK", "target_ip": p, "reason": "Host stopped party mode"], toIp: p)
+        }
         DispatchQueue.main.async {
             self.partyMembers.removeAll()
         }
@@ -539,6 +586,26 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             updateServerIp(manualHost)
         }
 
+        stateLock.lock()
+        packetsReceived = 0
+        packetsLost = 0
+        lastSequence = 0
+        lastRxPpsCount = 0
+        receivedOpusPacket = false
+        atomicFrameDurationMs = 5.0
+        stateLock.unlock()
+
+        atomicUnderruns.reset()
+        atomicOverflows.reset()
+
+        DispatchQueue.main.async {
+            self.delayHistory = Array(repeating: 0.0, count: 60)
+            self.packetLossPercent = 0.0
+            self.packetsLostCount = 0
+            self.rxPps = 0
+            self.underrunCount = 0
+        }
+
         audioControlQueue.sync {
             self.playbackSessionId &+= 1
             self.audioBufferQueueCount.reset()
@@ -548,10 +615,6 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 try? self.audioEngine.start()
             }
         }
-
-        stateLock.lock()
-        receivedOpusPacket = false
-        stateLock.unlock()
 
         rxStateLock.lock()
         isRunningAudio = true
@@ -803,8 +866,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             let frameCount = AVAudioFrameCount(channels == 1 ? sampleCount : (sampleCount / 2))
             guard frameCount > 0 else { continue }
 
-            // Cap queued buffers to max(12, bufferTargetMs * 2 / 5) so Wi-Fi bursts buffer smoothly!
-            let maxQueued = max(12, (curTargetMs * 2) / 5)
+            let frameDurMs = max(1.0, (Double(frameCount) * 1000.0) / 48000.0)
+            stateLock.lock()
+            atomicFrameDurationMs = frameDurMs
+            stateLock.unlock()
+
+            // Dynamic buffer thresholds based on real frame duration (5ms, 10ms, or 20ms)
+            let maxQueued = max(8, Int(ceil((Double(curTargetMs) * 2.0) / frameDurMs)))
             if audioBufferQueueCount.value >= maxQueued {
                 atomicOverflows.increment()
                 continue
@@ -838,7 +906,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     }
                 }
 
-                let minPrebuffer = max(3, curTargetMs / 5)
+                let minPrebuffer = max(2, Int(round(Double(curTargetMs) / frameDurMs)))
                 guard isRxSessionActive(sessionId) else { break }
                 audioControlQueue.async { [weak self] in
                     guard let self = self, self.isRxSessionActive(sessionId) else { return }
@@ -987,6 +1055,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func startServingInternalAudio(targetIp: String = "") {
         guard !isInternalAudioServing else { return }
 
+        stateLock.lock()
+        if !targetIp.isEmpty {
+            atomicServeTargetIp = targetIp.trimmingCharacters(in: .whitespacesAndNewlines)
+            atomicConnectedServerIp = atomicServeTargetIp
+        }
+        stateLock.unlock()
+
         let recorder = RPScreenRecorder.shared()
         guard recorder.isAvailable else {
             DispatchQueue.main.async {
@@ -1085,12 +1160,15 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.stateLock.unlock()
 
                 let destIp: String
-                if !targetIp.isEmpty {
+                self.stateLock.lock()
+                let targetServe = self.atomicServeTargetIp
+                let curIp = self.atomicConnectedServerIp
+                self.stateLock.unlock()
+                if !targetServe.isEmpty {
+                    destIp = targetServe
+                } else if !targetIp.isEmpty {
                     destIp = targetIp
                 } else {
-                    self.stateLock.lock()
-                    let curIp = self.atomicConnectedServerIp
-                    self.stateLock.unlock()
                     destIp = curIp.isEmpty ? "255.255.255.255" : curIp
                 }
                 self.sendServePacket(packet, toIp: destIp)
@@ -1311,20 +1389,22 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             suppressSync = true
             defer { suppressSync = false }
 
-            if let vol = (payload["volume_gain"] as? NSNumber)?.floatValue {
-                volume = min(2.0, max(0.0, vol))
-            }
-            if let mute = payload["muted"] as? Bool {
-                isMuted = mute
-            }
-            if let profile = payload["audio_profile"] as? String {
-                soundMode = profile
-            }
-            if let bMode = payload["buffer_mode"] as? String {
-                bufferMode = bMode
-            }
-            if let targetMs = (payload["custom_buffer_ms"] as? NSNumber)?.intValue {
-                bufferTargetMs = min(200, max(10, targetMs))
+            if !isUserDraggingSlider {
+                if let vol = (payload["volume_gain"] as? NSNumber)?.floatValue {
+                    volume = min(2.0, max(0.0, vol))
+                }
+                if let mute = payload["muted"] as? Bool {
+                    isMuted = mute
+                }
+                if let profile = payload["audio_profile"] as? String {
+                    soundMode = profile
+                }
+                if let bMode = payload["buffer_mode"] as? String {
+                    bufferMode = bMode
+                }
+                if let targetMs = (payload["custom_buffer_ms"] as? NSNumber)?.intValue {
+                    bufferTargetMs = min(200, max(10, targetMs))
+                }
             }
             if let role = payload["direction"] as? String {
                 serverRole = role
@@ -1409,11 +1489,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
     }
 
-    private func updatePartyMember(name: String, ip: String) {
+    private func updatePartyMember(name: String, ip: String, isManual: Bool = false) {
         if let idx = partyMembers.firstIndex(where: { $0.ip == ip }) {
             partyMembers[idx].lastSeen = Date()
+            if isManual {
+                partyMembers[idx].isManual = true
+            }
         } else {
-            partyMembers.append(PartyMember(name: name, ip: ip))
+            partyMembers.append(PartyMember(name: name, ip: ip, isManual: isManual))
         }
     }
 
@@ -1423,7 +1506,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         peersLock.lock()
         partyPeerIps.insert(trimmed)
         peersLock.unlock()
-        updatePartyMember(name: "Peer (\(trimmed))", ip: trimmed)
+        updatePartyMember(name: "Peer (\(trimmed))", ip: trimmed, isManual: true)
     }
 
     public func kickMember(ip: String) {
@@ -1604,7 +1687,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 let now = Date()
                 self.discoveredPartyHosts.removeAll { now.timeIntervalSince($0.lastSeen) > 6.0 }
                 self.partyMembers.removeAll { member in
-                    if now.timeIntervalSince(member.lastSeen) > 10.0 {
+                    if !member.isManual && now.timeIntervalSince(member.lastSeen) > 10.0 {
                         self.peersLock.lock()
                         self.partyPeerIps.remove(member.ip)
                         self.peersLock.unlock()
@@ -1684,7 +1767,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
                 let total = curRx + curLost
                 self.packetLossPercent = total > 0 ? (Double(curLost) / Double(total)) * 100.0 : 0.0
-                let queueBufMs = Double(self.audioBufferQueueCount.value * 5)
+                self.stateLock.lock()
+                let curFrameDurMs = self.atomicFrameDurationMs
+                self.stateLock.unlock()
+                let queueBufMs = Double(self.audioBufferQueueCount.value) * curFrameDurMs
                 let curBufMs: Double
                 if queueBufMs > 0 {
                     curBufMs = queueBufMs
