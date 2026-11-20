@@ -149,25 +149,59 @@
                 android:padding="10dp"
                 android:layout_marginBottom="10dp">
 
-                <TextView
-                    android:id="@+id/tvConnectedDeviceTitle"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="💻 Connected PC: Searching..."
-                    android:textColor="#38B6FF"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:fontFamily="monospace" />
+                    android:orientation="horizontal"
+                    android:gravity="top">
 
-                <TextView
-                    android:id="@+id/tvConnectedDeviceSub"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="📱 This Phone: Detecting..."
-                    android:textColor="#99AABB"
-                    android:textSize="12sp"
-                    android:fontFamily="monospace" />
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvConnectedDeviceTitle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="💻 Connected PC: Searching..."
+                            android:textColor="#38B6FF"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:fontFamily="monospace" />
+
+                        <TextView
+                            android:id="@+id/tvConnectedDeviceSub"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="📱 This Phone: Detecting..."
+                            android:textColor="#99AABB"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnEqualizerPlay"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:layout_marginStart="6dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="≡ EQ"
+                        android:textColor="#00EEEE"
+                        app:backgroundTint="#101820"
+                        app:strokeColor="#00EEEE"
+                        app:strokeWidth="1dp"
+                        android:fontFamily="monospace"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <!-- Connected PC IP input & connect -->
                 <LinearLayout
@@ -522,19 +556,6 @@
                     android:textSize="11sp" />
             </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnEqualizerPlay"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="8dp"
-                android:text="[ 🎛️ PLAY EQUALIZER: OFF (TAP TO OPEN) ]"
-                android:textColor="#00EEEE"
-                app:strokeColor="#00EEEE"
-                app:strokeWidth="1dp"
-                android:fontFamily="monospace"
-                android:textSize="11sp" />
-
             <!-- Live Latency & Delay Graph -->
             <com.hasan.airspeaker.LatencyGraphView
                 android:id="@+id/latencyGraph"
@@ -603,14 +624,42 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="INTERNAL SYSTEM AUDIO SENDER (PORT 5004):"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="INTERNAL SYSTEM AUDIO SENDER (PORT 5004):"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEqualizerServe"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="≡ EQ"
+                    android:textColor="#00EEEE"
+                    app:backgroundTint="#101820"
+                    app:strokeColor="#00EEEE"
+                    app:strokeWidth="1dp"
+                    android:fontFamily="monospace"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <!-- Target Receiver IP Card -->
             <LinearLayout
@@ -857,19 +906,6 @@
                 app:trackColorActive="#00FF88"
                 app:trackColorInactive="#444444" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnEqualizerServe"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="4dp"
-                android:text="[ 🎛️ SERVE EQUALIZER &amp; PRESETS: OFF ]"
-                android:textColor="#00EEEE"
-                app:strokeColor="#00EEEE"
-                app:strokeWidth="1dp"
-                android:fontFamily="monospace"
-                android:textSize="11sp" />
-
             <!-- Audio Level Meter -->
             <TextView
                 android:layout_width="wrap_content"
@@ -1067,6 +1103,26 @@
                         android:textSize="12sp"
                         android:textStyle="bold"
                         android:fontFamily="monospace" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnEqualizerPartyHost"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="6dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="≡ EQ"
+                        android:textColor="#00EEEE"
+                        app:backgroundTint="#101820"
+                        app:strokeColor="#00EEEE"
+                        app:strokeWidth="1dp"
+                        android:fontFamily="monospace"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <!-- Host IP Reveal Banner -->
@@ -1317,19 +1373,6 @@
                     app:trackColorActive="#00FF00"
                     app:trackColorInactive="#444444" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnEqualizerPartyHost"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="42dp"
-                    android:layout_marginTop="4dp"
-                    android:text="[ 🎛️ PARTY HOST EQUALIZER &amp; PRESETS: OFF ]"
-                    android:textColor="#00EEEE"
-                    app:strokeColor="#00EEEE"
-                    app:strokeWidth="1dp"
-                    android:fontFamily="monospace"
-                    android:textSize="11sp" />
-
                 <!-- Connected Party Members -->
                 <TextView
                     android:layout_width="wrap_content"
@@ -1461,6 +1504,26 @@
                         app:strokeWidth="1dp"
                         android:fontFamily="monospace"
                         android:textSize="11sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnEqualizerPartyJoin"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="6dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="≡ EQ"
+                        android:textColor="#00EEEE"
+                        app:backgroundTint="#101820"
+                        app:strokeColor="#00EEEE"
+                        app:strokeWidth="1dp"
+                        android:fontFamily="monospace"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <!-- Prominent Scan QR Code Button -->
@@ -1646,19 +1709,6 @@
                     app:thumbColor="#FFFFFF"
                     app:trackColorActive="#00EEEE"
                     app:trackColorInactive="#444444" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnEqualizerPartyJoin"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="42dp"
-                    android:layout_marginTop="4dp"
-                    android:text="[ 🎛️ PARTY JOIN EQUALIZER: OFF ]"
-                    android:textColor="#00EEEE"
-                    app:strokeColor="#00EEEE"
-                    app:strokeWidth="1dp"
-                    android:fontFamily="monospace"
-                    android:textSize="11sp" />
 
                 <com.hasan.airspeaker.LatencyGraphView
                     android:id="@+id/latencyGraphPartyJoin"
@@ -1947,24 +1997,47 @@
                 app:thumbTint="#FFFFFF"
                 app:trackTint="#666666" />
 
-            <TextView android:fontFamily="monospace" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:layout_width="wrap_content" android:text="UNIVERSAL DEVICE EQUALIZER (MASTER EQ):" android:textColor="#00EEEE" android:textSize="12sp" android:textStyle="bold"/>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:text="UNIVERSAL DEVICE EQUALIZER (MASTER EQ):"
+                    android:textColor="#00EEEE"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEqualizerUniversal"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="≡ EQ"
+                    android:textColor="#00EEEE"
+                    app:backgroundTint="#101820"
+                    app:strokeColor="#00EEEE"
+                    app:strokeWidth="1dp"
+                    android:fontFamily="monospace"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <CheckBox android:fontFamily="monospace" android:id="@+id/cbUniversalEqServeHost" android:layout_height="wrap_content" android:layout_width="match_parent" android:text="Apply Universal EQ to Hosting &amp; Serving (SERVE / HOST)" android:textColor="#FFFFFF" android:textSize="11sp"/>
 
             <CheckBox android:fontFamily="monospace" android:id="@+id/cbUniversalEqPlayJoin" android:layout_height="wrap_content" android:layout_width="match_parent" android:text="Apply Universal EQ to Playing &amp; Joining (PLAY / JOIN)" android:textColor="#FFFFFF" android:textSize="11sp"/>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnEqualizerUniversal"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="4dp"
-                android:text="[ 🎛️ OPEN UNIVERSAL 5-BAND EQUALIZER &amp; PRESETS ]"
-                android:textColor="#00FF00"
-                app:strokeColor="#00FF00"
-                app:strokeWidth="1dp"
-                android:fontFamily="monospace"
-                android:textSize="11sp" />
 
             <!-- Exclusive Audio Mode -->
             <TextView

@@ -487,18 +487,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateEqButtonLabels() {
         val prefs = getSharedPreferences("AirSpeakerEQ", MODE_PRIVATE)
-        fun formatLabel(ctx: String, prefix: String): String {
+        fun styleCornerEqButton(btn: MaterialButton, ctx: String) {
             val en = prefs.getBoolean("${ctx}_enabled", false)
-            val pr = prefs.getString("${ctx}_preset", "Flat") ?: "Flat"
-            return if (en) "[ 🎛️ $prefix: ON ($pr) ]" else "[ 🎛️ $prefix: OFF ]"
+            if (en) {
+                btn.text = "≡ EQ ON"
+                btn.setTextColor(0xFF00FF00.toInt())
+                btn.strokeColor = ColorStateList.valueOf(0xFF00FF00.toInt())
+                btn.backgroundTintList = ColorStateList.valueOf(0xFF002B00.toInt())
+            } else {
+                btn.text = "≡ EQ"
+                btn.setTextColor(0xFF00EEEE.toInt())
+                btn.strokeColor = ColorStateList.valueOf(0xFF00EEEE.toInt())
+                btn.backgroundTintList = ColorStateList.valueOf(0xFF101820.toInt())
+            }
         }
-        binding.btnEqualizerPlay.text = formatLabel("play", "PLAY EQUALIZER")
-        binding.btnEqualizerServe.text = formatLabel("serve", "SERVE EQUALIZER & PRESETS")
-        binding.btnEqualizerPartyHost.text = formatLabel("party_host", "PARTY HOST EQUALIZER & PRESETS")
-        binding.btnEqualizerPartyJoin.text = formatLabel("party_join", "PARTY JOIN EQUALIZER & PRESETS")
-        val uEn = prefs.getBoolean("universal_enabled", false)
-        val uPr = prefs.getString("universal_preset", "Flat") ?: "Flat"
-        binding.btnEqualizerUniversal.text = if (uEn) "[ 🎛️ UNIVERSAL 5-BAND EQUALIZER: ON ($uPr) ]" else "[ 🎛️ OPEN UNIVERSAL 5-BAND EQUALIZER & PRESETS ]"
+        styleCornerEqButton(binding.btnEqualizerPlay, "play")
+        styleCornerEqButton(binding.btnEqualizerServe, "serve")
+        styleCornerEqButton(binding.btnEqualizerPartyHost, "party_host")
+        styleCornerEqButton(binding.btnEqualizerPartyJoin, "party_join")
+        styleCornerEqButton(binding.btnEqualizerUniversal, "universal")
     }
 
     private fun showEqualizerDialog(contextKey: String, title: String) {

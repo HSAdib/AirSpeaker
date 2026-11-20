@@ -364,23 +364,41 @@ class AirSpeakerApp:
         self.buffer_val_label = lbl
         return bf
 
-    def _build_eq_bar(self, parent: tk.Misc, ctx_key: str, title_label: str) -> tk.Frame:
-        row = tk.Frame(parent, bg=BG)
-        status_var = tk.StringVar(value=self._eq_manager.summary_text(ctx_key))
-        if not hasattr(self, "_eq_status_vars"):
-            self._eq_status_vars = {}
-        self._eq_status_vars[ctx_key] = status_var
+    def _build_eq_corner_button(self, parent: tk.Misc, ctx_key: str, title_label: str) -> StudioButton:
+        if not hasattr(self, "_eq_corner_buttons"):
+            self._eq_corner_buttons: Dict[str, StudioButton] = {}
 
-        StudioButton(
-            row, text=f"🎛️ {title_label}", bg="#18222C", fg="#00EEEE",
-            font=FONT_MONO_BOLD, padx=8, pady=2,
+        btn = StudioButton(
+            parent,
+            text="≡ EQ",
+            bg="#18222C",
+            fg="#00EEEE",
+            activebackground="#223344",
+            activeforeground="#00FF00",
+            font=FONT_MONO_BOLD,
+            padx=8,
+            pady=2,
+            cursor="hand2",
             command=lambda: open_equalizer_dialog(
                 self.root, self._eq_manager, ctx_key, title_label,
                 FONT_MONO_SM, FONT_MONO_BOLD, on_updated=self._on_eq_changed
-            )
-        ).pack(side="left")
-        tk.Label(row, textvariable=status_var, bg=BG, fg=ACCENT, font=FONT_MONO_SM).pack(side="left", padx=8)
-        return row
+            ),
+        )
+        self._eq_corner_buttons[ctx_key] = btn
+        self._refresh_eq_button_style(ctx_key)
+        return btn
+
+    def _refresh_eq_button_style(self, ctx_key: str) -> None:
+        btns = getattr(self, "_eq_corner_buttons", {})
+        btn = btns.get(ctx_key)
+        if btn is None:
+            return
+        c = self._eq_manager.get_context(ctx_key)
+        on = bool(c.get("enabled", False))
+        if on:
+            btn.config(text="≡ EQ ON", bg="#002B00", fg=ACCENT, activebackground="#004400", activeforeground="#FFFFFF")
+        else:
+            btn.config(text="≡ EQ", bg="#18222C", fg="#00EEEE", activebackground="#223344", activeforeground=ACCENT)
 
     def _on_eq_changed(self) -> None:
         u_ctx = self._eq_manager.get_context("universal")
@@ -388,9 +406,9 @@ class AirSpeakerApp:
             self.univ_eq_tx_var.set(bool(u_ctx.get("apply_tx", False)))
         if hasattr(self, "univ_eq_rx_var"):
             self.univ_eq_rx_var.set(bool(u_ctx.get("apply_rx", False)))
-        if hasattr(self, "_eq_status_vars"):
-            for k, v in self._eq_status_vars.items():
-                v.set(self._eq_manager.summary_text(k))
+        if hasattr(self, "_eq_corner_buttons"):
+            for k in list(self._eq_corner_buttons.keys()):
+                self._refresh_eq_button_style(k)
         if self._udp_sender:
             tx_on, tx_gains = self._eq_manager.get_effective_tx_gains(is_party_host=self._party_streaming)
             self._udp_sender.set_eq_gains(tx_on, tx_gains)
@@ -554,6 +572,7 @@ class AirSpeakerApp:
         self.pc_output_combo.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
         self.pc_output_combo.bind("<<ComboboxSelected>>", self._on_pc_output_selected)
         ttk.Button(rx_card, text="↻", width=3, command=self._refresh_all_devices).grid(row=0, column=2, padx=(2, 4), pady=2)
+        self._build_eq_corner_button(rx_card, "play", "Play Equalizer").grid(row=0, column=3, padx=(2, 4), pady=2)
 
         # 2. Main Action Button: Play Receiver (5004)
         self.play_rx_btn = StudioButton(
@@ -588,7 +607,6 @@ class AirSpeakerApp:
             command=self._toggle_mute
         )
         self.mute_btn.pack(side="right", padx=4)
-        self._build_eq_bar(f, "play", "Play Equalizer (Optional)").pack(fill="x", padx=8, pady=2)
 
         # 5. Live Delay Graph Canvas
         dg_frame = tk.LabelFrame(f, text=" Live Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
@@ -646,6 +664,8 @@ class AirSpeakerApp:
         tk.Label(conn_top, text="📱", bg="#12161A", fg="#38B6FF", font=(_MONO_FAMILY, 16)).pack(side="left", padx=(0, 8))
         conn_info = tk.Frame(conn_top, bg="#12161A")
         conn_info.pack(side="left", fill="x", expand=True)
+
+        self._build_eq_corner_button(conn_top, "serve", "Serve Outbound Equalizer").pack(side="right", anchor="ne", padx=(6, 0))
 
         self.conn_device_name_var = tk.StringVar(value="Waiting for phone connection...")
         tk.Label(conn_info, textvariable=self.conn_device_name_var, bg="#12161A", fg="#FFFFFF", font=FONT_MONO_LG, anchor="w").pack(fill="x")
@@ -762,7 +782,6 @@ class AirSpeakerApp:
         tk.Label(qf_tab1, textvariable=self.expected_delay_var, bg=BG, fg="#00EEEE", font=FONT_MONO_SM, anchor="w").pack(fill="x", padx=4, pady=(1, 2))
 
         self._build_target_buffer_card(f, " Target Buffer (Synced to Receiver) ").pack(fill="x", **pad)
-        self._build_eq_bar(f, "serve", "Serve Outbound Equalizer & Presets").pack(fill="x", padx=8, pady=2)
 
         # 5. Live Audio Level Meter & Server Telemetry
         status_frame = tk.LabelFrame(f, text=" Live Audio Meters & Telemetry ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3)
@@ -863,6 +882,7 @@ class AirSpeakerApp:
         host_top_bar.pack(fill="x", padx=8, pady=(4, 2))
         ttk.Button(host_top_bar, text="← Back to Party Menu", command=self._back_to_party_chooser).pack(side="left")
         tk.Label(host_top_bar, text="👑 Party Host Mode (Broadcasting to Multiple Devices)", bg=BG, fg="#00FF00", font=FONT_MONO_BOLD).pack(side="left", padx=8)
+        self._build_eq_corner_button(host_top_bar, "party_host", "Party Host Equalizer").pack(side="right")
 
         # Host Banner & Host Info + Live QR Code
         banner = tk.LabelFrame(
@@ -965,7 +985,6 @@ class AirSpeakerApp:
         ttk.Button(add_row, text="+ Add to Party", command=self._on_add_party_device_manual).pack(side="left")
 
         self._build_target_buffer_card(self.party_host_frame, " Party Host Target Buffer ").pack(fill="x", **pad)
-        self._build_eq_bar(self.party_host_frame, "party_host", "Party Host Broadcast Equalizer & Presets").pack(fill="x", padx=8, pady=2)
 
         # Live Party Delay Graph for Host
         dg_phost = tk.LabelFrame(self.party_host_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
@@ -997,6 +1016,7 @@ class AirSpeakerApp:
         join_top_bar.pack(fill="x", padx=8, pady=(4, 2))
         ttk.Button(join_top_bar, text="← Back to Party Menu", command=self._back_to_party_chooser).pack(side="left")
         tk.Label(join_top_bar, text="🎧 Party Joiner Mode (Listen to Host)", bg=BG, fg="#00EEEE", font=FONT_MONO_BOLD).pack(side="left", padx=8)
+        self._build_eq_corner_button(join_top_bar, "party_join", "Party Join Equalizer").pack(side="right")
 
         # Discovered Hosts Section
         jf_disc = tk.LabelFrame(
@@ -1074,7 +1094,6 @@ class AirSpeakerApp:
         self.party_join_status_label.pack(fill="x", padx=8, pady=(0, 4))
 
         self._build_target_buffer_card(self.party_join_frame, " Party Joiner Target Buffer ").pack(fill="x", **pad)
-        self._build_eq_bar(self.party_join_frame, "party_join", "Party Joiner Equalizer (Optional)").pack(fill="x", padx=8, pady=2)
 
         # Live Party Delay Graph for Joiner
         dg_pjoin = tk.LabelFrame(self.party_join_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
@@ -1176,17 +1195,21 @@ class AirSpeakerApp:
             )
             self._on_eq_changed()
 
+        u_row = tk.Frame(uf, bg=BG)
+        u_row.pack(fill="x", padx=4, pady=2)
+        u_left = tk.Frame(u_row, bg=BG)
+        u_left.pack(side="left", fill="x", expand=True)
         tk.Checkbutton(
-            uf, text="Apply Universal EQ to Hosting & Serving (SERVE + PARTY HOST)",
+            u_left, text="Apply Universal EQ to Hosting & Serving (SERVE + PARTY HOST)",
             variable=self.univ_eq_tx_var, bg=BG, fg=FG, selectcolor="#222222",
             font=FONT_MONO_SM, command=_on_univ_scope_toggled
-        ).pack(anchor="w", padx=4)
+        ).pack(anchor="w")
         tk.Checkbutton(
-            uf, text="Apply Universal EQ to Playing & Joining (PLAY + PARTY JOIN)",
+            u_left, text="Apply Universal EQ to Playing & Joining (PLAY + PARTY JOIN)",
             variable=self.univ_eq_rx_var, bg=BG, fg=FG, selectcolor="#222222",
             font=FONT_MONO_SM, command=_on_univ_scope_toggled
-        ).pack(anchor="w", padx=4)
-        self._build_eq_bar(uf, "universal", "Open Universal 5-Band Equalizer & Presets").pack(fill="x", padx=4, pady=3)
+        ).pack(anchor="w")
+        self._build_eq_corner_button(u_row, "universal", "Universal 5-Band Equalizer").pack(side="right", anchor="ne", padx=(8, 0))
 
         # Available Network Adapters Listbox
         af = tk.LabelFrame(f, text=" Available Network Adapter IPs ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)

@@ -152,6 +152,26 @@ struct StudioTabButton: View {
     }
 }
 
+struct StudioEQCornerButton: View {
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(enabled ? "≡ EQ ON" : "≡ EQ")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(red: 0.0, green: 0.93, blue: 0.93))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(enabled ? Color(red: 0.0, green: 0.17, blue: 0.0) : Color(red: 0.06, green: 0.09, blue: 0.13))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1)
+                )
+        }
+    }
+}
+
 // MARK: - Tab 1: PLAYER STUDIO TAB
 struct PlayerStudioTab: View {
     @ObservedObject var engine: AirSpeakerEngine
@@ -163,14 +183,25 @@ struct PlayerStudioTab: View {
             VStack(alignment: .leading, spacing: 12) {
                 // Connections Card (#1A2630)
                 VStack(alignment: .leading, spacing: 4) {
-                    let hostDisplay = engine.connectedServerIp.isEmpty ? "Waiting for PC connection..." : "\(engine.connectedServerName) (\(engine.connectedServerIp))"
-                    Text("💻 Connected to: \(hostDisplay)")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            let hostDisplay = engine.connectedServerIp.isEmpty ? "Waiting for PC connection..." : "\(engine.connectedServerName) (\(engine.connectedServerIp))"
+                            Text("💻 Connected to: \(hostDisplay)")
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
 
-                    Text("📱 This Phone: \(engine.deviceName)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
+                            Text("📱 This Phone: \(engine.deviceName)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
+                        }
+                        Spacer()
+                        StudioEQCornerButton(enabled: engine.playEQ.enabled) {
+                            showEQSheet = true
+                        }
+                        .sheet(isPresented: $showEQSheet) {
+                            StudioEqualizerSheetView(title: "PLAYER EQUALIZER", config: $engine.playEQ, engine: engine)
+                        }
+                    }
 
                     HStack(spacing: 6) {
                         Text("PC IP:")
@@ -287,21 +318,6 @@ struct PlayerStudioTab: View {
                 // Stability / Delay Buffer
                 TargetBufferControlSection(engine: engine)
 
-                // Equalizer Trigger
-                Button(action: {
-                    showEQSheet = true
-                }) {
-                    Text("[ 🎛️ EQUALIZER: \(engine.playEQ.enabled ? engine.playEQ.presetName : "OFF") ]")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(engine.playEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                        .frame(maxWidth: .infinity, minHeight: 34)
-                        .background(engine.playEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.playEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                }
-                .sheet(isPresented: $showEQSheet) {
-                    StudioEqualizerSheetView(title: "PLAYER EQUALIZER", config: $engine.playEQ, engine: engine)
-                }
-
                 // Stream Volume (Relative to Phone)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -395,13 +411,24 @@ struct ServeStudioTab: View {
             VStack(alignment: .leading, spacing: 14) {
                 // Header & Target IP card
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("📡 IN-APP AUDIO CAPTURE (REPLAYKIT — PORT 5004)")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("📡 IN-APP AUDIO CAPTURE (REPLAYKIT — PORT 5004)")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
 
-                    Text("Captures audio from this device using ReplayKit in real-time and streams to PC, Mac, Linux, or another phone.")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(white: 0.6))
+                            Text("Captures audio from this device using ReplayKit in real-time and streams to PC, Mac, Linux, or another phone.")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(white: 0.6))
+                        }
+                        Spacer()
+                        StudioEQCornerButton(enabled: engine.serveEQ.enabled) {
+                            showEQSheet = true
+                        }
+                        .sheet(isPresented: $showEQSheet) {
+                            StudioEqualizerSheetView(title: "SERVE EQUALIZER", config: $engine.serveEQ, engine: engine)
+                        }
+                    }
 
                     HStack(spacing: 6) {
                         Text("TARGET IP:")
@@ -490,21 +517,6 @@ struct ServeStudioTab: View {
 
                 // Target Buffer Control
                 TargetBufferControlSection(engine: engine)
-
-                // Equalizer Trigger
-                Button(action: {
-                    showEQSheet = true
-                }) {
-                    Text("[ 🎛️ EQUALIZER: \(engine.serveEQ.enabled ? engine.serveEQ.presetName : "OFF") ]")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(engine.serveEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                        .frame(maxWidth: .infinity, minHeight: 34)
-                        .background(engine.serveEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.serveEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                }
-                .sheet(isPresented: $showEQSheet) {
-                    StudioEqualizerSheetView(title: "SERVE EQUALIZER", config: $engine.serveEQ, engine: engine)
-                }
 
                 // Live Audio Level & Telemetry
                 VStack(alignment: .leading, spacing: 6) {
@@ -651,6 +663,13 @@ struct PartyStudioTab: View {
                             Text("👑 HOST MODE")
                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                                 .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+                            Spacer()
+                            StudioEQCornerButton(enabled: engine.partyHostEQ.enabled) {
+                                showHostEQSheet = true
+                            }
+                            .sheet(isPresented: $showHostEQSheet) {
+                                StudioEqualizerSheetView(title: "PARTY HOST EQUALIZER", config: $engine.partyHostEQ, engine: engine)
+                            }
                         }
 
                         // Primary Broadcast Button
@@ -727,20 +746,6 @@ struct PartyStudioTab: View {
                                 .foregroundColor(Color(white: 0.6))
 
                             TargetBufferControlSection(engine: engine)
-
-                            Button(action: {
-                                showHostEQSheet = true
-                            }) {
-                                Text("[ 🎛️ HOST EQUALIZER: \(engine.partyHostEQ.enabled ? engine.partyHostEQ.presetName : "OFF") ]")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                                    .frame(maxWidth: .infinity, minHeight: 34)
-                                    .background(engine.partyHostEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyHostEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                            }
-                            .sheet(isPresented: $showHostEQSheet) {
-                                StudioEqualizerSheetView(title: "PARTY HOST EQUALIZER", config: $engine.partyHostEQ, engine: engine)
-                            }
                         }
                         .padding(10)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.07))
@@ -847,6 +852,13 @@ struct PartyStudioTab: View {
                             }
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
+
+                            StudioEQCornerButton(enabled: engine.partyJoinEQ.enabled) {
+                                showJoinEQSheet = true
+                            }
+                            .sheet(isPresented: $showJoinEQSheet) {
+                                StudioEqualizerSheetView(title: "PARTY JOIN EQUALIZER", config: $engine.partyJoinEQ, engine: engine)
+                            }
                         }
 
                         // Prominent QR Camera Scan Button
@@ -948,21 +960,6 @@ struct PartyStudioTab: View {
 
                         // Target Buffer Control in Party Join
                         TargetBufferControlSection(engine: engine)
-
-                        // Party Join Equalizer Trigger
-                        Button(action: {
-                            showJoinEQSheet = true
-                        }) {
-                            Text("[ 🎛️ PARTY JOIN EQUALIZER: \(engine.partyJoinEQ.enabled ? engine.partyJoinEQ.presetName : "OFF") ]")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                                .frame(maxWidth: .infinity, minHeight: 34)
-                                .background(engine.partyJoinEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                        }
-                        .sheet(isPresented: $showJoinEQSheet) {
-                            StudioEqualizerSheetView(title: "PARTY JOIN EQUALIZER", config: $engine.partyJoinEQ, engine: engine)
-                        }
 
                         // Live Delay Graph in Party Join
                         VStack(alignment: .leading, spacing: 4) {
@@ -1125,22 +1122,17 @@ struct SettingsStudioTab: View {
 
                 // Universal Device Equalizer (5-Band)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("UNIVERSAL DEVICE EQUALIZER (5-BAND):")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-
-                    Button(action: {
-                        showUniversalEQSheet = true
-                    }) {
-                        Text("[ 🎛️ UNIVERSAL EQUALIZER: \(engine.universalEQ.enabled ? engine.universalEQ.presetName : "OFF") ]")
+                    HStack {
+                        Text("UNIVERSAL DEVICE EQUALIZER (5-BAND):")
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(engine.universalEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
-                            .frame(maxWidth: .infinity, minHeight: 34)
-                            .background(engine.universalEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.universalEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                    }
-                    .sheet(isPresented: $showUniversalEQSheet) {
-                        StudioEqualizerSheetView(title: "UNIVERSAL EQUALIZER", config: $engine.universalEQ, engine: engine)
+                            .foregroundColor(.white)
+                        Spacer()
+                        StudioEQCornerButton(enabled: engine.universalEQ.enabled) {
+                            showUniversalEQSheet = true
+                        }
+                        .sheet(isPresented: $showUniversalEQSheet) {
+                            StudioEqualizerSheetView(title: "UNIVERSAL EQUALIZER", config: $engine.universalEQ, engine: engine)
+                        }
                     }
 
                     Toggle(isOn: $engine.universalApplyTx) {
