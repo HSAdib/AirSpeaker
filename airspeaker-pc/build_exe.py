@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+OUT_DIR = Path(os.environ.get("AIRSPEAKER_OUT_DIR", str(ROOT.parent))).resolve()
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 VENV = ROOT / ".venv"
 VENDOR = ROOT / "vendor"
 SRC_MAIN = ROOT / "src" / "main.py"
@@ -105,6 +107,7 @@ def main() -> None:
         str(python), "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
+        "-y",
         "--name", "AirSpeaker-v1-Portable",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build-portable"),
@@ -120,7 +123,7 @@ def main() -> None:
 
     portable_exe = ROOT / "dist" / "AirSpeaker-v1-Portable.exe"
     if portable_exe.exists():
-        target = ROOT.parent / "AirSpeaker-v1-Portable.exe"
+        target = OUT_DIR / "AirSpeaker-v1-Portable.exe"
         try:
             shutil.copy2(portable_exe, target)
             size_mb = target.stat().st_size / (1024 * 1024)
@@ -136,6 +139,7 @@ def main() -> None:
         str(python), "-m", "PyInstaller",
         "--noconsole",
         "--onedir",
+        "-y",
         "--name", "AirSpeaker",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build-onedir"),
@@ -163,6 +167,12 @@ def main() -> None:
         run([iscc_bin, str(iss_file)])
         setup_exe = ROOT.parent / "AirSpeaker-v1-Setup.exe"
         if setup_exe.exists():
+            if OUT_DIR != ROOT.parent:
+                try:
+                    shutil.copy2(setup_exe, OUT_DIR / "AirSpeaker-v1-Setup.exe")
+                    setup_exe = OUT_DIR / "AirSpeaker-v1-Setup.exe"
+                except Exception as exc:
+                    print(f"Warning: Could not copy setup installer to {OUT_DIR}: {exc}", flush=True)
             size_mb = setup_exe.stat().st_size / (1024 * 1024)
             print(f"SUCCESS: Windows Setup Installer ready at {setup_exe} ({size_mb:.1f} MB)", flush=True)
     else:

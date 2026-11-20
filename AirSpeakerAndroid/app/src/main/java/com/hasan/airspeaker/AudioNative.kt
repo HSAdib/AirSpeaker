@@ -48,6 +48,7 @@ object AudioNative {
     external fun nativeGetVolumeGain(): Float
     external fun nativeSetLowLatencyMode(lowLatency: Boolean)
     external fun nativeSetEnableAudioEffects(enabled: Boolean)
+    external fun nativeOnAudioRouteChanged(isBluetooth: Boolean)
     external fun nativeSetPartyRelay(enabled: Boolean)
     external fun nativeIsPartyRelay(): Boolean
     external fun nativeSetPartyPeers(peers: Array<String>)

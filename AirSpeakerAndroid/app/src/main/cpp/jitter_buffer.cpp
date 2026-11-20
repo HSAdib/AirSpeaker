@@ -66,6 +66,7 @@ void JitterBuffer::reset() {
     mConcealedPackets.store(0, std::memory_order_relaxed);
     mIntentionalDriftDrops.store(0, std::memory_order_relaxed);
     mStreamResetPending.store(false, std::memory_order_release);
+    mObservedCallbackFrames.store(240, std::memory_order_relaxed);
     mPcmRingBuffer.reset();
 
     // Reset worker state
@@ -204,6 +205,13 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (mPacketMap.empty()) return;
 
+        if (resetReq && mHasStarted && mPacketMap.size() > 6) {
+            auto keepFrom = mPacketMap.end();
+            std::advance(keepFrom, -4);
+            mPacketMap.erase(mPacketMap.begin(), keepFrom);
+            mQueuedPacketCount.store(mPacketMap.size(), std::memory_order_relaxed);
+        }
+
         // Initialize from first available packet
         auto first = mPacketMap.begin();
         mExpectedSeq = first->first;
@@ -251,17 +259,40 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         mLastAppliedConfiguredTargetMs = configured;
     }
     adaptTargetBuffer();
-    mEffectiveTargetBufferMs.store(mLocalTargetBufferMs, std::memory_order_relaxed);
-    mReportedTargetBufferMs.store(mLocalTargetBufferMs, std::memory_order_relaxed);
 
-    float ringOccupiedMs = mPcmRingBuffer.getOccupiedMs(mSampleRate.load(std::memory_order_relaxed));
+    const bool btMode = mBluetoothMode.load(std::memory_order_acquire);
+    const size_t sampleRate = (mSampleRate.load(std::memory_order_relaxed) > 0)
+        ? static_cast<size_t>(mSampleRate.load(std::memory_order_relaxed))
+        : 48000;
+    const size_t obsFrames = mObservedCallbackFrames.load(std::memory_order_relaxed);
+
+    // CRITICAL BLUETOOTH FIX:
+    // Bluetooth A2DP callbacks request 960..2880+ frames per burst.
+    // Keep ring buffer high enough (>= 2x observed callback burst + headroom) so onAudioReady NEVER starves.
+    const size_t baseLowWaterFrames = btMode ? ((sampleRate * 40) / 1000) : ((sampleRate * 15) / 1000);
+    const size_t burstSafeFrames = (obsFrames * 2) + (btMode ? 480 : 240);
+    const size_t lowWaterFrames = std::clamp<size_t>(
+        std::max(baseLowWaterFrames, burstSafeFrames),
+        480,
+        PcmRingBuffer::CAPACITY_FRAMES / 2
+    );
+    const float lowWaterMs = (static_cast<float>(lowWaterFrames) * 1000.0f) / static_cast<float>(sampleRate);
+    const float minEffectiveTarget = btMode
+        ? std::max(70.0f, lowWaterMs + 20.0f)
+        : std::max(10.0f, lowWaterMs + 5.0f);
+    const float effectiveTargetMs = std::clamp(std::max(mLocalTargetBufferMs, minEffectiveTarget), 10.0f, 200.0f);
+
+    mEffectiveTargetBufferMs.store(effectiveTargetMs, std::memory_order_relaxed);
+    mReportedTargetBufferMs.store(effectiveTargetMs, std::memory_order_relaxed);
+
+    float ringOccupiedMs = mPcmRingBuffer.getOccupiedMs(static_cast<int>(sampleRate));
     size_t packetQueueSize = mQueuedPacketCount.load(std::memory_order_relaxed);
     float pktDurMs = std::max(1.0f, mPacketDurationMs.load(std::memory_order_relaxed));
     float totalQueuedMs = (packetQueueSize * pktDurMs) + ringOccupiedMs;
 
-    // Startup prebuffering: wait until queued audio reaches configured target buffer
+    // Startup prebuffering: wait until queued audio reaches effective target buffer
     if (mIsPrebuffering) {
-        float startThreshold = mLocalTargetBufferMs;
+        float startThreshold = effectiveTargetMs;
         int minPackets = std::max(2, static_cast<int>(std::ceil(startThreshold / pktDurMs)));
         if (totalQueuedMs < startThreshold || static_cast<int>(packetQueueSize) < minPackets) {
             return;
@@ -275,21 +306,17 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         }
     }
 
-    // Keep only ~15 ms buffered in the lock-free PCM ring buffer so excess jitter
-    // margin remains in mPacketMap for reordering and drift trimming.
-    const size_t sampleRate = (mSampleRate.load(std::memory_order_relaxed) > 0)
-        ? static_cast<size_t>(mSampleRate.load(std::memory_order_relaxed))
-        : 48000;
-    const size_t lowWaterFrames = std::max<size_t>(480, (sampleRate * 15) / 1000);
+    const float driftHeadroomMs = btMode ? 25.0f : 15.0f;
 
     // Decode packets and push PCM to the SPSC ring buffer while space permits (up to 960 frames = 20ms)
     while (mPcmRingBuffer.getOccupiedFrames() < lowWaterFrames &&
            mPcmRingBuffer.getOccupiedFrames() + 960 <= PcmRingBuffer::CAPACITY_FRAMES) {
-        // Drift trimming: if total queued duration exceeds target + 15ms, discard oldest packet
+        // Drift trimming: if total queued duration exceeds effectiveTargetMs + driftHeadroomMs, discard oldest packet
         {
             std::lock_guard<std::mutex> lock(mPacketMutex);
-            float currentQueuedMs = (mPacketMap.size() * mPacketDurationMs.load(std::memory_order_relaxed)) + mPcmRingBuffer.getOccupiedMs(mSampleRate.load(std::memory_order_relaxed));
-            if (currentQueuedMs > (mLocalTargetBufferMs + 15.0f) && mPacketMap.size() > 4) {
+            float currentQueuedMs = (mPacketMap.size() * mPacketDurationMs.load(std::memory_order_relaxed))
+                + mPcmRingBuffer.getOccupiedMs(static_cast<int>(sampleRate));
+            if (currentQueuedMs > (effectiveTargetMs + driftHeadroomMs) && mPacketMap.size() > 4) {
                 auto oldest = mPacketMap.begin();
                 mExpectedSeq = oldest->first + 1;
                 mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
@@ -517,6 +544,30 @@ void JitterBuffer::setAutoMode(bool enabled) {
 
 bool JitterBuffer::isAutoMode() const {
     return mAutoMode.load(std::memory_order_relaxed);
+}
+
+void JitterBuffer::setBluetoothMode(bool enabled) {
+    mBluetoothMode.store(enabled, std::memory_order_release);
+}
+
+bool JitterBuffer::isBluetoothMode() const {
+    return mBluetoothMode.load(std::memory_order_acquire);
+}
+
+void JitterBuffer::onRouteChanged(bool isBluetooth, int32_t burstFrames) {
+    mBluetoothMode.store(isBluetooth, std::memory_order_release);
+    size_t initBurst = (burstFrames > 0) ? static_cast<size_t>(burstFrames) : 240;
+    mObservedCallbackFrames.store(std::clamp<size_t>(initBurst, 240, 8192), std::memory_order_relaxed);
+    mStreamResetPending.store(true, std::memory_order_release);
+    mCondition.notify_one();
+}
+
+void JitterBuffer::observeCallbackFrames(int32_t numFrames) {
+    if (numFrames <= 0) return;
+    size_t clamped = std::clamp<size_t>(static_cast<size_t>(numFrames), 240, 8192);
+    size_t cur = mObservedCallbackFrames.load(std::memory_order_relaxed);
+    while (clamped > cur &&
+           !mObservedCallbackFrames.compare_exchange_weak(cur, clamped, std::memory_order_relaxed)) {}
 }
 
 JitterStatsSnapshot JitterBuffer::getStatsSnapshot() const {

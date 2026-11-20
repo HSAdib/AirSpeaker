@@ -881,12 +881,38 @@ void testOpusInBandFecPreservesNextPacket() {
 }
 #endif
 
+void testBluetoothLargeBurstNoStarvation() {
+    JitterBuffer jb;
+    jb.setTargetBufferMs(30.0f);
+    jb.onRouteChanged(/*isBluetooth=*/true, /*burstFrames=*/1920);
+    jb.observeCallbackFrames(1920); // Simulate 40ms Bluetooth A2DP callback burst
+
+    // Feed 30 x 5ms packets (150ms)
+    for (uint32_t seq = 0; seq < 30; ++seq) {
+        auto pkt = makeTaggedPcmPacket(seq, static_cast<int16_t>(3000 + seq));
+        jb.pushPacket(pkt.data(), pkt.size());
+    }
+    jb.processPacketsForTest();
+
+    // Must hold >= 1920 frames in ring buffer so BT callback does not underrun
+    TEST_ASSERT(jb.getRingOccupiedFramesForTest() >= 1920,
+                "Bluetooth low-water scaling failed to buffer a full 1920-frame BT burst");
+
+    std::vector<int16_t> pcm;
+    size_t got = pullFrames(jb, pcm, 1920);
+    TEST_ASSERT(got == 1920, "Bluetooth 1920-frame read underran");
+    TEST_ASSERT(jb.getRingBuffer().underrunFrames() == 0, "Zero underruns required on BT burst read");
+
+    TEST_PASS("testBluetoothLargeBurstNoStarvation");
+}
+
 } // namespace
 
 void runJitterBufferTests() {
     testCumulativeRxPacketsAndReset();
     testOutOfOrderRecovery();
     testDriftTrimming();
+    testBluetoothLargeBurstNoStarvation();
 #ifdef HAS_OPUS
     testOpusInBandFecPreservesNextPacket();
 #else

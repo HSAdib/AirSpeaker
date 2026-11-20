@@ -489,6 +489,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private var atomicVolume: Float = 1.0
     private var atomicMuted: Bool = false
     private var atomicBufferTargetMs: Int = 30
+    private var atomicBluetoothRoute: Bool = false
     private var playbackSessionId: Int = 0
     private var atomicRelayActive: Bool = false
     private var atomicConnectedServerIp: String = ""
@@ -697,16 +698,38 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     // MARK: - Audio Session & Engine Setup
+    private func isCurrentRouteBluetooth() -> Bool {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        return outputs.contains { out in
+            out.portType == .bluetoothA2DP ||
+            out.portType == .bluetoothLE ||
+            out.portType == .bluetoothHFP
+        }
+    }
+
     private func setupAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetooth]
-            if exclusiveAudioMode == "MIX_WITH_OTHERS" {
-                options.insert(.mixWithOthers)
+            let btActive = isCurrentRouteBluetooth()
+            stateLock.lock()
+            atomicBluetoothRoute = btActive
+            stateLock.unlock()
+
+            if isInternalAudioServing {
+                var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetoothA2DP]
+                if exclusiveAudioMode == "MIX_WITH_OTHERS" {
+                    options.insert(.mixWithOthers)
+                }
+                try session.setCategory(.playAndRecord, mode: .default, options: options)
+            } else {
+                var options: AVAudioSession.CategoryOptions = [.allowBluetoothA2DP]
+                if exclusiveAudioMode == "MIX_WITH_OTHERS" {
+                    options.insert(.mixWithOthers)
+                }
+                try session.setCategory(.playback, mode: .default, options: options)
             }
-            try session.setCategory(.playAndRecord, mode: .default, options: options)
             try session.setPreferredSampleRate(48000)
-            try session.setPreferredIOBufferDuration(0.005) // 5ms buffer
+            try session.setPreferredIOBufferDuration(btActive ? 0.020 : 0.005)
             try session.setActive(true)
         } catch {
             print("AudioSession setup error: \(error)")
@@ -753,15 +776,35 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     @objc private func handleRouteChange(notification: Notification) {
-        guard stopOnHeadsetDisconnect, isAudioPlaying else { return }
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
-        if reason == .oldDeviceUnavailable {
+        let btActive = isCurrentRouteBluetooth()
+        stateLock.lock()
+        let prevBt = atomicBluetoothRoute
+        atomicBluetoothRoute = btActive
+        stateLock.unlock()
+
+        if reason == .oldDeviceUnavailable && stopOnHeadsetDisconnect && isAudioPlaying {
             DispatchQueue.main.async {
                 self.isMuted = true
                 self.statusMessage = "Headset disconnected — Paused"
+            }
+        }
+
+        if isAudioPlaying && (reason == .newDeviceAvailable || reason == .oldDeviceUnavailable || prevBt != btActive) {
+            try? AVAudioSession.sharedInstance().setPreferredIOBufferDuration(btActive ? 0.020 : 0.005)
+            rxEQDSP.reset()
+            audioControlQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.playbackSessionId &+= 1
+                self.playerNode.stop()
+                self.audioBufferQueueCount.reset()
+                self.isPrebufferingAudio = true
+                if !self.audioEngine.isRunning {
+                    try? self.audioEngine.start()
+                }
             }
         }
     }
@@ -1024,7 +1067,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             let curVolume = atomicVolume
             let curMuted = atomicMuted
             let curTargetMs = atomicBufferTargetMs
+            let btRoute = atomicBluetoothRoute
             stateLock.unlock()
+
+            let effectiveTargetMs = btRoute ? max(80, curTargetMs) : curTargetMs
 
             // Multi-Hop Party Relay (Daisy-Chain Forwarding) with thread-safe snapshot
             if relayActive && hopCount < 4 {
@@ -1075,7 +1121,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             stateLock.unlock()
 
             // Dynamic buffer thresholds based on real frame duration (5ms, 10ms, or 20ms)
-            let maxQueued = max(8, Int(ceil((Double(curTargetMs) * 2.0) / frameDurMs)))
+            let maxQueued = max(8, Int(ceil((Double(effectiveTargetMs) * 2.0) / frameDurMs)))
             if audioBufferQueueCount.value >= maxQueued {
                 atomicOverflows.increment()
                 continue
@@ -1114,7 +1160,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     rxEQDSP.processFloatStereo(left: left, right: right, frameCount: Int(frameCount), gain: gain)
                 }
 
-                let minPrebuffer = max(2, Int(round(Double(curTargetMs) / frameDurMs)))
+                let minPrebuffer = max(2, Int(round(Double(effectiveTargetMs) / frameDurMs)))
                 guard isRxSessionActive(sessionId) else { break }
                 audioControlQueue.async { [weak self] in
                     guard let self = self, self.isRxSessionActive(sessionId) else { return }

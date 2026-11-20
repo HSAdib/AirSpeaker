@@ -55,6 +55,8 @@ public:
     bool isLowLatencyMode() const;
     void setEnableAudioEffects(bool enabled);
     bool isEnableAudioEffects() const;
+    void setBluetoothRouteActive(bool isBluetooth);
+    bool isBluetoothRouteActive() const;
     void setPartyRelayEnabled(bool enabled);
     bool isPartyRelayEnabled() const;
     void setPartyPeers(const std::vector<std::string>& peers);
@@ -86,6 +88,8 @@ private:
     std::atomic<float> mVolumeGain{1.0f};
     std::atomic<bool> mLowLatencyMode{true};
     std::atomic<bool> mEnableAudioEffects{false};
+    std::atomic<bool> mBluetoothRouteActive{false};
+    std::atomic<int32_t> mStreamSampleRate{48000};
     std::atomic<bool> mPartyRelayEnabled{false};
     std::mutex mPartyPeersMutex;
     std::vector<struct sockaddr_in> mPartyPeerAddrs;

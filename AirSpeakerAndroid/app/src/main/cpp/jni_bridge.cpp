@@ -18,6 +18,7 @@ static bool gSavedPartyRelay = false;
 static std::vector<std::string> gSavedPartyPeers;
 static bool gSavedEqEnabled = false;
 static float gSavedEqBands[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+static bool gSavedBluetoothRoute = false;
 
 extern "C" {
 
@@ -36,6 +37,7 @@ Java_com_hasan_airspeaker_AudioNative_nativeStart(JNIEnv* /*env*/, jobject /*thi
     gAudioEngine->setPartyRelayEnabled(gSavedPartyRelay);
     gAudioEngine->setPartyPeers(gSavedPartyPeers);
     gAudioEngine->setEqualizerBands(gSavedEqEnabled, gSavedEqBands[0], gSavedEqBands[1], gSavedEqBands[2], gSavedEqBands[3], gSavedEqBands[4]);
+    gAudioEngine->setBluetoothRouteActive(gSavedBluetoothRoute);
     return gAudioEngine->start(port) ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -136,6 +138,15 @@ Java_com_hasan_airspeaker_AudioNative_nativeSetEnableAudioEffects(JNIEnv* /*env*
     gSavedEnableAudioEffects = (enabled == JNI_TRUE);
     if (gAudioEngine) {
         gAudioEngine->setEnableAudioEffects(gSavedEnableAudioEffects);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_hasan_airspeaker_AudioNative_nativeOnAudioRouteChanged(JNIEnv* /*env*/, jobject /*thiz*/, jboolean isBluetooth) {
+    std::lock_guard<std::mutex> lock(gEngineMutex);
+    gSavedBluetoothRoute = (isBluetooth == JNI_TRUE);
+    if (gAudioEngine) {
+        gAudioEngine->setBluetoothRouteActive(gSavedBluetoothRoute);
     }
 }
 

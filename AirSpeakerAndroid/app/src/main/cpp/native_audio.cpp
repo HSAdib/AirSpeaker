@@ -159,7 +159,9 @@ void NativeAudioEngine::stop() {
 
 bool NativeAudioEngine::openOboeStream() {
     std::lock_guard<std::mutex> lock(mStreamMutex);
-    bool effectsEnabled = mEnableAudioEffects.load(std::memory_order_relaxed);
+    const bool effectsEnabled = mEnableAudioEffects.load(std::memory_order_relaxed);
+    const bool btActive = mBluetoothRouteActive.load(std::memory_order_acquire);
+
     auto tryOpen = [&](oboe::SharingMode sharing, oboe::PerformanceMode perf) -> bool {
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Output)
@@ -167,7 +169,9 @@ bool NativeAudioEngine::openOboeStream() {
             ->setChannelCount(oboe::ChannelCount::Stereo)
             ->setSampleRate(48000)
             ->setFormatConversionAllowed(true)
-            ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium)
+            ->setSampleRateConversionQuality(
+                btActive ? oboe::SampleRateConversionQuality::High : oboe::SampleRateConversionQuality::Medium
+            )
             ->setUsage(oboe::Usage::Media)
             ->setContentType(oboe::ContentType::Music)
             ->setPerformanceMode(perf)
@@ -181,13 +185,40 @@ bool NativeAudioEngine::openOboeStream() {
 
         oboe::Result result = builder.openStream(mAudioStream);
         if (result != oboe::Result::OK) {
-            LOGW("Oboe openStream (sharing=%d, perf=%d) failed: %s",
-                 static_cast<int>(sharing), static_cast<int>(perf), oboe::convertToText(result));
+            LOGW("Oboe openStream (sharing=%d, perf=%d, bt=%d) failed: %s",
+                 static_cast<int>(sharing), static_cast<int>(perf), static_cast<int>(btActive),
+                 oboe::convertToText(result));
             mAudioStream.reset();
             return false;
         }
+
+        int32_t burst = std::max<int32_t>(192, mAudioStream->getFramesPerBurst());
+        int32_t cap = mAudioStream->getBufferCapacityInFrames();
+        int32_t targetStreamFrames = btActive ? std::max(burst * 3, 1920) : (burst * 2);
+        if (cap > 0) {
+            mAudioStream->setBufferSizeInFrames(std::min(cap, targetStreamFrames));
+        }
+
+        int32_t actualSr = mAudioStream->getSampleRate();
+        mStreamSampleRate.store(actualSr > 0 ? actualSr : 48000, std::memory_order_relaxed);
+        mJitterBuffer.onRouteChanged(btActive, burst);
+
+        LOGI("Oboe opened: bt=%d sharing=%d perf=%d sr=%d burst=%d bufFrames=%d cap=%d",
+             static_cast<int>(btActive),
+             static_cast<int>(mAudioStream->getSharingMode()),
+             static_cast<int>(mAudioStream->getPerformanceMode()),
+             actualSr,
+             burst,
+             mAudioStream->getBufferSizeInFrames(),
+             cap);
         return true;
     };
+
+    if (btActive) {
+        // Bluetooth A2DP/BLE: always use Shared + PerformanceMode::None so Android mixes cleanly
+        // without starving MMAP Exclusive buffers or triggering SCO fallback.
+        return tryOpen(oboe::SharingMode::Shared, oboe::PerformanceMode::None);
+    }
 
     if (mLowLatencyMode.load(std::memory_order_relaxed) && !effectsEnabled) {
         if (tryOpen(oboe::SharingMode::Exclusive, oboe::PerformanceMode::LowLatency)) {
@@ -258,8 +289,10 @@ void NativeAudioEngine::scheduleStreamReopen() {
         LOGI("Oboe stream reopen worker started");
         stopAndCloseOboeStream();
 
+        std::memset(mEqZ1, 0, sizeof(mEqZ1));
+        std::memset(mEqZ2, 0, sizeof(mEqZ2));
         for (int retry = 0; retry < 5 && mIsRunning.load(std::memory_order_acquire) && !mShuttingDown.load(std::memory_order_acquire); ++retry) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(120 * (1 << retry)));
             if (!mIsRunning.load(std::memory_order_acquire) || mShuttingDown.load(std::memory_order_acquire)) break;
 
             if (openOboeStream() && startOboeStream()) {
@@ -290,6 +323,7 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
     int16_t* output = static_cast<int16_t*>(audioData);
 
     // Guaranteed real-time safe: ZERO mutexes, ZERO allocations, ZERO opus decodes.
+    mJitterBuffer.observeCallbackFrames(numFrames);
     mJitterBuffer.readAudio(output, numFrames);
 
     // Lock-free seqlock check for updated EQ coefficients (never blocks or tears)
@@ -415,7 +449,8 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
            !mMaxCallbackMicros.compare_exchange_weak(current_max, elapsed_micros, std::memory_order_relaxed)) {}
 
     // Diagnostic deadline calculation: audio duration = (numFrames * 1,000,000) / sampleRate
-    int64_t audio_duration_micros = (static_cast<int64_t>(numFrames) * 1000000LL) / 48000LL;
+    int64_t sr = std::max<int64_t>(8000, mStreamSampleRate.load(std::memory_order_relaxed));
+    int64_t audio_duration_micros = (static_cast<int64_t>(numFrames) * 1000000LL) / sr;
     int64_t deadline_threshold_micros = audio_duration_micros / 4; // 25% of audio duration
     if (elapsed_micros > deadline_threshold_micros) {
         mDeadlineMisses.fetch_add(1, std::memory_order_relaxed);
@@ -526,6 +561,19 @@ void NativeAudioEngine::setEnableAudioEffects(bool enabled) {
 
 bool NativeAudioEngine::isEnableAudioEffects() const {
     return mEnableAudioEffects.load(std::memory_order_relaxed);
+}
+
+void NativeAudioEngine::setBluetoothRouteActive(bool isBluetooth) {
+    bool prev = mBluetoothRouteActive.exchange(isBluetooth, std::memory_order_acq_rel);
+    mJitterBuffer.setBluetoothMode(isBluetooth);
+    if (prev != isBluetooth && mIsRunning.load(std::memory_order_acquire)) {
+        LOGI("Audio route changed (bluetooth=%d) — reopening Oboe stream cleanly", static_cast<int>(isBluetooth));
+        scheduleStreamReopen();
+    }
+}
+
+bool NativeAudioEngine::isBluetoothRouteActive() const {
+    return mBluetoothRouteActive.load(std::memory_order_acquire);
 }
 
 void NativeAudioEngine::setPartyRelayEnabled(bool enabled) {

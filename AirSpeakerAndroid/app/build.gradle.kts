@@ -142,16 +142,25 @@ tasks.register("copyDebugApkToRoot") {
     doLast {
         val buildDir = layout.buildDirectory.asFile.get()
         val apkDir = File(buildDir, "outputs/apk/debug")
-        val universalApk = File(apkDir, "app-universal-debug.apk")
-        val fallbackApk = File(apkDir, "app-debug.apk")
-        val srcApk = if (universalApk.exists()) universalApk else fallbackApk
         val rootDir = rootProject.projectDir.parentFile
-        val destUniversal = rootDir.resolve("AirSpeaker-v1-universal.apk")
-        val destCompat = rootDir.resolve("AirSpeaker-v1.apk")
-        if (srcApk.exists()) {
-            srcApk.copyTo(destUniversal, overwrite = true)
-            srcApk.copyTo(destCompat, overwrite = true)
-            println("Copied ${srcApk.name} to ${destUniversal.name} and ${destCompat.name}")
+        val mapping = mapOf(
+            "app-arm64-v8a-debug.apk" to "AirSpeaker-v1-arm64-v8a.apk",
+            "app-armeabi-v7a-debug.apk" to "AirSpeaker-v1-armeabi-v7a.apk",
+            "app-x86_64-debug.apk" to "AirSpeaker-v1-x86_64.apk",
+            "app-x86-debug.apk" to "AirSpeaker-v1-x86.apk",
+            "app-universal-debug.apk" to "AirSpeaker-v1-universal.apk"
+        )
+        mapping.forEach { (srcName, dstName) ->
+            val src = File(apkDir, srcName)
+            if (src.exists()) {
+                src.copyTo(rootDir.resolve(dstName), overwrite = true)
+                println("Copied ${src.name} -> ${rootDir.resolve(dstName)}")
+            }
+        }
+        val universal = File(apkDir, "app-universal-debug.apk").takeIf { it.exists() }
+            ?: File(apkDir, "app-debug.apk")
+        if (universal.exists()) {
+            universal.copyTo(rootDir.resolve("AirSpeaker-v1.apk"), overwrite = true)
         }
     }
 }

@@ -89,6 +89,13 @@ public:
     void setAutoMode(bool enabled);
     bool isAutoMode() const;
 
+    // Bluetooth / dynamic audio route adaptation
+    void setBluetoothMode(bool enabled);
+    bool isBluetoothMode() const;
+    void onRouteChanged(bool isBluetooth, int32_t burstFrames = 240);
+    // Real-time safe (called from Oboe onAudioReady): records largest callback burst seen
+    void observeCallbackFrames(int32_t numFrames);
+
     // Telemetry snapshots (lock-free)
     JitterStatsSnapshot getStatsSnapshot() const;
     JitterStats getStats() const { return getStatsSnapshot(); }
@@ -150,6 +157,8 @@ private:
     alignas(64) std::atomic<bool> mAutoMode{true};
     float mLastAppliedConfiguredTargetMs{-1.0f};
     std::atomic<float> mReportedTargetBufferMs{30.0f};
+    alignas(64) std::atomic<bool> mBluetoothMode{false};
+    alignas(64) std::atomic<size_t> mObservedCallbackFrames{240};
 
     // ---------------------------------------------------------
     // Worker Thread Published Atomics (Read by Telemetry / Receiver)

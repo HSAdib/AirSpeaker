@@ -680,7 +680,15 @@ class AudioReceiver:
                     self._stream.write(out_write)
         except Exception as exc:
             if self._running:
-                logger.debug("PhoneAudioReceiver write error: %s", exc)
+                logger.warning("AudioReceiver output write error (%s) — attempting stream reopen", exc)
+                try:
+                    with self._lock:
+                        self._close_audio_sink()
+                        if not self._open_audio_sink():
+                            self._device_index = None
+                            self._open_audio_sink()
+                except Exception as reopen_exc:
+                    logger.debug("AudioReceiver reopen failed: %s", reopen_exc)
 
     def _play_loop(self) -> None:
         """Dedicated audio playback thread consuming decoded mic frames smoothly."""

@@ -11,6 +11,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.projection.MediaProjection
@@ -112,6 +114,64 @@ class AudioStreamService : Service() {
         AudioNative.nativeSetMuted(effectiveMute)
     }
 
+    private var lastReportedBtRoute: Boolean? = null
+
+    private fun isBluetoothDeviceType(type: Int): Boolean {
+        if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+            return true
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && type == AudioDeviceInfo.TYPE_HEARING_AID) {
+            return true
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER)) {
+            return true
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && type == AudioDeviceInfo.TYPE_BLE_BROADCAST) {
+            return true
+        }
+        return false
+    }
+
+    private fun isBluetoothOutputConnected(): Boolean {
+        val am = audioManager ?: return false
+        return try {
+            am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { isBluetoothDeviceType(it.type) }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun syncBluetoothRouteToNative(force: Boolean = false) {
+        val btConnected = isBluetoothOutputConnected()
+        if (force || lastReportedBtRoute != btConnected) {
+            lastReportedBtRoute = btConnected
+            Log.i(TAG, "Audio output route updated: bluetooth=$btConnected")
+            AudioNative.nativeOnAudioRouteChanged(btConnected)
+        }
+    }
+
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+            val hasBt = addedDevices.any { it.isSink && isBluetoothDeviceType(it.type) }
+            if (hasBt) {
+                pausedByHeadset = false
+                applyEffectiveMuteAndGain()
+            }
+            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = hasBt) }, 150L)
+        }
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+            val removedBt = removedDevices.any { it.isSink && isBluetoothDeviceType(it.type) }
+            if (removedBt && stopOnHeadsetDisconnect && isStreaming) {
+                pausedByHeadset = true
+                applyEffectiveMuteAndGain()
+                notifyStateChanged()
+            }
+            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = removedBt) }, 150L)
+        }
+    }
+
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -152,6 +212,8 @@ class AudioStreamService : Service() {
             filter,
             ContextCompat.RECEIVER_EXPORTED
         )
+        audioManager?.registerAudioDeviceCallback(audioDeviceCallback, serviceHandler)
+        syncBluetoothRouteToNative(force = true)
     }
 
     override fun onDestroy() {
@@ -159,6 +221,9 @@ class AudioStreamService : Service() {
         serviceHandler.removeCallbacksAndMessages(null)
         try {
             unregisterReceiver(noisyReceiver)
+        } catch (_: Exception) {}
+        try {
+            audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
         } catch (_: Exception) {}
 
         stopAudioPlayer()
@@ -269,6 +334,7 @@ class AudioStreamService : Service() {
         AudioNative.nativeSetLowLatencyMode(lowLatency)
         AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
 
+        syncBluetoothRouteToNative(force = true)
         val started = AudioNative.nativeStart(port)
         Log.d(TAG, "nativeStart result: $started on port $port")
         if (!started) {

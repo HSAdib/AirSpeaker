@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+OUT_DIR = Path(os.environ.get("AIRSPEAKER_OUT_DIR", str(ROOT.parent))).resolve()
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 VENV = ROOT / ".venv-macos"
 VENDOR = ROOT / "vendor"
 SRC_MAIN = ROOT / "src" / "main.py"
@@ -217,7 +219,7 @@ def main() -> None:
 
     # 8. Build DMG with /Applications drag-and-drop symlink
     hdiutil = shutil.which("hdiutil")
-    dmg_out = ROOT.parent / "AirSpeaker-v1-macOS.dmg"
+    dmg_out = OUT_DIR / "AirSpeaker-v1-macOS.dmg"
     if hdiutil:
         print("\nCreating Drag-and-Drop DMG with /Applications symlink...", flush=True)
         staging_dir = ROOT / "dist" / "dmg_staging"

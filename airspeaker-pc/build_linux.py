@@ -17,6 +17,8 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+OUT_DIR = Path(os.environ.get("AIRSPEAKER_OUT_DIR", str(ROOT.parent))).resolve()
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 VENV = ROOT / ".venv-linux"
 VENDOR = ROOT / "vendor"
 SRC_MAIN = ROOT / "src" / "main.py"
@@ -151,7 +153,7 @@ def main() -> None:
         binary.chmod(binary.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
 
     # 6. Package dist/AirSpeaker into ../AirSpeaker-v1-Linux-x86_64.tar.gz
-    tar_out = ROOT.parent / "AirSpeaker-v1-Linux-x86_64.tar.gz"
+    tar_out = OUT_DIR / "AirSpeaker-v1-Linux-x86_64.tar.gz"
     print(f"\nPackaging application bundle into {tar_out}...", flush=True)
     if tar_out.exists():
         tar_out.unlink()
