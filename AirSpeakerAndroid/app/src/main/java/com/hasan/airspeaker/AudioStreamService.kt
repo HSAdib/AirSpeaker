@@ -454,7 +454,9 @@ class AudioStreamService : Service() {
             if (!isServing) {
                 stopSelf()
             }
-            android.widget.Toast.makeText(this, "Party Host: $reason", android.widget.Toast.LENGTH_LONG).show()
+            if (ControlChannel.onPartyKicked == null) {
+                android.widget.Toast.makeText(this, "Party Host: $reason", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 

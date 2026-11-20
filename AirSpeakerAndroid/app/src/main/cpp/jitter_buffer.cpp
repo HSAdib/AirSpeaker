@@ -56,6 +56,16 @@ void JitterBuffer::reset() {
         mQueuedPacketCount.store(0, std::memory_order_relaxed);
     }
     mTotalRxPackets.store(0, std::memory_order_relaxed);
+    mRxPacketsInterval.store(0, std::memory_order_relaxed);
+    mCurrentRxPps.store(0, std::memory_order_relaxed);
+    mLateCount.store(0, std::memory_order_relaxed);
+    mDuplicatePackets.store(0, std::memory_order_relaxed);
+    mPacketQueueOverflowDrops.store(0, std::memory_order_relaxed);
+    mUnderrunCount.store(0, std::memory_order_relaxed);
+    mLostCount.store(0, std::memory_order_relaxed);
+    mConcealedPackets.store(0, std::memory_order_relaxed);
+    mIntentionalDriftDrops.store(0, std::memory_order_relaxed);
+    mStreamResetPending.store(false, std::memory_order_release);
     mPcmRingBuffer.reset();
 
     // Reset worker state
@@ -64,7 +74,7 @@ void JitterBuffer::reset() {
     mExpectedSeq = 0;
     mConsecutiveLosses = 0;
     mLastFrameSamplesPerCh = 240;
-    mPacketDurationMs = 5.0f;
+    mPacketDurationMs.store(5.0f, std::memory_order_relaxed);
     std::fill(mLastValidFrame.begin(), mLastValidFrame.end(), 0);
 
     mWorkerExpectedSeq.store(0, std::memory_order_relaxed);

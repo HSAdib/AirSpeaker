@@ -229,6 +229,7 @@ jobs:
           cd airspeaker-pc
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pyaudio || true
           python tests/verify_pc.py
 
       - name: Build Linux Application Bundle & Tarball

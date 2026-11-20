@@ -543,21 +543,24 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             self.playbackSessionId &+= 1
             self.audioBufferQueueCount.reset()
             self.isPrebufferingAudio = true
+            self.playerNode.stop()
             if !self.audioEngine.isRunning {
                 try? self.audioEngine.start()
             }
-            self.playerNode.play()
         }
 
         stateLock.lock()
-        isRunningAudio = true
         receivedOpusPacket = false
         stateLock.unlock()
 
+        rxStateLock.lock()
+        isRunningAudio = true
+        rxStateLock.unlock()
+
         guard startAudioRxSocket(port: port) else {
-            stateLock.lock()
+            rxStateLock.lock()
             isRunningAudio = false
-            stateLock.unlock()
+            rxStateLock.unlock()
             audioControlQueue.sync {
                 self.playerNode.stop()
             }
@@ -702,8 +705,17 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             inet_ntop(AF_INET, &senderAddr.sin_addr, &senderIpStr, socklen_t(INET_ADDRSTRLEN))
             let senderIp = String(cString: senderIpStr)
 
+            let nowIpTs = Date().timeIntervalSince1970
+            if nowIpTs - lastIpRefresh > 2.0 {
+                cachedMyIps = AirSpeakerEngine.getLocalIpv4Addresses()
+                lastIpRefresh = nowIpTs
+            }
+            if senderIp == "127.0.0.1" || cachedMyIps.contains(senderIp) {
+                continue
+            }
+
             stateLock.lock()
-            let needServerIp = atomicConnectedServerIp.isEmpty && senderIp != "127.0.0.1"
+            let needServerIp = atomicConnectedServerIp.isEmpty
             if needServerIp {
                 atomicConnectedServerIp = senderIp
             }
@@ -871,7 +883,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port = in_port_t(port).bigEndian
-        inet_pton(AF_INET, toIp, &dest.sin_addr)
+        guard inet_pton(AF_INET, toIp, &dest.sin_addr) == 1 else { return }
 
         _ = withUnsafePointer(to: &dest) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -975,12 +987,6 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func startServingInternalAudio(targetIp: String = "") {
         guard !isInternalAudioServing else { return }
 
-        serveTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
-        var broadcast: Int32 = 1
-        setsockopt(serveTxSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
-        var sndBuf: Int32 = 65536
-        setsockopt(serveTxSocket, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
-
         let recorder = RPScreenRecorder.shared()
         guard recorder.isAvailable else {
             DispatchQueue.main.async {
@@ -988,6 +994,18 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
             return
         }
+
+        serveTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
+        guard serveTxSocket >= 0 else {
+            DispatchQueue.main.async {
+                self.statusMessage = "Failed to open UDP transmit socket"
+            }
+            return
+        }
+        var broadcast: Int32 = 1
+        setsockopt(serveTxSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
+        var sndBuf: Int32 = 65536
+        setsockopt(serveTxSocket, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
 
         var seq: UInt32 = 1
         var sampleAccumulator: [Int16] = []
@@ -1106,11 +1124,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var destAddr = sockaddr_in()
         destAddr.sin_family = sa_family_t(AF_INET)
         destAddr.sin_port = in_port_t(5004).bigEndian
-        inet_pton(AF_INET, toIp, &destAddr.sin_addr)
-
-        withUnsafePointer(to: &destAddr) { addrPtr in
-            _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+        if inet_pton(AF_INET, toIp, &destAddr.sin_addr) == 1 {
+            withUnsafePointer(to: &destAddr) { addrPtr in
+                _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
         }
 
@@ -1760,7 +1778,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port = in_port_t(5005).bigEndian
-        inet_pton(AF_INET, toIp, &dest.sin_addr)
+        guard inet_pton(AF_INET, toIp, &dest.sin_addr) == 1 else { return }
 
         data.withUnsafeBytes { ptr in
             withUnsafePointer(to: &dest) { addrPtr in

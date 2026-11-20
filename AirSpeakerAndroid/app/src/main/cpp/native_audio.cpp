@@ -20,6 +20,7 @@ NativeAudioEngine::~NativeAudioEngine() {
 bool NativeAudioEngine::start(int audio_port) {
     std::lock_guard<std::mutex> lock(mStartStopMutex);
     mShuttingDown.store(false, std::memory_order_release);
+    mReopenPending.store(false, std::memory_order_release);
     if (mIsRunning.load(std::memory_order_acquire)) return true;
 
     mAudioPort = audio_port;

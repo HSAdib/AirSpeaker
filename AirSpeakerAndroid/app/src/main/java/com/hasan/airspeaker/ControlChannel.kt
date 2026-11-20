@@ -280,9 +280,12 @@ class ControlChannel(
                             }
                             onConfigSyncReceived?.invoke(json)
                         } else if (msgType == "PARTY_KICK") {
-                            val reason = json.optString("reason", "Removed by party host")
-                            onPartyKicked?.invoke(reason)
-                            Companion.onPartyKicked?.invoke(reason)
+                            val targetIp = json.optString("target_ip", "").trim()
+                            if (targetIp.isEmpty() || isOwnLocalIp(targetIp)) {
+                                val reason = json.optString("reason", "Removed by party host")
+                                onPartyKicked?.invoke(reason)
+                                Companion.onPartyKicked?.invoke(reason)
+                            }
                         }
                     } catch (_: Exception) {}
                 }
@@ -565,6 +568,27 @@ class ControlChannel(
         fun sendPartyLeaveBeacon(hostIp: String, deviceName: String = getPhoneModelName(), audioPort: Int = 5004) {
             isPartyJoinerActive = false
             sendPartyLeaveAnnouncement(hostIp)
+        }
+
+        fun sendPartyKick(peerIp: String, reason: String = "Removed by party host") {
+            val cleanIp = peerIp.trim()
+            if (cleanIp.isEmpty()) return
+            kotlin.concurrent.thread(name = "PartyKickSender", isDaemon = true) {
+                try {
+                    val sock = DatagramSocket()
+                    val json = JSONObject().apply {
+                        put("type", "PARTY_KICK")
+                        put("app", "AirSpeaker")
+                        put("version", 1)
+                        put("target_ip", cleanIp)
+                        put("reason", reason)
+                    }
+                    val data = json.toString().toByteArray(Charsets.UTF_8)
+                    val addr = InetAddress.getByName(cleanIp)
+                    sock.send(DatagramPacket(data, data.size, addr, 5005))
+                    sock.close()
+                } catch (_: Exception) {}
+            }
         }
 
         fun sendPartyHostStopAnnouncement() {

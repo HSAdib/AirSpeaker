@@ -1604,9 +1604,16 @@ class AirSpeakerApp:
 
     def _clear_party_devices(self) -> None:
         with self._party_lock:
+            ips_to_kick = list(self._party_devices.keys())
             self._party_devices.clear()
         if self._udp_sender:
             self._udp_sender.clear_party_targets()
+        for ip in ips_to_kick:
+            send_control_message(
+                ip,
+                {"type": "PARTY_KICK", "target_ip": ip, "reason": "Removed by party host"},
+                CONTROL_PORT,
+            )
         self._refresh_party_ui()
 
     def _enter_party_host_mode(self) -> None:
@@ -2043,6 +2050,8 @@ class AirSpeakerApp:
             )
         self._party_joined_active = False
         self.party_extend_var.set(False)
+        if self._control_listener and not self._party_streaming:
+            self._control_listener.set_party_mode(False)
         if hasattr(self, "party_extend_card"):
             self.party_extend_card.pack_forget()
         if hasattr(self, "party_extend_details_frame"):

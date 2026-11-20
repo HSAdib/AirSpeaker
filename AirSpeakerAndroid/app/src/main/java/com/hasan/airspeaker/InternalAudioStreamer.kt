@@ -300,12 +300,14 @@ class InternalAudioStreamer {
 
                 val packetBytes = packetBuf.array()
                 val targetIpStr = targetIpRef.get()
-                try {
-                    val targetAddr = InetAddress.getByName(targetIpStr)
-                    val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, targetPort)
-                    sock.send(dgram)
-                } catch (e: Exception) {
-                    // Ignore transient network errors
+                if (targetIpStr.isNotBlank() && targetIpStr != "0.0.0.0") {
+                    try {
+                        val targetAddr = InetAddress.getByName(targetIpStr)
+                        val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, targetPort)
+                        sock.send(dgram)
+                    } catch (e: Exception) {
+                        // Ignore transient network errors
+                    }
                 }
 
                 if (targetIpStr == "255.255.255.255") {

@@ -41,6 +41,7 @@ targets:
     frameworks:
       - framework: AVFoundation.framework
       - framework: AudioToolbox.framework
+      - framework: CoreMedia.framework
       - framework: ReplayKit.framework
       - framework: Network.framework
       - framework: CoreImage.framework

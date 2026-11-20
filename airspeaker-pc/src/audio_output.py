@@ -571,16 +571,19 @@ class AudioReceiver:
                         out_channels = 1 if channels == 1 else 2
 
                     if decoded_pcm:
+                        frame_stride = 2 * out_channels
+                        usable = (len(decoded_pcm) // frame_stride) * frame_stride
+                        if usable <= 0:
+                            continue
+                        decoded_pcm = decoded_pcm[:usable]
                         self._pps_count += 1
                         self._last_rx_time = time.monotonic()
                         if not self._manual_mute:
                             self._muted = False
                         if not self._muted:
-                            usable = (len(decoded_pcm) // 2) * 2
-                            if usable > 0:
-                                pcm_arr = np.frombuffer(decoded_pcm[:usable], dtype="<i2")
-                                if len(pcm_arr) > 0:
-                                    self.peak_level = float(np.max(np.abs(pcm_arr))) / 32768.0
+                            pcm_arr = np.frombuffer(decoded_pcm, dtype="<i2")
+                            if len(pcm_arr) > 0:
+                                self.peak_level = float(np.max(np.abs(pcm_arr))) / 32768.0
                             self._update_frame_duration_ms(decoded_pcm, out_channels)
                             self._pcm_queue.append((decoded_pcm, out_channels))
                             self._queue_event.set()
