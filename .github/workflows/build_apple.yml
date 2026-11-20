@@ -51,6 +51,11 @@ jobs:
             echo "No keystore secret found, skipping release signing."
           fi
 
+      - name: Run Native Audio C++ Tests
+        run: |
+          g++ -std=c++17 -O2 -pthread -I"AirSpeakerAndroid/app/src/main/cpp" "AirSpeakerAndroid/app/src/main/cpp/test_native_pipeline.cpp" -o test_pipeline
+          ./test_pipeline
+
       - name: Run Android Unit Tests
         run: |
           cd AirSpeakerAndroid
@@ -92,7 +97,7 @@ jobs:
           copy_and_verify() {
             local pattern="$1"
             local dest="$2"
-            local src=$(find "$APK_DIR" -name "*$pattern*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
+            local src=$(find "$APK_DIR" -name "*-${pattern}-*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
             if [ -z "$src" ] || [ ! -f "$src" ]; then
               echo "ERROR: Missing required APK variant for $pattern in $APK_DIR"
               exit 1
@@ -154,11 +159,12 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Dependencies & Run Verification Tests
+      - name: Install Dependencies, Acquire Opus & Run Verification Tests
         run: |
           cd airspeaker-pc
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python vendor/get_opus.py
           python tests/verify_pc.py
 
       - name: Compile Windows Setup & Portable Executables
@@ -169,10 +175,16 @@ jobs:
       - name: Verify Windows Artifacts & Generate Checksums
         shell: pwsh
         run: |
-          Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Portable.exe" | Out-File "AirSpeaker-v1-Portable.exe.sha256"
-          if (Test-Path "AirSpeaker-v1-Setup.exe") {
-            Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Setup.exe" | Out-File "AirSpeaker-v1-Setup.exe.sha256"
+          if (!(Test-Path "AirSpeaker-v1-Portable.exe")) {
+            Write-Error "Missing AirSpeaker-v1-Portable.exe"
+            exit 1
           }
+          if (!(Test-Path "AirSpeaker-v1-Setup.exe")) {
+            Write-Error "Missing AirSpeaker-v1-Setup.exe"
+            exit 1
+          }
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Portable.exe" | Out-File "AirSpeaker-v1-Portable.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Setup.exe" | Out-File "AirSpeaker-v1-Setup.exe.sha256"
           Write-Host "Windows Deliverables:"
           Get-ChildItem -Filter "AirSpeaker-v1-*"
 
@@ -218,6 +230,7 @@ jobs:
         run: |
           cd airspeaker-pc
           python build_linux.py
+          ./dist/AirSpeaker/AirSpeaker --version
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
@@ -245,7 +258,7 @@ jobs:
 
       - name: Install macOS Audio & Build Dependencies
         run: |
-          brew install opus portaudio python@3.11 python-tk@3.11 xcodegen oras
+          brew install opus portaudio python@3.11 python-tk@3.11 xcodegen
 
       - name: Build macOS Application Bundle & DMG
         run: |
@@ -311,28 +324,24 @@ jobs:
 
       - name: Download Android Artifacts
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: AirSpeaker-v1-APK
           path: release-artifacts/
 
       - name: Download Windows Artifacts
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: AirSpeaker-v1-Windows
           path: release-artifacts/
 
       - name: Download Linux Artifact
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: AirSpeaker-v1-Linux
           path: release-artifacts/
 
       - name: Download Apple Artifacts
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: AirSpeaker-v1-Apple-Deliverables
           path: release-artifacts/

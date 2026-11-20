@@ -26,9 +26,16 @@ def _netsh_add_cmd(port: int) -> list:
     ]
 
 
+def _netsh_delete_cmd(port: int) -> list:
+    return [
+        "netsh", "advfirewall", "firewall", "delete", "rule",
+        f"name={RULE_NAME_TMPL.format(port=port)}",
+    ]
+
+
 def get_firewall_commands() -> list:
     if sys.platform == "darwin":
-        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/Air\\ Speaker\\ v1.app/Contents/MacOS/airspeaker"]
+        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/Air\\ Speaker.app/Contents/MacOS/Air\\ Speaker"]
     if sys.platform.startswith("linux"):
         if shutil.which("ufw"):
             return [f"sudo ufw allow {p}/udp" for p in PORTS]
@@ -65,6 +72,11 @@ def apply_firewall_rules() -> tuple:
     results = []
     direct_ok = True
     for port in PORTS:
+        del_cmd = _netsh_delete_cmd(port)
+        try:
+            subprocess.run(del_cmd, capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass
         cmd = _netsh_add_cmd(port)
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -83,7 +95,7 @@ def apply_firewall_rules() -> tuple:
     try:
         import base64
         ps_commands = "; ".join([
-            f"netsh advfirewall firewall add rule name='AirSpeaker UDP {p}' protocol=UDP localport={p} dir=in action=allow enable=yes profile=any"
+            f"netsh advfirewall firewall delete rule name='AirSpeaker UDP {p}'; netsh advfirewall firewall add rule name='AirSpeaker UDP {p}' protocol=UDP localport={p} dir=in action=allow enable=yes profile=any"
             for p in PORTS
         ])
         b64 = base64.b64encode(ps_commands.encode("utf-16le")).decode("ascii")

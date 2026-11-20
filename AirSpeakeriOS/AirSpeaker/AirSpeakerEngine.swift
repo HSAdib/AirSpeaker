@@ -104,19 +104,19 @@ public final class Swift5BandBiquadDSP {
     private var z1 = [[Double]](repeating: [0.0, 0.0], count: 5)
     private var z2 = [[Double]](repeating: [0.0, 0.0], count: 5)
     private var isEnabled: Bool = false
+    private var needsStateReset: Bool = false
 
     public func setGains(enabled: Bool, gains: [Float]) {
-        lock.lock()
-        defer { lock.unlock() }
         let freqs: [Double] = [60.0, 230.0, 910.0, 3600.0, 14000.0]
         let sr: Double = 48000.0
         let q: Double = 1.15
         var anyActive = false
+        var newCoeffs = Array(repeating: Coeffs(), count: 5)
 
         for i in 0..<5 {
             let g = i < gains.count ? Double(max(-12.0, min(12.0, gains[i]))) : 0.0
             if abs(g) <= 0.05 {
-                coeffs[i] = Coeffs(b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, active: false)
+                newCoeffs[i] = Coeffs(b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, active: false)
                 continue
             }
             anyActive = true
@@ -126,7 +126,7 @@ public final class Swift5BandBiquadDSP {
             let cos_w0 = cos(w0)
             let a0 = 1.0 + alpha / A
 
-            coeffs[i] = Coeffs(
+            newCoeffs[i] = Coeffs(
                 b0: (1.0 + alpha * A) / a0,
                 b1: (-2.0 * cos_w0) / a0,
                 b2: (1.0 - alpha * A) / a0,
@@ -135,23 +135,35 @@ public final class Swift5BandBiquadDSP {
                 active: true
             )
         }
-        isEnabled = enabled && anyActive
-        if !isEnabled {
+
+        lock.lock()
+        let wasEnabled = self.isEnabled
+        let nextEnabled = enabled && anyActive
+        self.coeffs = newCoeffs
+        self.isEnabled = nextEnabled
+        if !nextEnabled || (!wasEnabled && nextEnabled) {
+            self.needsStateReset = true
+        }
+        lock.unlock()
+    }
+
+    public func processInt16Samples(_ samples: inout [Int16], channels: Int = 2) {
+        lock.lock()
+        let isEn = isEnabled
+        let localCoeffs = coeffs
+        let shouldReset = needsStateReset
+        if shouldReset {
+            needsStateReset = false
+        }
+        lock.unlock()
+
+        if shouldReset {
             for i in 0..<5 {
                 z1[i] = [0.0, 0.0]
                 z2[i] = [0.0, 0.0]
             }
         }
-    }
-
-    public func processInt16Samples(_ samples: inout [Int16], channels: Int = 2) {
-        lock.lock()
-        guard isEnabled, !samples.isEmpty else {
-            lock.unlock()
-            return
-        }
-        let localCoeffs = coeffs
-        lock.unlock()
+        guard isEn, !samples.isEmpty else { return }
 
         let ch = channels == 1 ? 1 : 2
         let numFrames = samples.count / ch
@@ -219,6 +231,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var connectedServerName: String = "PC"
     @Published public var latencyMs: Double = 0.0
     @Published public var packetLossPercent: Double = 0.0
+    @Published public var packetsLostCount: UInt64 = 0
     @Published public var rxPps: Int = 0
     @Published public var serveTxPps: Int = 0
     @Published public var servePeakLevel: Float = 0.0
@@ -237,10 +250,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             stateLock.lock()
             atomicMuted = isMuted
             stateLock.unlock()
-            playerNode.volume = isMuted ? 0.0 : 1.0
+            audioControlQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.playerNode.volume = self.isMuted ? 0.0 : 1.0
+            }
         }
     }
-    @Published public var bufferTargetMs: Int = 20 {
+    @Published public var bufferTargetMs: Int = 30 {
         didSet {
             stateLock.lock()
             atomicBufferTargetMs = bufferTargetMs
@@ -255,7 +271,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var activeCodecName: String = "PCM16"
     @Published public var opusBitrateKbps: String = "192"
     @Published public var serverRole: String = "PC_TO_PHONE"
-    @Published public var outputEngineMode: String = "OBOE_LOW_LATENCY"
+    @Published public var outputEngineMode: String = "AUDIOTRACK_STANDARD"
     @Published public var enableAudioEffects: Bool = false
     @Published public var exclusiveAudioMode: String = "MIX_WITH_OTHERS"
     @Published public var stopOnHeadsetDisconnect: Bool = false
@@ -298,7 +314,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     // Thread-safe snapshots read by background audio/network threads
     private var atomicVolume: Float = 1.0
     private var atomicMuted: Bool = false
-    private var atomicBufferTargetMs: Int = 20
+    private var atomicBufferTargetMs: Int = 30
+    private var playbackSessionId: Int = 0
     private var atomicRelayActive: Bool = false
     private var atomicConnectedServerIp: String = ""
     private var isPrebufferingAudio: Bool = true
@@ -308,12 +325,27 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private let playerNode = AVAudioPlayerNode()
     private let audioFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: false)!
     private let audioBufferQueueCount = AtomicInt()
+    private let audioControlQueue = DispatchQueue(label: "com.hasan.airspeaker.audioControlQueue")
+    private var receivedOpusPacket: Bool = false
+    private var lastStatsCalcTime: Date = Date()
 
     // BSD POSIX UDP Sockets
     private var audioRxSocket: Int32 = -1
     private var controlSocket: Int32 = -1
     private var serveTxSocket: Int32 = -1
     private var relayTxSocket: Int32 = -1
+
+    // Rx Session State & Socket Safety
+    private let rxStateLock = NSLock()
+    private var rxSessionId: UInt64 = 0
+    private var activeAudioRxFd: Int32 = -1
+    private let atomicOverflows = AtomicInt()
+
+    private func isRxSessionActive(_ sessionId: UInt64) -> Bool {
+        rxStateLock.lock()
+        defer { rxStateLock.unlock() }
+        return isRunningAudio && rxSessionId == sessionId
+    }
 
     // Background Threads
     private var rxThread: Thread?
@@ -432,6 +464,19 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         stateLock.unlock()
     }
 
+    public func clearPartyPeers() {
+        peersLock.lock()
+        partyPeerIps.removeAll()
+        peersLock.unlock()
+        DispatchQueue.main.async {
+            self.partyMembers.removeAll()
+        }
+    }
+
+    public func applyAudioSessionMode() {
+        setupAudioSession()
+    }
+
     private func updateServerIp(_ ip: String) {
         connectedServerIp = ip
         stateLock.lock()
@@ -443,23 +488,45 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private func setupAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetooth]
+            if exclusiveAudioMode == "MIX_WITH_OTHERS" {
+                options.insert(.mixWithOthers)
+            }
+            try session.setCategory(.playAndRecord, mode: .default, options: options)
             try session.setPreferredSampleRate(48000)
             try session.setPreferredIOBufferDuration(0.005) // 5ms buffer
             try session.setActive(true)
         } catch {
             print("AudioSession setup error: \(error)")
         }
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
+    }
+
+    @objc private func handleRouteChange(notification: Notification) {
+        guard stopOnHeadsetDisconnect, isAudioPlaying else { return }
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+
+        if reason == .oldDeviceUnavailable {
+            DispatchQueue.main.async {
+                self.isMuted = true
+                self.statusMessage = "Headset disconnected — Paused"
+            }
+        }
     }
 
     private func setupAudioEngine() {
-        audioEngine.attach(playerNode)
-        audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: audioFormat)
-        playerNode.volume = isMuted ? 0.0 : 1.0
-        do {
-            try audioEngine.start()
-        } catch {
-            print("AVAudioEngine start error: \(error)")
+        audioControlQueue.sync {
+            audioEngine.attach(playerNode)
+            audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: audioFormat)
+            playerNode.volume = isMuted ? 0.0 : 1.0
+            do {
+                try audioEngine.start()
+            } catch {
+                print("AVAudioEngine start error: \(error)")
+            }
         }
     }
 
@@ -467,20 +534,40 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func startSpeakerPlayer(port: Int = 5004, manualHost: String = "") {
         guard !isAudioPlaying else { return }
         setupAudioSession()
-        if !audioEngine.isRunning {
-            try? audioEngine.start()
-        }
-        isPrebufferingAudio = true
-        playerNode.play()
-
         if !manualHost.isEmpty {
             updateServerIp(manualHost)
         }
 
-        isRunningAudio = true
-        startAudioRxSocket(port: port)
-        startStatsTimer()
+        audioControlQueue.sync {
+            self.playbackSessionId &+= 1
+            self.audioBufferQueueCount.reset()
+            self.isPrebufferingAudio = true
+            if !self.audioEngine.isRunning {
+                try? self.audioEngine.start()
+            }
+            self.playerNode.play()
+        }
 
+        stateLock.lock()
+        isRunningAudio = true
+        receivedOpusPacket = false
+        stateLock.unlock()
+
+        guard startAudioRxSocket(port: port) else {
+            stateLock.lock()
+            isRunningAudio = false
+            stateLock.unlock()
+            audioControlQueue.sync {
+                self.playerNode.stop()
+            }
+            DispatchQueue.main.async {
+                self.isAudioPlaying = false
+                self.statusMessage = "Failed to bind UDP port \(port)"
+            }
+            return
+        }
+
+        startStatsTimer()
         DispatchQueue.main.async {
             self.isAudioPlaying = true
             self.statusMessage = "Speaker active (UDP \(port))"
@@ -489,17 +576,34 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     public func stopSpeakerPlayer() {
         guard isAudioPlaying else { return }
+        rxStateLock.lock()
+        rxSessionId &+= 1
         isRunningAudio = false
-        playerNode.stop()
-        if audioEngine.isRunning {
-            audioEngine.pause()
+        let fdToUnblock = activeAudioRxFd
+        activeAudioRxFd = -1
+        rxStateLock.unlock()
+
+        if fdToUnblock >= 0 {
+            Darwin.shutdown(fdToUnblock, SHUT_RDWR)
+        }
+
+        stateLock.lock()
+        receivedOpusPacket = false
+        audioRxSocket = -1
+        stateLock.unlock()
+
+        audioControlQueue.sync {
+            self.playbackSessionId &+= 1
+            self.playerNode.stop()
+            if self.audioEngine.isRunning {
+                self.audioEngine.pause()
+            }
+            self.audioBufferQueueCount.reset()
         }
 
         if !isInternalAudioServing {
             stopStatsTimer()
         }
-        closeSocket(&audioRxSocket)
-        audioBufferQueueCount.reset()
 
         DispatchQueue.main.async {
             self.isAudioPlaying = false
@@ -508,9 +612,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     // MARK: - Exact 12-Byte Little-Endian Audio Receiver (UDP 5004)
-    private func startAudioRxSocket(port: Int = 5004) {
+    @discardableResult
+    private func startAudioRxSocket(port: Int = 5004) -> Bool {
         audioRxSocket = socket(AF_INET, SOCK_DGRAM, 0)
-        guard audioRxSocket >= 0 else { return }
+        guard audioRxSocket >= 0 else { return false }
 
         var opt: Int32 = 1
         setsockopt(audioRxSocket, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout<Int32>.size))
@@ -535,14 +640,24 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
         if bindResult < 0 {
             print("Failed to bind UDP port \(port)")
-            return
+            closeSocket(&audioRxSocket)
+            return false
         }
 
+        rxStateLock.lock()
+        rxSessionId &+= 1
+        let sessionId = rxSessionId
+        activeAudioRxFd = audioRxSocket
+        isRunningAudio = true
+        rxStateLock.unlock()
+
+        let sock = audioRxSocket
         rxThread = Thread { [weak self] in
-            self?.runAudioRxLoop()
+            self?.runAudioRxLoop(fd: sock, sessionId: sessionId)
         }
         rxThread?.qualityOfService = .userInteractive
         rxThread?.start()
+        return true
     }
 
     @inline(__always)
@@ -555,7 +670,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         return x
     }
 
-    private func runAudioRxLoop() {
+    private func runAudioRxLoop(fd: Int32, sessionId: UInt64) {
+        defer {
+            Darwin.close(fd)
+        }
         var buffer = [UInt8](repeating: 0, count: 4096)
         var senderAddr = sockaddr_in()
         var senderLen = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -564,11 +682,16 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var cachedMyIps: [String] = AirSpeakerEngine.getLocalIpv4Addresses()
         var lastIpRefresh: TimeInterval = Date().timeIntervalSince1970
 
-        while isRunningAudio && audioRxSocket >= 0 {
+        while isRxSessionActive(sessionId) {
             let bytesRead = withUnsafeMutablePointer(to: &senderAddr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    recvfrom(audioRxSocket, &buffer, buffer.count, 0, sa, &senderLen)
+                    recvfrom(fd, &buffer, buffer.count, 0, sa, &senderLen)
                 }
+            }
+
+            if bytesRead <= 0 {
+                if !isRxSessionActive(sessionId) { break }
+                continue
             }
 
             // Exact 12-byte header requirement
@@ -578,8 +701,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             inet_ntop(AF_INET, &senderAddr.sin_addr, &senderIpStr, socklen_t(INET_ADDRSTRLEN))
             let senderIp = String(cString: senderIpStr)
 
-            if atomicConnectedServerIp.isEmpty && senderIp != "127.0.0.1" {
+            stateLock.lock()
+            let needServerIp = atomicConnectedServerIp.isEmpty && senderIp != "127.0.0.1"
+            if needServerIp {
                 atomicConnectedServerIp = senderIp
+            }
+            stateLock.unlock()
+            if needServerIp {
                 DispatchQueue.main.async { [weak self] in
                     if self?.connectedServerIp.isEmpty == true {
                         self?.connectedServerIp = senderIp
@@ -643,6 +771,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
             // Codec Fallback: If sender sends Opus (codec == 1), auto-request Lossless PCM16
             if codec == 1 {
+                stateLock.lock()
+                self.receivedOpusPacket = true
+                stateLock.unlock()
                 let now = Date().timeIntervalSince1970
                 if now - localLastSyncReq > 2.0 {
                     localLastSyncReq = now
@@ -662,7 +793,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             // Cap queued buffers to max(12, bufferTargetMs * 2 / 5) so Wi-Fi bursts buffer smoothly!
             let maxQueued = max(12, (curTargetMs * 2) / 5)
             if audioBufferQueueCount.value >= maxQueued {
-                atomicUnderruns.increment()
+                atomicOverflows.increment()
                 continue
             }
 
@@ -695,23 +826,38 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 }
 
                 let minPrebuffer = max(3, curTargetMs / 5)
-                if audioBufferQueueCount.value == 0 {
-                    isPrebufferingAudio = true
-                    playerNode.pause()
-                }
-                audioBufferQueueCount.increment()
                 guard isRunningAudio else { return }
-                playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
-                    self?.audioBufferQueueCount.decrement()
-                }
-                if isPrebufferingAudio && audioBufferQueueCount.value >= minPrebuffer {
-                    isPrebufferingAudio = false
-                    guard isRunningAudio else { return }
-                    if !audioEngine.isRunning {
-                        try? audioEngine.start()
+                audioControlQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.stateLock.lock()
+                    let running = self.isRunningAudio
+                    self.stateLock.unlock()
+                    guard running else { return }
+
+                    let sessionId = self.playbackSessionId
+                    if self.audioBufferQueueCount.value == 0 && !self.isPrebufferingAudio {
+                        self.isPrebufferingAudio = true
+                        if self.playerNode.isPlaying {
+                            self.playerNode.pause()
+                        }
                     }
-                    if !playerNode.isPlaying {
-                        playerNode.play()
+                    self.audioBufferQueueCount.increment()
+                    self.playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
+                        guard let self = self else { return }
+                        self.audioControlQueue.async {
+                            if self.playbackSessionId == sessionId {
+                                self.audioBufferQueueCount.decrement()
+                            }
+                        }
+                    }
+                    if self.isPrebufferingAudio && self.audioBufferQueueCount.value >= minPrebuffer {
+                        self.isPrebufferingAudio = false
+                        if !self.audioEngine.isRunning {
+                            try? self.audioEngine.start()
+                        }
+                        if !self.playerNode.isPlaying {
+                            self.playerNode.play()
+                        }
                     }
                 }
             }
@@ -745,9 +891,91 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
     }
 
+    private func extractInterleavedInt16Stereo(from sampleBuffer: CMSampleBuffer) -> [Int16]? {
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
+            return nil
+        }
+        let asbd = asbdPtr.pointee
+        let channels = Int(asbd.mChannelsPerFrame)
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard channels > 0, frameCount > 0 else { return nil }
+
+        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let isBigEndian = (asbd.mFormatFlags & kAudioFormatFlagIsBigEndian) != 0
+
+        let bufferCount = isNonInterleaved ? channels : 1
+        let listSize = MemoryLayout<AudioBufferList>.size + max(0, bufferCount - 1) * MemoryLayout<AudioBuffer>.size
+        let rawList = UnsafeMutableRawPointer.allocate(byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { rawList.deallocate() }
+        let ablPtr = rawList.bindMemory(to: AudioBufferList.self, capacity: 1)
+
+        var blockBuffer: CMBlockBuffer?
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: ablPtr,
+            bufferListSize: listSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else { return nil }
+
+        let buffers = UnsafeMutableAudioBufferListPointer(ablPtr)
+        var out = [Int16](repeating: 0, count: frameCount * 2)
+
+        @inline(__always)
+        func floatToInt16(_ v: Float) -> Int16 {
+            let clamped = max(-1.0, min(1.0, v))
+            return Int16(clamped * 32767.0)
+        }
+
+        if isNonInterleaved {
+            guard let leftData = buffers[0].mData else { return nil }
+            let rightData = (buffers.count > 1 ? buffers[1].mData : buffers[0].mData) ?? leftData
+            if isFloat {
+                let lPtr = leftData.bindMemory(to: Float.self, capacity: frameCount)
+                let rPtr = rightData.bindMemory(to: Float.self, capacity: frameCount)
+                for i in 0..<frameCount {
+                    out[i * 2] = floatToInt16(lPtr[i])
+                    out[i * 2 + 1] = floatToInt16(rPtr[i])
+                }
+            } else {
+                let lPtr = leftData.bindMemory(to: Int16.self, capacity: frameCount)
+                let rPtr = rightData.bindMemory(to: Int16.self, capacity: frameCount)
+                for i in 0..<frameCount {
+                    out[i * 2] = isBigEndian ? Int16(bigEndian: lPtr[i]) : lPtr[i]
+                    out[i * 2 + 1] = isBigEndian ? Int16(bigEndian: rPtr[i]) : rPtr[i]
+                }
+            }
+        } else {
+            guard let data = buffers[0].mData else { return nil }
+            if isFloat {
+                let ptr = data.bindMemory(to: Float.self, capacity: frameCount * channels)
+                for i in 0..<frameCount {
+                    let l = ptr[i * channels]
+                    let r = (channels > 1) ? ptr[i * channels + 1] : l
+                    out[i * 2] = floatToInt16(l)
+                    out[i * 2 + 1] = floatToInt16(r)
+                }
+            } else {
+                let ptr = data.bindMemory(to: Int16.self, capacity: frameCount * channels)
+                for i in 0..<frameCount {
+                    let rawL = ptr[i * channels]
+                    let rawR = (channels > 1) ? ptr[i * channels + 1] : rawL
+                    out[i * 2] = isBigEndian ? Int16(bigEndian: rawL) : rawL
+                    out[i * 2 + 1] = isBigEndian ? Int16(bigEndian: rawR) : rawR
+                }
+            }
+        }
+        return out
+    }
+
     public func startServingInternalAudio(targetIp: String = "") {
         guard !isInternalAudioServing else { return }
-        let ip = targetIp.isEmpty ? (atomicConnectedServerIp.isEmpty ? "255.255.255.255" : atomicConnectedServerIp) : targetIp
 
         serveTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
         var broadcast: Int32 = 1
@@ -769,49 +997,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
         recorder.startCapture(handler: { [weak self] (sampleBuffer, bufferType, error) in
             guard let self = self, error == nil, bufferType == .audioApp, self.serveTxSocket >= 0 else { return }
+            guard var decodedStereo = self.extractInterleavedInt16Stereo(from: sampleBuffer) else { return }
 
-            guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
-            var lengthAtOffset: Int = 0
-            var totalLength: Int = 0
-            var dataPointer: UnsafeMutablePointer<Int8>?
-            guard CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: &lengthAtOffset, totalLengthOut: &totalLength, dataPointerOut: &dataPointer) == noErr,
-                  let rawPtr = dataPointer else { return }
-
-            var isFloat = false
-            var isBigEndian = false
-            var inChannels = 2
             var inSampleRate: Double = 48000.0
             if let fmtDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
                let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(fmtDesc) {
                 let asbd = asbdPtr.pointee
-                isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-                isBigEndian = (asbd.mFormatFlags & kAudioFormatFlagIsBigEndian) != 0
-                inChannels = max(1, Int(asbd.mChannelsPerFrame))
                 if asbd.mSampleRate > 8000.0 {
                     inSampleRate = asbd.mSampleRate
-                }
-            }
-
-            var decodedStereo: [Int16] = []
-            if isFloat {
-                let floatCount = totalLength / 4
-                decodedStereo.reserveCapacity(inChannels == 1 ? floatCount * 2 : floatCount)
-                let floatPtr = rawPtr.withMemoryRebound(to: Float32.self, capacity: floatCount) { $0 }
-                for i in 0..<floatCount {
-                    var f = floatPtr[i]
-                    if isBigEndian { f = Float32(bitPattern: UInt32(bigEndian: f.bitPattern)) }
-                    let s = Int16(max(-32768.0, min(32767.0, f * 32767.0)))
-                    decodedStereo.append(s)
-                    if inChannels == 1 { decodedStereo.append(s) }
-                }
-            } else {
-                let sampleCount = totalLength / 2
-                decodedStereo.reserveCapacity(inChannels == 1 ? sampleCount * 2 : sampleCount)
-                let shortPtr = rawPtr.withMemoryRebound(to: Int16.self, capacity: sampleCount) { $0 }
-                for i in 0..<sampleCount {
-                    let s = isBigEndian ? Int16(bigEndian: shortPtr[i]) : shortPtr[i]
-                    decodedStereo.append(s)
-                    if inChannels == 1 { decodedStereo.append(s) }
                 }
             }
 
@@ -834,7 +1027,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 decodedStereo = resampled
             }
 
-            var maxSample: Int16 = 0
+            var maxSample: Int32 = 0
             serveLock.lock()
             sampleAccumulator.append(contentsOf: decodedStereo)
 
@@ -863,7 +1056,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
                 for j in 0..<480 {
                     let s = slice[j]
-                    let a = abs(s)
+                    let a = abs(Int32(s))
                     if a > maxSample { maxSample = a }
                     let u = UInt16(bitPattern: s)
                     packet[12 + j * 2] = UInt8(u & 0xFF)
@@ -875,11 +1068,20 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.servePacketsSent += 1
                 self.stateLock.unlock()
 
-                self.sendServePacket(packet, toIp: ip)
+                let destIp: String
+                if !targetIp.isEmpty {
+                    destIp = targetIp
+                } else {
+                    self.stateLock.lock()
+                    let curIp = self.atomicConnectedServerIp
+                    self.stateLock.unlock()
+                    destIp = curIp.isEmpty ? "255.255.255.255" : curIp
+                }
+                self.sendServePacket(packet, toIp: destIp)
             }
             serveLock.unlock()
 
-            let peak = Float(maxSample) / 32767.0
+            let peak = min(1.0, Float(maxSample) / 32768.0)
             DispatchQueue.main.async {
                 self.servePeakLevel = peak
             }
@@ -888,6 +1090,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 if let error = error {
                     self?.statusMessage = "Capture error: \(error.localizedDescription)"
                     self?.isInternalAudioServing = false
+                    if var sock = self?.serveTxSocket {
+                        self?.closeSocket(&sock)
+                        self?.serveTxSocket = -1
+                    }
                 } else {
                     self?.isInternalAudioServing = true
                     self?.statusMessage = "Serving Internal Audio (Port 5004)"
@@ -951,6 +1157,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 guard let self = self else { return }
                 self.isInternalAudioServing = false
                 self.statusMessage = "Internal Audio Sender Stopped"
+                self.servePeakLevel = 0.0
+                self.serveTxPps = 0
                 self.closeSocket(&self.serveTxSocket)
                 if !self.isAudioPlaying {
                     self.stopStatsTimer()
@@ -985,6 +1193,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
         if bindRes < 0 {
             print("Failed to bind UDP port 5005")
+            closeSocket(&controlSocket)
             return
         }
 
@@ -1055,12 +1264,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
             // Downstream peer discovery
             if (isPartyHost || isPartyExtending) {
+                let isPartyLeave = payload["party_leave"] as? Bool ?? false
                 if isPartyJoin == true && !isHost {
                     peersLock.lock()
                     partyPeerIps.insert(senderIp)
                     peersLock.unlock()
                     updatePartyMember(name: dev, ip: senderIp)
-                } else if isPartyJoin == false {
+                } else if isPartyLeave {
                     peersLock.lock()
                     partyPeerIps.remove(senderIp)
                     peersLock.unlock()
@@ -1247,6 +1457,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             "audio_port": 5004,
             "device": self.deviceName,
             "party_join": false,
+            "party_leave": true,
             "is_party_host": false,
             "is_extended_host": false,
             "serving": self.isInternalAudioServing,
@@ -1301,11 +1512,13 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 "version": 1,
                 "device": deviceName,
                 "party_join": false,
+                "party_leave": true,
                 "is_party_host": false,
                 "is_extended_host": false,
                 "audio_port": 5004
             ], toIp: currentPartyHostIp)
         }
+        broadcastBeacon(explicitLeave: true)
         stopPartyKeepAliveTimer()
         stopSpeakerPlayer()
         closeSocket(&relayTxSocket)
@@ -1367,41 +1580,47 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     // MARK: - Periodic Beacons & Stats
     private func startBeaconTimer() {
-        beaconTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            self.broadcastBeacon()
-            let now = Date()
-            self.discoveredPartyHosts.removeAll { now.timeIntervalSince($0.lastSeen) > 6.0 }
-            self.partyMembers.removeAll { member in
-                if now.timeIntervalSince(member.lastSeen) > 10.0 {
-                    self.peersLock.lock()
-                    self.partyPeerIps.remove(member.ip)
-                    self.peersLock.unlock()
-                    return true
+        DispatchQueue.main.async {
+            self.beaconTimer?.invalidate()
+            self.beaconTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                self.broadcastBeacon()
+                let now = Date()
+                self.discoveredPartyHosts.removeAll { now.timeIntervalSince($0.lastSeen) > 6.0 }
+                self.partyMembers.removeAll { member in
+                    if now.timeIntervalSince(member.lastSeen) > 10.0 {
+                        self.peersLock.lock()
+                        self.partyPeerIps.remove(member.ip)
+                        self.peersLock.unlock()
+                        return true
+                    }
+                    return false
                 }
-                return false
             }
         }
     }
 
-    public func broadcastBeacon() {
+    public func broadcastBeacon(explicitLeave: Bool = false) {
         let isHostActive = self.isPartyHost && self.isPartyHostBroadcasting && !self.isPartyExtending
         let isExtActive = self.isPartyExtending && self.isPartyJoined
-        let beacon: [String: Any] = [
+        var beacon: [String: Any] = [
             "type": "BEACON",
             "app": "AirSpeaker",
             "version": 1,
             "ips": AirSpeakerEngine.getLocalIpv4Addresses(),
             "audio_port": 5004,
             "device": self.deviceName,
-            "party_join": false,
+            "party_join": self.isPartyJoined && !explicitLeave,
             "is_party_host": isHostActive,
             "is_extended_host": isExtActive,
             "serving": self.isInternalAudioServing,
             "playing": self.isAudioPlaying,
             "platform": "ios",
-            "force_pcm": true
+            "force_pcm": self.isAudioPlaying && self.receivedOpusPacket
         ]
+        if explicitLeave {
+            beacon["party_leave"] = true
+        }
         broadcastControlMessage(beacon)
     }
 
@@ -1420,81 +1639,98 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func startPartyKeepAliveTimer() {
-        partyKeepAliveTimer?.invalidate()
-        partyKeepAliveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            guard let self = self, self.isPartyJoined, !self.currentPartyHostIp.isEmpty else { return }
-            self.sendPartyJoinAnnouncement(hostIp: self.currentPartyHostIp)
+        DispatchQueue.main.async {
+            self.partyKeepAliveTimer?.invalidate()
+            self.partyKeepAliveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+                guard let self = self, self.isPartyJoined, !self.currentPartyHostIp.isEmpty else { return }
+                self.sendPartyJoinAnnouncement(hostIp: self.currentPartyHostIp)
+            }
         }
     }
 
     private func stopPartyKeepAliveTimer() {
-        partyKeepAliveTimer?.invalidate()
-        partyKeepAliveTimer = nil
+        DispatchQueue.main.async {
+            self.partyKeepAliveTimer?.invalidate()
+            self.partyKeepAliveTimer = nil
+        }
     }
 
     private func startStatsTimer() {
-        statsTimer?.invalidate()
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            self.stateLock.lock()
-            let curRx = self.packetsReceived
-            let curLost = self.packetsLost
-            let curServeTx = self.servePacketsSent
-            self.stateLock.unlock()
+        DispatchQueue.main.async {
+            self.statsTimer?.invalidate()
+            self.statsTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                self.stateLock.lock()
+                let curRx = self.packetsReceived
+                let curLost = self.packetsLost
+                let curServeTx = self.servePacketsSent
+                self.stateLock.unlock()
 
-            let total = curRx + curLost
-            self.packetLossPercent = total > 0 ? (Double(curLost) / Double(total)) * 100.0 : 0.0
-            let queueBufMs = Double(self.audioBufferQueueCount.value * 5)
-            let curBufMs: Double
-            if queueBufMs > 0 {
-                curBufMs = queueBufMs
-            } else if self.isInternalAudioServing && self.serveTxPps > 0 {
-                curBufMs = Double(self.bufferTargetMs) + Double(self.servePeakLevel * 5.0)
-            } else {
-                curBufMs = 0.0
-            }
-            self.latencyMs = curBufMs
+                let total = curRx + curLost
+                self.packetLossPercent = total > 0 ? (Double(curLost) / Double(total)) * 100.0 : 0.0
+                let queueBufMs = Double(self.audioBufferQueueCount.value * 5)
+                let curBufMs: Double
+                if queueBufMs > 0 {
+                    curBufMs = queueBufMs
+                } else if self.isInternalAudioServing && self.serveTxPps > 0 {
+                    curBufMs = Double(self.bufferTargetMs) + Double(self.servePeakLevel * 5.0)
+                } else {
+                    curBufMs = 0.0
+                }
+                self.latencyMs = curBufMs
 
-            self.delayHistory.append(curBufMs)
-            if self.delayHistory.count > 60 {
-                self.delayHistory.removeFirst(self.delayHistory.count - 60)
-            }
+                self.delayHistory.append(curBufMs)
+                if self.delayHistory.count > 60 {
+                    self.delayHistory.removeFirst(self.delayHistory.count - 60)
+                }
 
-            self.rxPps = Int(curRx >= self.lastRxPpsCount ? (curRx - self.lastRxPpsCount) : 0) * 3
-            self.lastRxPpsCount = curRx
+                let now = Date()
+                let dt = max(0.001, now.timeIntervalSince(self.lastStatsCalcTime))
+                self.lastStatsCalcTime = now
+                let rxDelta = curRx >= self.lastRxPpsCount ? Double(curRx - self.lastRxPpsCount) : 0.0
+                self.rxPps = Int(round(rxDelta / dt))
+                self.lastRxPpsCount = curRx
 
-            self.serveTxPps = Int(curServeTx >= self.lastServePacketsCount ? (curServeTx - self.lastServePacketsCount) : 0) * 3
-            self.lastServePacketsCount = curServeTx
+                let serveDelta = curServeTx >= self.lastServePacketsCount ? Double(curServeTx - self.lastServePacketsCount) : 0.0
+                self.serveTxPps = Int(round(serveDelta / dt))
+                self.lastServePacketsCount = curServeTx
 
-            // Sync atomic underruns to published property
-            self.underrunCount = self.atomicUnderruns.value
+                self.packetsLostCount = curLost
 
-            if !self.connectedServerIp.isEmpty {
-                let stats: [String: Any] = [
-                    "type": "STATS",
-                    "buffer_ms": curBufMs,
-                    "target_ms": Double(self.bufferTargetMs),
-                    "underruns": self.underrunCount,
-                    "lost_packets": curLost,
-                    "late_packets": 0,
-                    "auto_mode": (self.bufferMode == "AUTO"),
-                    "rx_pps": self.rxPps,
-                    "active_codec": 0,
-                    "device": self.deviceName,
-                    "serving": self.isInternalAudioServing,
-                    "playing": self.isAudioPlaying,
-                    "serve_pps": self.serveTxPps,
-                    "platform": "ios",
-                    "force_pcm": true
-                ]
-                self.sendControlMessage(stats, toIp: self.connectedServerIp)
+                // Sync atomic underruns to published property
+                self.underrunCount = self.atomicUnderruns.value
+
+                if !self.connectedServerIp.isEmpty {
+                    let stats: [String: Any] = [
+                        "type": "STATS",
+                        "buffer_ms": curBufMs,
+                        "target_ms": Double(self.bufferTargetMs),
+                        "underruns": self.underrunCount,
+                        "lost_packets": curLost,
+                        "packet_loss_pct": self.packetLossPercent,
+                        "late_packets": 0,
+                        "auto_mode": (self.bufferMode == "AUTO"),
+                        "rx_pps": self.rxPps,
+                        "active_codec": 0,
+                        "codec": "PCM16",
+                        "device": self.deviceName,
+                        "serving": self.isInternalAudioServing,
+                        "playing": self.isAudioPlaying,
+                        "serve_pps": self.serveTxPps,
+                        "platform": "ios",
+                        "force_pcm": true
+                    ]
+                    self.sendControlMessage(stats, toIp: self.connectedServerIp)
+                }
             }
         }
     }
 
     private func stopStatsTimer() {
-        statsTimer?.invalidate()
-        statsTimer = nil
+        DispatchQueue.main.async {
+            self.statsTimer?.invalidate()
+            self.statsTimer = nil
+        }
     }
 
     // MARK: - Control Message Sending
@@ -1689,7 +1925,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
 
             let localBuildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
-            let localVersion = "1.0.0"
+            let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
 
             func parseSemver(_ v: String) -> (Int, Int, Int) {
                 let cleaned = v.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))

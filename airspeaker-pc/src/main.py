@@ -15,6 +15,15 @@ _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
+if "--version" in sys.argv or "-V" in sys.argv:
+    try:
+        from version import APP_VERSION, BUILD_SHA
+        sha_str = f" ({BUILD_SHA})" if BUILD_SHA and BUILD_SHA != "dev" else ""
+        print(f"Air Speaker PC v{APP_VERSION}{sha_str}")
+    except Exception:
+        print("Air Speaker PC v1.0.0")
+    sys.exit(0)
+
 import config as cfg_module
 
 # Set up logging first

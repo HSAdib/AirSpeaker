@@ -172,7 +172,8 @@ class OpusEncoder:
 
         # Apply settings
         self._ctl(OPUS_SET_BITRATE_REQUEST, bitrate)
-        self._ctl(OPUS_SET_COMPLEXITY_REQUEST, 10)
+        clamped_complexity = max(0, min(10, int(complexity)))
+        self._ctl(OPUS_SET_COMPLEXITY_REQUEST, clamped_complexity)
         self._ctl(OPUS_SET_INBAND_FEC_REQUEST, 1)
         self._ctl(OPUS_SET_PACKET_LOSS_PERC_REQUEST, 2)
         self._ctl(OPUS_SET_VBR_REQUEST, 1)             # Enable VBR

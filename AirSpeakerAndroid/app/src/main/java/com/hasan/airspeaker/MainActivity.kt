@@ -129,23 +129,62 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private fun joinPartyHost(ip: String, port: Int, hostLabel: String = ip) {
+        val cleanIp = ip.trim()
+        if (cleanIp.isEmpty()) return
+        showPartyScreen("JOIN")
+        binding.rbPartyJoin.isChecked = true
+        joinedHostIp = cleanIp
+        joinedHostPort = port
+        binding.etPcIp.setText(cleanIp)
+        ControlChannel.lastKnownPcIp = cleanIp
+        ControlChannel.partyPeerIps.clear()
+        ControlChannel.partyPeerLastSeen.clear()
+        AudioNative.nativeSetPartyPeers(emptyArray())
+        ControlChannel.isPartyJoinerActive = true
+        ControlChannel.sendPartyJoinAnnouncement(cleanIp)
+        lastJoinKeepAliveMs = SystemClock.elapsedRealtime()
+
+        isPartyJoinedActive = true
+        val isExtend = isPartyExtendedActive || binding.switchExtendParty.isChecked
+        ControlChannel.isExtendingParty = isExtend
+        ControlChannel.isHostingOrExtendingParty = isExtend
+        AudioNative.nativeSetPartyRelay(isExtend)
+        if (isExtend) {
+            AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+        }
+
+        binding.layoutPartyExtendCard.visibility = View.VISIBLE
+        binding.btnTogglePartyJoin.visibility = View.VISIBLE
+        binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
+        binding.tvPartyJoinStatus.text = "PARTY JOINER: Connected to $hostLabel ($cleanIp:$port) • Playing in sync"
+        binding.tvPartyJoinStatus.setTextColor(0xFF00FF00.toInt())
+
+        if (!AudioStreamService.isStreaming) {
+            lastServiceStartTimeMs = SystemClock.elapsedRealtime()
+            stopPreStreamDiscovery()
+            val intent = Intent(this, AudioStreamService::class.java).apply {
+                action = AudioStreamService.ACTION_START
+                putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
+                putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        }
+        refreshServiceButtonState()
+    }
+
     private val qrScannerLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
             val raw = result.data?.getStringExtra("SCAN_RESULT")?.trim().orEmpty()
             if (raw.isNotEmpty()) {
                 val (ip, port) = parseHostIpFromUri(raw)
                 if (ip.isNotEmpty()) {
-                    showPartyScreen("JOIN")
-                    binding.rbPartyJoin.isChecked = true
-                    joinedHostIp = ip
-                    joinedHostPort = port
-                    binding.tvPartyJoinStatus.text = "PARTY JOINER: Connecting to $ip:$port..."
                     Toast.makeText(this, "Party Host: $ip:$port — Connecting...", Toast.LENGTH_SHORT).show()
-                    if (!AudioStreamService.isStreaming) {
-                        binding.btnTogglePartyJoin.performClick()
-                    } else {
-                        ControlChannel.sendPartyJoinAnnouncement(ip)
-                    }
+                    joinPartyHost(ip, port)
                 }
             }
         }
@@ -225,7 +264,7 @@ class MainActivity : AppCompatActivity() {
           click [ ▶ START SPEAKER STREAM ] on PC.
         * Plays low-latency wireless audio from your computer.
         * Default codec: Lossless PCM16 48 kHz stereo (5 ms frames).
-        * Target buffer slider: 10 ms to 150 ms (Prebuffer safety).
+        * Target buffer slider: 10 ms to 200 ms (Prebuffer safety).
         * Live latency, packet loss, and jitter telemetry graph.
 
         2. [ SERVE ] TAB (PHONE INTERNAL AUDIO -> PC)
@@ -326,27 +365,39 @@ class MainActivity : AppCompatActivity() {
         val clamped = quantizeTarget(qVal)
         val textStr = if (clamped % 1f == 0f) "${clamped.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", clamped)
 
-        val sliders = listOf(
+        val sliders = listOfNotNull(
             binding.sliderTargetBuffer,
             binding.sliderServeTargetBuffer,
-            binding.sliderPartyHostTargetBuffer
+            binding.sliderPartyHostTargetBuffer,
+            binding.sliderTargetBufferPartyJoin
         )
         for (s in sliders) {
-            if (s !== fromSlider && kotlin.math.abs(s.value - clamped) > 0.1f) {
-                s.value = clamped
+            if (s !== fromSlider) {
+                try {
+                    val step = if (s.stepSize > 0f) s.stepSize else 2.5f
+                    val bounded = clamped.coerceIn(s.valueFrom, s.valueTo)
+                    val snapped = (s.valueFrom + kotlin.math.round((bounded - s.valueFrom) / step) * step)
+                        .coerceIn(s.valueFrom, s.valueTo)
+                    if (kotlin.math.abs(s.value - snapped) > 0.1f) {
+                        s.value = snapped
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Slider sync skipped: ${e.message}")
+                }
             }
         }
         binding.tvTargetBufferValue.text = textStr
         binding.tvServeTargetBufferValue.text = textStr
         binding.tvPartyHostTargetBufferValue.text = textStr
+        binding.tvTargetBufferPartyJoin.text = textStr
     }
 
     private fun syncAllBufferModeRadioGroups(mode: String) {
-        val lowBtns = listOf(binding.rbBufLow, binding.rbServeBufLow, binding.rbPartyHostBufLow)
-        val medBtns = listOf(binding.rbBufMed, binding.rbServeBufMed, binding.rbPartyHostBufMed)
-        val highBtns = listOf(binding.rbBufHigh, binding.rbServeBufHigh, binding.rbPartyHostBufHigh)
-        val autoBtns = listOf(binding.rbBufAuto, binding.rbServeBufAuto, binding.rbPartyHostBufAuto)
-        val customBtns = listOf(binding.rbBufCustom, binding.rbServeBufCustom, binding.rbPartyHostBufCustom)
+        val lowBtns = listOfNotNull(binding.rbBufLow, binding.rbServeBufLow, binding.rbPartyHostBufLow, binding.rbPartyJoinLow)
+        val medBtns = listOfNotNull(binding.rbBufMed, binding.rbServeBufMed, binding.rbPartyHostBufMed, binding.rbPartyJoinMed)
+        val highBtns = listOfNotNull(binding.rbBufHigh, binding.rbServeBufHigh, binding.rbPartyHostBufHigh, binding.rbPartyJoinHigh)
+        val autoBtns = listOfNotNull(binding.rbBufAuto, binding.rbServeBufAuto, binding.rbPartyHostBufAuto, binding.rbPartyJoinAuto)
+        val customBtns = listOfNotNull(binding.rbBufCustom, binding.rbServeBufCustom, binding.rbPartyHostBufCustom, binding.rbPartyJoinCustom)
 
         when (mode) {
             "LOW" -> lowBtns.forEach { if (!it.isChecked) it.isChecked = true }
@@ -407,6 +458,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnEqualizerPlay.text = formatLabel("play", "PLAY EQUALIZER")
         binding.btnEqualizerServe.text = formatLabel("serve", "SERVE EQUALIZER & PRESETS")
         binding.btnEqualizerPartyHost.text = formatLabel("party_host", "PARTY HOST EQUALIZER & PRESETS")
+        binding.btnEqualizerPartyJoin.text = formatLabel("party_join", "PARTY JOIN EQUALIZER & PRESETS")
         val uEn = prefs.getBoolean("universal_enabled", false)
         val uPr = prefs.getString("universal_preset", "Flat") ?: "Flat"
         binding.btnEqualizerUniversal.text = if (uEn) "[ 🎛️ UNIVERSAL 5-BAND EQUALIZER: ON ($uPr) ]" else "[ 🎛️ OPEN UNIVERSAL 5-BAND EQUALIZER & PRESETS ]"
@@ -570,8 +622,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        var isInitialSelection = true
         spinnerPresets.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (isInitialSelection) {
+                    isInitialSelection = false
+                    return
+                }
                 if (isUpdatingUi) return
                 val selectedName = allPresetNames[position]
                 if (selectedName == "Custom") {
@@ -633,7 +690,11 @@ class MainActivity : AppCompatActivity() {
                             allPresetNames.add(allPresetNames.size - 1, name)
                             (spinnerPresets.adapter as ArrayAdapter<String>).notifyDataSetChanged()
                         }
+                        currentPreset = name
+                        isUpdatingUi = true
                         spinnerPresets.setSelection(allPresetNames.indexOf(name))
+                        isUpdatingUi = false
+                        saveDialogState()
                         Toast.makeText(this, "Saved preset '$name'", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -706,6 +767,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        ControlChannel.onPartyKicked = { reason ->
+            runOnUiThread {
+                if (isPartyJoinedActive) {
+                    ControlChannel.sendPartyLeaveAnnouncement(joinedHostIp)
+                    ControlChannel.isPartyJoinerActive = false
+                    joinedHostIp = ""
+                    isPartyJoinedActive = false
+                    isPartyExtendedActive = false
+                    ControlChannel.isHostingOrExtendingParty = false
+                    ControlChannel.isExtendingParty = false
+                    AudioNative.nativeSetPartyRelay(false)
+                    binding.switchExtendParty.isChecked = false
+                    binding.layoutPartyExtendCard.visibility = View.GONE
+                    binding.layoutExtendDetails.visibility = View.GONE
+                    binding.btnTogglePartyJoin.visibility = View.GONE
+                    binding.tvPartyJoinStatus.text = "PARTY JOINER: Standby ($reason)"
+                    if (AudioStreamService.isStreaming) {
+                        val intent = Intent(this, AudioStreamService::class.java).apply {
+                            action = AudioStreamService.ACTION_STOP
+                        }
+                        startService(intent)
+                    }
+                    Toast.makeText(this, "Party Host: $reason", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
         setupTabs()
         setupUI()
         checkPermissions()
@@ -762,6 +850,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         ControlChannel.onPartyHostDiscovered = null
+        ControlChannel.onPartyKicked = null
         stopPreStreamDiscovery()
     }
 
@@ -893,16 +982,8 @@ class MainActivity : AppCompatActivity() {
                 if (entered.isNotEmpty()) {
                     val (ip, port) = parseHostIpFromUri(entered)
                     if (ip.isNotEmpty()) {
-                        showPartyScreen("JOIN")
-                        joinedHostIp = ip
-                        joinedHostPort = port
-                        binding.tvPartyJoinStatus.text = "PARTY JOINER: Selected host $ip:$port"
                         Toast.makeText(this, "Set Party Host: $ip:$port", Toast.LENGTH_SHORT).show()
-                        if (!AudioStreamService.isStreaming) {
-                            binding.btnTogglePartyJoin.performClick()
-                        } else {
-                            ControlChannel.sendPartyJoinAnnouncement(ip)
-                        }
+                        joinPartyHost(ip, port)
                     }
                 }
             }
@@ -1017,15 +1098,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 layoutParams = params
                 setOnClickListener {
-                    joinedHostIp = h.ip
-                    joinedHostPort = h.port
                     Toast.makeText(this@MainActivity, "Joining Host: ${h.name} (${h.ip})", Toast.LENGTH_SHORT).show()
-                    binding.tvPartyJoinStatus.text = "PARTY JOINER: Connecting to ${h.name} (${h.ip}:${h.port})..."
-                    if (!AudioStreamService.isStreaming) {
-                        binding.btnTogglePartyJoin.performClick()
-                    } else {
-                        ControlChannel.sendPartyJoinAnnouncement(h.ip)
-                    }
+                    joinPartyHost(h.ip, h.port, h.name)
                 }
             }
             binding.layoutDiscoveredHostsList.addView(btn)
@@ -1154,43 +1228,43 @@ class MainActivity : AppCompatActivity() {
         binding.sliderTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
         binding.sliderServeTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
         binding.sliderPartyHostTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
+        binding.sliderTargetBufferPartyJoin.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
 
-        // Buffer presets radio groups (synchronized across PLAY, SERVE, and PARTY HOST)
+        // Buffer presets radio groups (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
         var updatingBufferGroups = false
         val setupBufferGroup: (android.widget.RadioGroup, Int, Int, Int, Int, Int) -> Unit = { group, lowId, medId, highId, autoId, customId ->
             group.setOnCheckedChangeListener { _, checkedId ->
                 if (updatingBufferGroups) return@setOnCheckedChangeListener
                 updatingBufferGroups = true
                 try {
-                    when (checkedId) {
-                        lowId -> {
-                            AudioNative.nativeSetTargetBufferMs(20f)
-                            AudioNative.nativeSetAutoMode(false)
-                            syncAllTargetBufferSliders(20f)
-                            syncAllBufferModeRadioGroups("LOW")
-                        }
-                        medId -> {
-                            AudioNative.nativeSetTargetBufferMs(40f)
-                            AudioNative.nativeSetAutoMode(false)
-                            syncAllTargetBufferSliders(40f)
-                            syncAllBufferModeRadioGroups("MEDIUM")
-                        }
-                        highId -> {
-                            AudioNative.nativeSetTargetBufferMs(80f)
-                            AudioNative.nativeSetAutoMode(false)
-                            syncAllTargetBufferSliders(80f)
-                            syncAllBufferModeRadioGroups("HIGH")
-                        }
-                        autoId -> {
-                            AudioNative.nativeSetAutoMode(true)
-                            syncAllBufferModeRadioGroups("AUTO")
-                        }
-                        customId -> {
-                            AudioNative.nativeSetAutoMode(false)
-                            syncAllBufferModeRadioGroups("CUSTOM")
-                        }
+                    val mode = when (checkedId) {
+                        lowId -> "LOW"
+                        medId -> "MEDIUM"
+                        highId -> "HIGH"
+                        autoId -> "AUTO"
+                        else -> "CUSTOM"
                     }
+                    syncAllBufferModeRadioGroups(mode)
                     if (!suppressSync) {
+                        when (mode) {
+                            "LOW" -> {
+                                AudioNative.nativeSetTargetBufferMs(20f)
+                                AudioNative.nativeSetAutoMode(false)
+                                syncAllTargetBufferSliders(20f)
+                            }
+                            "MEDIUM" -> {
+                                AudioNative.nativeSetTargetBufferMs(40f)
+                                AudioNative.nativeSetAutoMode(false)
+                                syncAllTargetBufferSliders(40f)
+                            }
+                            "HIGH" -> {
+                                AudioNative.nativeSetTargetBufferMs(80f)
+                                AudioNative.nativeSetAutoMode(false)
+                                syncAllTargetBufferSliders(80f)
+                            }
+                            "AUTO" -> AudioNative.nativeSetAutoMode(true)
+                            "CUSTOM" -> AudioNative.nativeSetAutoMode(false)
+                        }
                         binding.rbProfileCustom.isChecked = true
                         onLocalSettingChanged()
                     }
@@ -1203,6 +1277,7 @@ class MainActivity : AppCompatActivity() {
         setupBufferGroup(binding.rgBufferMode, R.id.rbBufLow, R.id.rbBufMed, R.id.rbBufHigh, R.id.rbBufAuto, R.id.rbBufCustom)
         setupBufferGroup(binding.rgServeBufferMode, R.id.rbServeBufLow, R.id.rbServeBufMed, R.id.rbServeBufHigh, R.id.rbServeBufAuto, R.id.rbServeBufCustom)
         setupBufferGroup(binding.rgPartyHostBufferMode, R.id.rbPartyHostBufLow, R.id.rbPartyHostBufMed, R.id.rbPartyHostBufHigh, R.id.rbPartyHostBufAuto, R.id.rbPartyHostBufCustom)
+        setupBufferGroup(binding.rgBufferModePartyJoin, R.id.rbPartyJoinLow, R.id.rbPartyJoinMed, R.id.rbPartyJoinHigh, R.id.rbPartyJoinAuto, R.id.rbPartyJoinCustom)
 
         // Audio Profile / Focus radio group
         binding.rgAudioProfile.setOnCheckedChangeListener { _, checkedId ->
@@ -1274,6 +1349,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnEqualizerPlay.setOnClickListener { showEqualizerDialog("play", "Play Equalizer") }
         binding.btnEqualizerServe.setOnClickListener { showEqualizerDialog("serve", "Serve Outbound Equalizer") }
         binding.btnEqualizerPartyHost.setOnClickListener { showEqualizerDialog("party_host", "Party Host Broadcast Equalizer") }
+        binding.btnEqualizerPartyJoin.setOnClickListener { showEqualizerDialog("party_join", "Party Join Equalizer") }
         binding.btnEqualizerUniversal.setOnClickListener { showEqualizerDialog("universal", "Universal Device Equalizer") }
 
         val eqPrefs = getSharedPreferences("AirSpeakerEQ", MODE_PRIVATE)
@@ -1281,11 +1357,15 @@ class MainActivity : AppCompatActivity() {
         binding.cbUniversalEqPlayJoin.isChecked = eqPrefs.getBoolean("universal_apply_rx", false)
 
         binding.cbUniversalEqServeHost.setOnCheckedChangeListener { _, isChecked ->
-            eqPrefs.edit().putBoolean("universal_apply_tx", isChecked).apply()
+            val ed = eqPrefs.edit().putBoolean("universal_apply_tx", isChecked)
+            if (isChecked) ed.putBoolean("universal_enabled", true)
+            ed.apply()
             applyEffectiveEqualizerState()
         }
         binding.cbUniversalEqPlayJoin.setOnCheckedChangeListener { _, isChecked ->
-            eqPrefs.edit().putBoolean("universal_apply_rx", isChecked).apply()
+            val ed = eqPrefs.edit().putBoolean("universal_apply_rx", isChecked)
+            if (isChecked) ed.putBoolean("universal_enabled", true)
+            ed.apply()
             applyEffectiveEqualizerState()
         }
 
@@ -1299,13 +1379,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
         binding.sliderGain.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
-                val isPartyJoin = (partyModeScreen == "JOIN") || binding.rbPartyJoin.isChecked || isPartyJoinedActive
-                if (isPartyJoin) {
-                    AudioNative.nativeSetVolumeGain(value)
-                } else {
-                    // PC UDPSender applies the stream gain relative to phone's hardware volume
-                    AudioNative.nativeSetVolumeGain(1.0f)
-                }
+                AudioStreamService.setUserVolumeGain(value)
                 binding.tvGainValue.text = "${(value * 100).toInt()}%"
                 onLocalSettingChanged()
             }
@@ -1349,20 +1423,35 @@ class MainActivity : AppCompatActivity() {
             onLocalSettingChanged()
         }
 
-        // Serve tab settings & listeners
+        // Serve tab settings & listeners: locked to PCM16
+        binding.rbServeCodecPcm16.isChecked = true
+        binding.rbServeCodecOpus.isEnabled = false
+        binding.rbServeCodecOpus.alpha = 0.45f
+        binding.spinnerServeBitrate.isEnabled = false
+        binding.spinnerServeBitrate.alpha = 0.45f
+
         binding.rgServeSoundMode.setOnCheckedChangeListener { _, checkedId ->
-            if (checkedId == R.id.rbServeGaming) {
-                AudioNative.nativeSetTargetBufferMs(20.0f)
-            } else if (checkedId == R.id.rbServeQuality) {
-                AudioNative.nativeSetTargetBufferMs(80.0f)
-            } else if (checkedId == R.id.rbServeBalanced) {
-                AudioNative.nativeSetTargetBufferMs(40.0f)
+            val (frameMs, targetBufferMs) = when (checkedId) {
+                R.id.rbServeGaming -> 5 to 20
+                R.id.rbServeBalanced -> 10 to 40
+                else -> 20 to 80
             }
-        }
-        binding.rgServeCodec.setOnCheckedChangeListener { _, checkedId ->
-            val isOpus = (checkedId == R.id.rbServeCodecOpus)
-            binding.spinnerServeBitrate.isEnabled = isOpus
-            binding.spinnerServeBitrate.alpha = if (isOpus) 1.0f else 0.45f
+            getSharedPreferences("AirSpeakerPrefs", MODE_PRIVATE).edit()
+                .putInt("serve_frame_ms", frameMs)
+                .putInt("target_buffer_ms", targetBufferMs)
+                .apply()
+            getSharedPreferences("airspeaker_prefs", MODE_PRIVATE).edit()
+                .putInt("serve_frame_ms", frameMs)
+                .putInt("target_buffer_ms", targetBufferMs)
+                .apply()
+            AudioNative.nativeSetTargetBufferMs(targetBufferMs.toFloat())
+            binding.sliderTargetBuffer.value = targetBufferMs.toFloat()
+            binding.tvTargetBufferValue.text = "$targetBufferMs ms"
+            binding.sliderPartyHostBuffer.value = targetBufferMs.toFloat()
+            binding.tvPartyHostTargetBufferValue.text = "$targetBufferMs ms"
+            if (!suppressSync) {
+                onLocalSettingChanged()
+            }
         }
         val serveBitrates = listOf("64", "96", "128", "192", "256", "320")
         binding.spinnerServeBitrate.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, serveBitrates)
@@ -1417,6 +1506,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnPartyJoinBack.setOnClickListener {
             if (isPartyJoinedActive) {
                 ControlChannel.sendPartyLeaveAnnouncement(joinedHostIp)
+                ControlChannel.isPartyJoinerActive = false
             }
             if (AudioStreamService.isStreaming && partyModeScreen == "JOIN") {
                 val intent = Intent(this, AudioStreamService::class.java).apply {
@@ -1481,6 +1571,14 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Refreshed Host IP & QR Code", Toast.LENGTH_SHORT).show()
         }
 
+        binding.cbPartyBroadcastInternal.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                binding.tvPartyHostModeHint.text = "Internal audio mode: capturing and broadcasting this phone's playback."
+            } else {
+                binding.tvPartyHostModeHint.text = "Relay mode: stream from PC to this phone's IP to feed the party."
+            }
+        }
+
         binding.btnTogglePartyHost.setOnClickListener {
             if (isPartyHostBroadcastActive) {
                 isPartyHostBroadcastActive = false
@@ -1491,6 +1589,12 @@ class MainActivity : AppCompatActivity() {
                 if (AudioStreamService.isStreaming) {
                     val intent = Intent(this, AudioStreamService::class.java).apply {
                         action = AudioStreamService.ACTION_STOP
+                    }
+                    startService(intent)
+                }
+                if (AudioStreamService.isServing) {
+                    val intent = Intent(this, AudioStreamService::class.java).apply {
+                        action = AudioStreamService.ACTION_STOP_SERVE
                     }
                     startService(intent)
                 }
@@ -1505,7 +1609,14 @@ class MainActivity : AppCompatActivity() {
                 AudioNative.nativeSetPartyRelay(true)
                 AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 ControlChannel.sendPreStreamBeacon()
+                if (binding.cbPartyBroadcastInternal.isChecked) {
+                    if (!AudioStreamService.isServing) {
+                        toggleServing()
+                    }
+                }
                 if (!AudioStreamService.isStreaming) {
+                    lastServiceStartTimeMs = SystemClock.elapsedRealtime()
+                    stopPreStreamDiscovery()
                     val intent = Intent(this, AudioStreamService::class.java).apply {
                         action = AudioStreamService.ACTION_START
                         putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
@@ -1528,6 +1639,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnTogglePartyJoin.setOnClickListener {
             if (isPartyJoinedActive || AudioStreamService.isStreaming) {
                 ControlChannel.sendPartyLeaveAnnouncement(joinedHostIp)
+                ControlChannel.isPartyJoinerActive = false
                 joinedHostIp = ""
                 isPartyJoinedActive = false
                 isPartyExtendedActive = false
@@ -1561,6 +1673,7 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.lastKnownPcIp = joinedHostIp
                 ControlChannel.partyPeerIps.clear()
                 AudioNative.nativeSetPartyPeers(emptyArray())
+                ControlChannel.isPartyJoinerActive = true
                 ControlChannel.sendPartyJoinAnnouncement(joinedHostIp)
                 lastJoinKeepAliveMs = SystemClock.elapsedRealtime()
 
@@ -1578,6 +1691,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Connected to $joinedHostIp:$joinedHostPort • Playing in sync"
 
+                lastServiceStartTimeMs = SystemClock.elapsedRealtime()
                 stopPreStreamDiscovery()
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_START
@@ -1707,6 +1821,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnClearPartyPeers.setOnClickListener {
             ControlChannel.partyPeerIps.clear()
+            ControlChannel.partyPeerLastSeen.clear()
             AudioNative.nativeSetPartyPeers(emptyArray())
             updateStatsUI()
         }
@@ -1852,6 +1967,7 @@ class MainActivity : AppCompatActivity() {
         localRev++
         val syncId = (System.currentTimeMillis() and 0x7FFFFFFF).toInt()
         lastSyncId = syncId
+        AudioStreamService.markLocalConfigSent(localRev, syncId)
         binding.tvSyncRev.text = "REV: $localRev"
         updateExpectedDelayUI()
 
@@ -1973,12 +2089,7 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     Log.w("AirSpeaker", "Could not set sliderGain value: ${e.message}")
                 }
-                val isPartyJoin = (partyModeScreen == "JOIN") || binding.rbPartyJoin.isChecked || isPartyJoinedActive
-                if (isPartyJoin) {
-                    AudioNative.nativeSetVolumeGain(g)
-                } else {
-                    AudioNative.nativeSetVolumeGain(1.0f)
-                }
+                AudioStreamService.setUserVolumeGain(g)
             }
             if (json.has("muted")) {
                 val m = json.getBoolean("muted")
@@ -2171,6 +2282,8 @@ class MainActivity : AppCompatActivity() {
                 0f
             }
             binding.latencyGraphServe.pushSample(activeServeBuf, target, estTotal.toFloat())
+            binding.latencyGraphPartyHost.pushSample(activeServeBuf, target, estTotal.toFloat())
+            binding.latencyGraphPartyJoin.pushSample(safeBuffer, target, estTotal.toFloat())
 
             binding.tvBufferLevel.text = String.format("%.1f ms", safeBuffer)
             val targetText = if (target % 1f == 0f) "${target.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", target)
@@ -2294,11 +2407,13 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Update Joiner status
-            if (AudioStreamService.isStreaming && isPartyJoinedActive) {
+            val joinStarting = (SystemClock.elapsedRealtime() - lastServiceStartTimeMs) < 2000L
+            if (isPartyJoinedActive && (AudioStreamService.isStreaming || joinStarting)) {
                 val hIp = if (joinedHostIp.isNotEmpty()) joinedHostIp else displayIp
                 val extSuffix = if (isExtend) " • Re-broadcasting to extended peers" else ""
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Connected to $hIp:$joinedHostPort • Playing host sound in sync$extSuffix"
                 binding.tvPartyJoinStatus.setTextColor(0xFF00FF00.toInt())
+                binding.layoutPartyExtendCard.visibility = View.VISIBLE
                 binding.btnTogglePartyJoin.visibility = View.VISIBLE
                 binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
             } else {

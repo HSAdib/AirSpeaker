@@ -58,6 +58,29 @@ class AudioStreamService : Service() {
 
         var activeControlChannel: ControlChannel? = null
             private set
+
+        var instance: AudioStreamService? = null
+            private set
+
+        fun setUserVolumeGain(gain: Float) {
+            val clamped = gain.coerceIn(0f, 2f)
+            instance?.savedVolumeGain = clamped
+            AudioNative.nativeSetVolumeGain(clamped)
+        }
+
+        private var lastServiceConfigRev = 0
+        private val seenServiceSyncIds = ArrayDeque<Int>(32)
+
+        @Synchronized
+        fun markLocalConfigSent(rev: Int, syncId: Int) {
+            if (rev > lastServiceConfigRev) {
+                lastServiceConfigRev = rev
+            }
+            if (seenServiceSyncIds.size >= 32) {
+                seenServiceSyncIds.removeFirst()
+            }
+            seenServiceSyncIds.addLast(syncId)
+        }
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -110,6 +133,7 @@ class AudioStreamService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Log.d(TAG, "AudioStreamService.onCreate")
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
@@ -128,6 +152,7 @@ class AudioStreamService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "AudioStreamService.onDestroy")
+        serviceHandler.removeCallbacksAndMessages(null)
         try {
             unregisterReceiver(noisyReceiver)
         } catch (_: Exception) {}
@@ -141,6 +166,7 @@ class AudioStreamService : Service() {
         } catch (_: Exception) {}
         loudnessEnhancer = null
         lastAttachedSessionId = 0
+        instance = null
 
         super.onDestroy()
     }
@@ -236,6 +262,7 @@ class AudioStreamService : Service() {
 
         val lowLatency = (audioOutputEngine == "OBOE_LOW_LATENCY" && !enableAudioEffects)
         AudioNative.nativeSetLowLatencyMode(lowLatency)
+        AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
 
         val started = AudioNative.nativeStart(5004)
         Log.d(TAG, "nativeStart result: $started")
@@ -293,6 +320,10 @@ class AudioStreamService : Service() {
             return
         }
 
+        if (isServing || internalStreamer != null) {
+            stopServingInternalAudio()
+        }
+
         ensureControlChannel()
         if (!targetIp.isNullOrBlank()) {
             activeControlChannel?.setActivePcIp(targetIp)
@@ -344,7 +375,7 @@ class AudioStreamService : Service() {
             internalAudioStreamerInstance = internalStreamer
         }
 
-        val ok = internalStreamer!!.start(projection, ip)
+        val ok = internalStreamer!!.start(projection, ip, this)
         if (!ok) {
             Log.e(TAG, "InternalAudioStreamer failed to start")
             serviceHandler.post {
@@ -405,14 +436,43 @@ class AudioStreamService : Service() {
             activeControlChannel = ControlChannel(
                 audioPort = 5004,
                 controlPort = 5005,
-                onConfigSyncReceived = { configJson -> handleConfigSync(configJson) }
+                onConfigSyncReceived = { configJson -> handleConfigSync(configJson) },
+                onPartyKicked = { reason -> handlePartyKicked(reason) }
             )
             activeControlChannel?.start()
         }
     }
 
+    private fun handlePartyKicked(reason: String) {
+        serviceHandler.post {
+            ControlChannel.sendPartyLeaveAnnouncement(activeControlChannel?.getActivePcIp())
+            ControlChannel.isPartyJoinerActive = false
+            AudioNative.nativeSetPartyRelay(false)
+            ControlChannel.isHostingOrExtendingParty = false
+            ControlChannel.isExtendingParty = false
+            stopStreaming()
+            notifyStateChanged()
+            android.widget.Toast.makeText(this, "Party Host: $reason", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun handleConfigSync(json: JSONObject) {
         try {
+            val incomingRev = json.optInt("rev", 0)
+            val incomingSyncId = if (json.has("sync_id")) json.getInt("sync_id") else null
+
+            synchronized(AudioStreamService::class.java) {
+                if (incomingSyncId != null) {
+                    if (seenServiceSyncIds.contains(incomingSyncId)) return
+                    if (incomingRev < lastServiceConfigRev) return
+                    if (seenServiceSyncIds.size >= 32) seenServiceSyncIds.removeFirst()
+                    seenServiceSyncIds.addLast(incomingSyncId)
+                } else if (incomingRev <= lastServiceConfigRev) {
+                    return
+                }
+                lastServiceConfigRev = maxOf(lastServiceConfigRev, incomingRev) + 1
+            }
+
             sendBroadcast(
                 Intent(ACTION_CONFIG_SYNC_RECEIVED)
                     .setPackage(packageName)
@@ -427,7 +487,7 @@ class AudioStreamService : Service() {
             }
             if (json.has("volume_gain")) {
                 savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                AudioNative.nativeSetVolumeGain(1.0f)
+                AudioNative.nativeSetVolumeGain(savedVolumeGain)
             }
             if (json.has("muted")) {
                 userMuted = json.getBoolean("muted")
@@ -447,6 +507,8 @@ class AudioStreamService : Service() {
             if (json.has("stop_on_headset_disconnect")) {
                 stopOnHeadsetDisconnect = json.getBoolean("stop_on_headset_disconnect")
             }
+            val oldEngine = audioOutputEngine
+            val oldFx = enableAudioEffects
             if (json.has("audio_output_engine")) {
                 audioOutputEngine = json.getString("audio_output_engine")
             }
@@ -455,8 +517,11 @@ class AudioStreamService : Service() {
             }
             val lowLatency = (audioOutputEngine == "OBOE_LOW_LATENCY" && !enableAudioEffects)
             AudioNative.nativeSetLowLatencyMode(lowLatency)
-            updateAudioEffects()
-            serviceHandler.postDelayed({ updateAudioEffects() }, 280L)
+            AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
+            if (oldEngine != audioOutputEngine || oldFx != enableAudioEffects) {
+                updateAudioEffects()
+                serviceHandler.postDelayed({ updateAudioEffects() }, 280L)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error applying CONFIG_SYNC in service", e)
         }
@@ -546,12 +611,12 @@ class AudioStreamService : Service() {
                             }
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                                 if (exclusiveAudioMode == "EXCLUSIVE") {
-                                    AudioNative.nativeSetVolumeGain(0.25f)
+                                    AudioNative.nativeSetVolumeGain(savedVolumeGain * 0.25f)
                                 }
                             }
                             AudioManager.AUDIOFOCUS_GAIN -> {
                                 pausedByFocus = false
-                                AudioNative.nativeSetVolumeGain(1.0f)
+                                AudioNative.nativeSetVolumeGain(savedVolumeGain)
                                 applyEffectiveMuteAndGain()
                             }
                         }

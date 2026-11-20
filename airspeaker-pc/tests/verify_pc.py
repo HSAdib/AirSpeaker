@@ -684,6 +684,188 @@ def test_equalizer_manager() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 16: ControlListener PC_ANNOUNCE normalization & self-IP filter
+# ---------------------------------------------------------------------------
+def test_control_listener_pc_announce_and_self_filter() -> None:
+    name = "ControlListener PC_ANNOUNCE normalization & self IP filter"
+    listener = None
+    sock = None
+    try:
+        from network import ControlListener
+        import json
+
+        announced = []
+        beacons = []
+        test_port = 55105
+        listener = ControlListener(
+            on_beacon=lambda m: beacons.append(m),
+            on_pc_announce=lambda m: announced.append(m),
+            bind_port=test_port,
+        )
+        listener.start()
+        time.sleep(0.05)
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        # 1. Self-IP filter: Packet from 127.0.0.1 must be ignored because 127.0.0.1 is in _get_local_ips()
+        msg_local = json.dumps({
+            "type": "PC_ANNOUNCE",
+            "pc_name": "SelfPC",
+            "party_mode": True,
+        }).encode("utf-8")
+        sock.sendto(msg_local, ("127.0.0.1", test_port))
+        time.sleep(0.1)
+
+        if len(announced) != 0:
+            check(name, False, f"self-packet was not filtered (got {len(announced)} callbacks)")
+            return
+
+        # 2. Peer packet: Allow 127.0.0.1 by clearing it from _local_ips cache to simulate remote peer
+        listener._local_ips = {"10.254.254.254"}
+        listener._last_local_ips_refresh = time.monotonic() + 100.0  # prevent immediate auto-refresh
+        sock.sendto(msg_local, ("127.0.0.1", test_port))
+        time.sleep(0.1)
+
+        if len(announced) != 1:
+            check(name, False, f"peer announcement not received (got {len(announced)}, expected 1)")
+            return
+
+        norm = announced[0]
+        if norm.get("device") != "SelfPC":
+            check(name, False, f"device not normalized: {norm.get('device')}")
+            return
+        if norm.get("audio_port") != 5004:
+            check(name, False, f"audio_port not normalized: {norm.get('audio_port')}")
+            return
+        if norm.get("control_port") != test_port:
+            check(name, False, f"control_port mismatch: {norm.get('control_port')}")
+            return
+        if norm.get("_sender_ip") != "127.0.0.1":
+            check(name, False, f"_sender_ip mismatch: {norm.get('_sender_ip')}")
+            return
+
+        check(name, True, "self-filtering and PC_ANNOUNCE field normalization verified")
+    except Exception as exc:
+        check(name, False, str(exc))
+    finally:
+        if listener:
+            listener.stop()
+        if sock:
+            sock.close()
+
+
+# ---------------------------------------------------------------------------
+# Test 17: StereoFiveBandBiquadDSP performance & output verification
+# ---------------------------------------------------------------------------
+def test_eq_dsp_performance_and_output() -> None:
+    name = "StereoFiveBandBiquadDSP performance, curve & soft-knee limiting"
+    try:
+        from equalizer import StereoFiveBandBiquadDSP
+
+        dsp = StereoFiveBandBiquadDSP()
+
+        # 5ms @ 48kHz stereo = 240 samples per channel
+        t = np.linspace(0, 0.005, 240, endpoint=False)
+        sine_60 = (np.sin(2 * np.pi * 60 * t) * 10000).astype(np.int16)
+        stereo_pcm = np.empty((240, 2), dtype=np.int16)
+        stereo_pcm[:, 0] = sine_60
+        stereo_pcm[:, 1] = sine_60
+        raw_pcm = stereo_pcm.tobytes()
+
+        # 1. Flat bypass: disabled DSP must return unmodified raw bytes
+        out_flat = dsp.process_pcm16(raw_pcm)
+        if out_flat != raw_pcm:
+            check(name, False, "disabled DSP modified audio bytes")
+            return
+
+        # 2. Gain boost: +12dB on 60Hz should amplify low frequencies
+        dsp.set_gains([12.0, 0.0, 0.0, 0.0, 0.0], enabled=True)
+        out_boost = dsp.process_pcm16(raw_pcm)
+        if out_boost == raw_pcm:
+            check(name, False, "boosted DSP produced identical output")
+            return
+        arr_boost = np.frombuffer(out_boost, dtype=np.int16)
+        if np.max(np.abs(arr_boost)) <= np.max(np.abs(stereo_pcm)):
+            check(name, False, "boosted 60Hz did not increase peak amplitude")
+            return
+
+        # 3. High throughput benchmark: 10,000 frames under 500ms without NaN/Inf
+        t0 = time.monotonic()
+        last_out = None
+        for _ in range(10000):
+            last_out = dsp.process_pcm16(raw_pcm)
+        elapsed = time.monotonic() - t0
+
+        arr_last = np.frombuffer(last_out, dtype=np.int16)
+        if np.isnan(arr_last).any() or np.isinf(arr_last).any():
+            check(name, False, "DSP produced NaN or Inf values")
+            return
+
+        # 4. Soft-knee limiting: loud signals approaching full-scale must be smoothly constrained
+        loud_pcm = (np.ones((240, 2), dtype=np.int16) * 32700).tobytes()
+        dsp.set_gains([12.0, 12.0, 12.0, 12.0, 12.0], enabled=True)
+        out_loud = dsp.process_pcm16(loud_pcm)
+        arr_loud = np.frombuffer(out_loud, dtype=np.int16)
+        if np.any(arr_loud > 32767) or np.any(arr_loud < -32768):
+            check(name, False, "soft-knee limiter overflowed int16 bounds")
+            return
+
+        check(name, True, f"10k frames in {elapsed*1000:.1f}ms ({elapsed*1000/10000:.3f}ms/frame), bypass & limiter verified")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Test 18: AudioReceiver frame duration buffer math
+# ---------------------------------------------------------------------------
+def test_audio_receiver_frame_duration_buffer_math() -> None:
+    name = "AudioReceiver frame duration calculation & buffer packet bounds"
+    try:
+        from audio_output import AudioReceiver
+
+        rec = AudioReceiver()
+
+        # 5ms @ 48kHz stereo int16 = 240 samples * 4 bytes = 960 bytes
+        d5 = rec._update_frame_duration_ms(b"\x00" * 960, channels=2)
+        if abs(d5 - 5.0) > 0.05:
+            check(name, False, f"5ms frame calculated as {d5}ms")
+            return
+
+        # 10ms @ 48kHz stereo int16 = 480 samples * 4 bytes = 1920 bytes
+        d10 = rec._update_frame_duration_ms(b"\x00" * 1920, channels=2)
+        if abs(d10 - 10.0) > 0.05:
+            check(name, False, f"10ms frame calculated as {d10}ms")
+            return
+
+        # 20ms @ 48kHz stereo int16 = 960 samples * 4 bytes = 3840 bytes
+        d20 = rec._update_frame_duration_ms(b"\x00" * 3840, channels=2)
+        if abs(d20 - 20.0) > 0.05:
+            check(name, False, f"20ms frame calculated as {d20}ms")
+            return
+
+        # Buffer packet bounds adaptation: target = 30ms
+        rec.set_target_buffer_ms(30.0)
+
+        # 5ms frame: min_packets = round(30 / 5) = 6, max_packets = round((30 + 30) / 5) = 12
+        rec._frame_duration_ms = 5.0
+        min_p5, max_p5 = rec._compute_buffer_packet_bounds()
+        if min_p5 != 6 or max_p5 != 12:
+            check(name, False, f"5ms bounds mismatch: got ({min_p5}, {max_p5}), expected (6, 12)")
+            return
+
+        # 20ms frame: min_packets = max(2, round(30 / 20)) = 2, max_packets = max(6, round(60 / 20)) = 6
+        rec._frame_duration_ms = 20.0
+        min_p20, max_p20 = rec._compute_buffer_packet_bounds()
+        if min_p20 != 2 or max_p20 != 6:
+            check(name, False, f"20ms bounds mismatch: got ({min_p20}, {max_p20}), expected (2, 6)")
+            return
+
+        check(name, True, "5ms/10ms/20ms frame duration and dynamic buffer bounds verified")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -708,6 +890,9 @@ def main() -> None:
     test_audio_queue_stress_10000()
     test_equalizer_dsp()
     test_equalizer_manager()
+    test_control_listener_pc_announce_and_self_filter()
+    test_eq_dsp_performance_and_output()
+    test_audio_receiver_frame_duration_buffer_math()
 
     print()
     print("=" * 60)

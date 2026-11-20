@@ -8,7 +8,8 @@ data class AudioStats(
     val latePackets: Int = 0,
     val rxPps: Int = 0,
     val codec: Int = 0,
-    val autoMode: Boolean = true
+    val autoMode: Boolean = true,
+    val rxPackets: Long = 0L
 )
 
 data class NativeAudioStats(
@@ -46,6 +47,7 @@ object AudioNative {
     external fun nativeSetVolumeGain(gain: Float)
     external fun nativeGetVolumeGain(): Float
     external fun nativeSetLowLatencyMode(lowLatency: Boolean)
+    external fun nativeSetEnableAudioEffects(enabled: Boolean)
     external fun nativeSetPartyRelay(enabled: Boolean)
     external fun nativeIsPartyRelay(): Boolean
     external fun nativeSetPartyPeers(peers: Array<String>)
@@ -58,6 +60,7 @@ object AudioNative {
     fun getStats(): AudioStats {
         val arr = nativeGetStats() ?: return AudioStats()
         if (arr.size < 8) return AudioStats()
+        val rxPackets = if (arr.size >= 9) arr[8].toLong() else 0L
         return AudioStats(
             bufferMs = arr[0],
             targetMs = arr[1],
@@ -66,7 +69,8 @@ object AudioNative {
             latePackets = arr[4].toInt(),
             rxPps = arr[5].toInt(),
             codec = arr[6].toInt(),
-            autoMode = arr[7] > 0.5f
+            autoMode = arr[7] > 0.5f,
+            rxPackets = rxPackets
         )
     }
 

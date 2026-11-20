@@ -12,6 +12,7 @@ static bool gSavedAutoMode = true;
 static bool gSavedMuted = false;
 static float gSavedVolumeGain = 1.0f;
 static bool gSavedLowLatency = true;
+static bool gSavedEnableAudioEffects = false;
 static bool gSavedPartyRelay = false;
 static std::vector<std::string> gSavedPartyPeers;
 static bool gSavedEqEnabled = false;
@@ -30,6 +31,7 @@ Java_com_hasan_airspeaker_AudioNative_nativeStart(JNIEnv* /*env*/, jobject /*thi
     gAudioEngine->setMuted(gSavedMuted);
     gAudioEngine->setVolumeGain(gSavedVolumeGain);
     gAudioEngine->setLowLatencyMode(gSavedLowLatency);
+    gAudioEngine->setEnableAudioEffects(gSavedEnableAudioEffects);
     gAudioEngine->setPartyRelayEnabled(gSavedPartyRelay);
     gAudioEngine->setPartyPeers(gSavedPartyPeers);
     gAudioEngine->setEqualizerBands(gSavedEqEnabled, gSavedEqBands[0], gSavedEqBands[1], gSavedEqBands[2], gSavedEqBands[3], gSavedEqBands[4]);
@@ -128,6 +130,15 @@ Java_com_hasan_airspeaker_AudioNative_nativeSetLowLatencyMode(JNIEnv* /*env*/, j
 }
 
 JNIEXPORT void JNICALL
+Java_com_hasan_airspeaker_AudioNative_nativeSetEnableAudioEffects(JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled) {
+    std::lock_guard<std::mutex> lock(gEngineMutex);
+    gSavedEnableAudioEffects = (enabled == JNI_TRUE);
+    if (gAudioEngine) {
+        gAudioEngine->setEnableAudioEffects(gSavedEnableAudioEffects);
+    }
+}
+
+JNIEXPORT void JNICALL
 Java_com_hasan_airspeaker_AudioNative_nativeSetPartyRelay(JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled) {
     std::lock_guard<std::mutex> lock(gEngineMutex);
     gSavedPartyRelay = (enabled == JNI_TRUE);
@@ -194,10 +205,10 @@ Java_com_hasan_airspeaker_AudioNative_nativeGetAudioSessionId(JNIEnv* /*env*/, j
 
 JNIEXPORT jfloatArray JNICALL
 Java_com_hasan_airspeaker_AudioNative_nativeGetStats(JNIEnv* env, jobject /*thiz*/) {
-    jfloatArray result = env->NewFloatArray(8);
+    jfloatArray result = env->NewFloatArray(9);
     if (!result) return nullptr;
 
-    jfloat statsArr[8] = {0.0f};
+    jfloat statsArr[9] = {0.0f};
     {
         std::lock_guard<std::mutex> lock(gEngineMutex);
         statsArr[1] = gSavedTargetMs;
@@ -212,10 +223,11 @@ Java_com_hasan_airspeaker_AudioNative_nativeGetStats(JNIEnv* env, jobject /*thiz
             statsArr[5] = static_cast<float>(stats.rxPacketsPerSecond);
             statsArr[6] = static_cast<float>(stats.activeCodec);
             statsArr[7] = stats.autoMode ? 1.0f : 0.0f;
+            statsArr[8] = static_cast<float>(stats.rxPackets);
         }
     }
 
-    env->SetFloatArrayRegion(result, 0, 8, statsArr);
+    env->SetFloatArrayRegion(result, 0, 9, statsArr);
     return result;
 }
 

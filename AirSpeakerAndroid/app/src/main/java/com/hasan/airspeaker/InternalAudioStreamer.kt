@@ -51,6 +51,7 @@ class InternalAudioStreamer {
         @Volatile var eqEnabled = false
         @Volatile var eqGainsDb = FloatArray(5)
         @Volatile var eqCoeffs = Array(5) { EqCoeffs(1.0, 0.0, 0.0, 0.0, 0.0, false) }
+        @Volatile var eqResetGeneration = 0
 
         fun setOutboundEq(enabled: Boolean, gains: FloatArray) {
             val copy = FloatArray(5)
@@ -82,8 +83,12 @@ class InternalAudioStreamer {
                     )
                 }
             }
+            val nowActive = enabled && newCoeffs.any { it.active }
             eqCoeffs = newCoeffs
-            eqEnabled = enabled && newCoeffs.any { it.active }
+            eqEnabled = nowActive
+            if (!nowActive) {
+                eqResetGeneration++
+            }
         }
     }
 
@@ -112,12 +117,24 @@ class InternalAudioStreamer {
         }
     }
 
-    fun start(projection: MediaProjection, targetIp: String = "255.255.255.255"): Boolean {
+    fun start(projection: MediaProjection, targetIp: String = "255.255.255.255", context: android.content.Context? = null): Boolean {
         if (isRunning.get()) return true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Log.e(TAG, "AudioPlaybackCapture requires Android 10 (API 29) or higher")
             return false
         }
+
+        val prefs = context?.getSharedPreferences("AirSpeakerPrefs", android.content.Context.MODE_PRIVATE)
+            ?: context?.getSharedPreferences("airspeaker_prefs", android.content.Context.MODE_PRIVATE)
+        val frameMs = when (prefs?.getInt("serve_frame_ms", 5) ?: 5) {
+            10 -> 10
+            20 -> 20
+            else -> 5
+        }
+        val framesPerPacket = (SAMPLE_RATE * frameMs) / 1000
+        val totalSamples = framesPerPacket * CHANNELS
+        val payloadBytes = totalSamples * 2
+        val packetSize = HEADER_BYTES + payloadBytes
 
         this.mediaProjection = projection
         updateTargetIp(targetIp)
@@ -141,7 +158,7 @@ class InternalAudioStreamer {
                 AudioFormat.CHANNEL_IN_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT
             )
-            val bufferSize = max(minBufSize, PAYLOAD_BYTES * 10) // ~50ms buffer cushion
+            val bufferSize = max(minBufSize, payloadBytes * 10) // ~50ms buffer cushion
 
             val record = AudioRecord.Builder()
                 .setAudioPlaybackCaptureConfig(captureConfig)
@@ -167,13 +184,13 @@ class InternalAudioStreamer {
             workerTerminatedLatch = latch
 
             workerThread = Thread({
-                runCaptureLoop(record, sock, latch)
+                runCaptureLoop(record, sock, latch, totalSamples, packetSize)
             }, "InternalAudioCaptureWorker").apply {
                 priority = Thread.MAX_PRIORITY
                 start()
             }
 
-            Log.i(TAG, "Internal system audio capture started -> streaming to $targetIp:$targetPort")
+            Log.i(TAG, "Internal system audio capture started (${frameMs}ms frames) -> streaming to $targetIp:$targetPort")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start internal audio streamer: ${e.message}", e)
@@ -182,12 +199,19 @@ class InternalAudioStreamer {
         }
     }
 
-    private fun runCaptureLoop(record: AudioRecord, sock: DatagramSocket, latch: CountDownLatch) {
-        val shortBuf = ShortArray(TOTAL_SAMPLES)
-        val packetBuf = ByteBuffer.allocate(PACKET_SIZE).order(ByteOrder.LITTLE_ENDIAN)
+    private fun runCaptureLoop(
+        record: AudioRecord,
+        sock: DatagramSocket,
+        latch: CountDownLatch,
+        totalSamples: Int = TOTAL_SAMPLES,
+        packetSize: Int = PACKET_SIZE
+    ) {
+        val shortBuf = ShortArray(totalSamples)
+        val packetBuf = ByteBuffer.allocate(packetSize).order(ByteOrder.LITTLE_ENDIAN)
         var sequence: Long = 1
         var ppsCounter = 0
         var lastPpsTimeMs = SystemClock.elapsedRealtime()
+        var lastEqResetGen = -1
 
         try {
             record.startRecording()
@@ -195,8 +219,8 @@ class InternalAudioStreamer {
 
             while (isRunning.get() && !Thread.currentThread().isInterrupted) {
                 var samplesRead = 0
-                while (samplesRead < TOTAL_SAMPLES && isRunning.get()) {
-                    val read = record.read(shortBuf, samplesRead, TOTAL_SAMPLES - samplesRead, AudioRecord.READ_BLOCKING)
+                while (samplesRead < totalSamples && isRunning.get()) {
+                    val read = record.read(shortBuf, samplesRead, totalSamples - samplesRead, AudioRecord.READ_BLOCKING)
                     if (read > 0) {
                         samplesRead += read
                     } else if (read < 0) {
@@ -205,7 +229,7 @@ class InternalAudioStreamer {
                     }
                 }
 
-                if (samplesRead < TOTAL_SAMPLES) {
+                if (samplesRead < totalSamples) {
                     continue
                 }
 
@@ -217,10 +241,19 @@ class InternalAudioStreamer {
                 }
                 peakLevel.set(maxSample.toFloat() / 32768.0f)
 
+                val curResetGen = eqResetGeneration
+                if (curResetGen != lastEqResetGen) {
+                    lastEqResetGen = curResetGen
+                    for (b in 0 until 5) {
+                        z1[b][0] = 0.0; z1[b][1] = 0.0
+                        z2[b][0] = 0.0; z2[b][1] = 0.0
+                    }
+                }
+
                 if (eqEnabled) {
                     val coeffs = eqCoeffs
                     val knee = 0.85
-                    val numFrames = TOTAL_SAMPLES / 2
+                    val numFrames = totalSamples / 2
                     for (n in 0 until numFrames) {
                         for (ch in 0 until 2) {
                             var x = shortBuf[n * 2 + ch].toDouble() / 32768.0
@@ -254,7 +287,7 @@ class InternalAudioStreamer {
                 packetBuf.putShort(((SAMPLE_RATE / 100) and 0xFFFF).toShort())
 
                 // Append PCM16 payload
-                for (i in 0 until TOTAL_SAMPLES) {
+                for (i in 0 until totalSamples) {
                     packetBuf.putShort(shortBuf[i])
                 }
 
@@ -262,7 +295,7 @@ class InternalAudioStreamer {
                 val targetIpStr = targetIpRef.get()
                 try {
                     val targetAddr = InetAddress.getByName(targetIpStr)
-                    val dgram = DatagramPacket(packetBytes, PACKET_SIZE, targetAddr, targetPort)
+                    val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, targetPort)
                     sock.send(dgram)
                 } catch (e: Exception) {
                     // Ignore transient network errors
@@ -274,7 +307,7 @@ class InternalAudioStreamer {
                         if (parts.size == 4 && !parts[0].startsWith("127")) {
                             val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
                             try {
-                                sock.send(DatagramPacket(packetBytes, PACKET_SIZE, InetAddress.getByName("$prefix.255"), targetPort))
+                                sock.send(DatagramPacket(packetBytes, packetSize, InetAddress.getByName("$prefix.255"), targetPort))
                             } catch (_: Exception) {}
                         }
                     }
@@ -285,7 +318,7 @@ class InternalAudioStreamer {
                         if (peerIp != targetIpStr) {
                             try {
                                 val peerAddr = InetAddress.getByName(peerIp)
-                                val peerDgram = DatagramPacket(packetBytes, PACKET_SIZE, peerAddr, targetPort)
+                                val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, targetPort)
                                 sock.send(peerDgram)
                             } catch (_: Exception) {}
                         }

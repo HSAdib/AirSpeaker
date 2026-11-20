@@ -53,6 +53,8 @@ public:
     float getVolumeGain() const;
     void setLowLatencyMode(bool lowLatency);
     bool isLowLatencyMode() const;
+    void setEnableAudioEffects(bool enabled);
+    bool isEnableAudioEffects() const;
     void setPartyRelayEnabled(bool enabled);
     bool isPartyRelayEnabled() const;
     void setPartyPeers(const std::vector<std::string>& peers);
@@ -83,6 +85,7 @@ private:
     std::atomic<bool> mMuted{false};
     std::atomic<float> mVolumeGain{1.0f};
     std::atomic<bool> mLowLatencyMode{true};
+    std::atomic<bool> mEnableAudioEffects{false};
     std::atomic<bool> mPartyRelayEnabled{false};
     std::mutex mPartyPeersMutex;
     std::vector<struct sockaddr_in> mPartyPeerAddrs;
@@ -91,6 +94,7 @@ private:
     std::string mLastSenderIp;
 
     mutable std::mutex mStreamMutex;
+    std::atomic<bool> mShuttingDown{false};
     std::mutex mReopenMutex;
     std::atomic<bool> mReopenPending{false};
     std::thread mReceiverThread;

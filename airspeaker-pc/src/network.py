@@ -12,6 +12,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
 import psutil
 
 from equalizer import StereoFiveBandBiquadDSP
@@ -140,6 +141,23 @@ def list_real_adapters() -> List[Dict[str, Any]]:
         logger.error("Error enumerating adapters: %s", exc)
 
     return result
+
+
+def get_active_broadcast_targets(port: int = AUDIO_PORT) -> List[tuple]:
+    """Return broadcast (ip, port) targets for UP network adapters + global 255.255.255.255."""
+    targets = [("255.255.255.255", port)]
+    for a in list_real_adapters():
+        if not a.get("is_up"):
+            continue
+        bcast = a.get("broadcast")
+        if not bcast:
+            ip = a.get("ip", "")
+            parts = ip.split(".")
+            if len(parts) == 4 and not parts[0].startswith("127"):
+                bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+        if bcast and (bcast, port) not in targets:
+            targets.append((bcast, port))
+    return targets
 
 
 # ---------------------------------------------------------------------------
@@ -299,11 +317,13 @@ class UDPSender:
         codec: int = CODEC_PCM16,
         frame_ms: int = 5,
         bind_ip: str = "",
+        is_party_host: bool = False,
     ) -> None:
         with self._lock:
-            self._target_ip = target_ip
+            self._target_ip = "" if is_party_host else target_ip
             self._target_port = target_port
-            if target_ip and target_ip not in ("0.0.0.0", "255.255.255.255"):
+            self._party_targets.clear()
+            if not is_party_host and target_ip and target_ip not in ("0.0.0.0", "255.255.255.255"):
                 self._party_targets[target_ip] = int(target_port)
             self._codec = codec
             self._frame_ms = frame_ms
@@ -424,7 +444,6 @@ class UDPSender:
             pcm_frame = b'\x00' * len(pcm_frame)
         elif abs(gain - 1.0) > 0.01:
             try:
-                import numpy as np
                 norm = (np.frombuffer(pcm_frame, dtype="<i2").astype(np.float32) * gain) / 32767.0
                 if gain > 1.0:
                     knee = 0.85
@@ -456,117 +475,130 @@ class UDPSender:
     def _run(self) -> None:
         """Main sender loop — steady 5ms pacing without GIL spin or burst drops."""
         set_timer_resolution(1)
-
-        with self._lock:
-            frame_ms = self._frame_ms
-        interval = frame_ms / 1000.0
-        silence_threshold = 0.085
-        silence_frame = (
-            SILENCE_PCM_20MS if frame_ms == 20
-            else (SILENCE_PCM_10MS if frame_ms == 10 else SILENCE_PCM_5MS)
-        )
-
-        next_tick = time.monotonic()
-        last_audio_time = time.monotonic()
-        pps_window_start = time.monotonic()
-        pps_count = 0
-
-        while self._running:
+        try:
             with self._lock:
-                target_ip = self._target_ip
-                target_port = self._target_port
-                party_mode = self._party_mode
-                if party_mode and self._party_targets:
-                    targets_snapshot = list(self._party_targets.items())
-                    if target_ip and (target_ip, target_port) not in targets_snapshot:
-                        targets_snapshot.insert(0, (target_ip, target_port))
-                elif target_ip:
-                    targets_snapshot = [(target_ip, target_port)]
-                else:
-                    targets_snapshot = []
-                send_enabled = self._send_enabled
-                sock = self._sock
-                if self._frame_ms != frame_ms:
-                    frame_ms = self._frame_ms
-                    interval = frame_ms / 1000.0
-                    silence_threshold = 0.085
-                    silence_frame = (
-                        SILENCE_PCM_20MS if frame_ms == 20
-                        else (SILENCE_PCM_10MS if frame_ms == 10 else SILENCE_PCM_5MS)
-                    )
+                frame_ms = self._frame_ms
+            interval = frame_ms / 1000.0
+            silence_threshold = 0.085
+            silence_frame = (
+                SILENCE_PCM_20MS if frame_ms == 20
+                else (SILENCE_PCM_10MS if frame_ms == 10 else SILENCE_PCM_5MS)
+            )
+
+            next_tick = time.monotonic()
+            last_audio_time = time.monotonic()
+            pps_window_start = time.monotonic()
+            pps_count = 0
+
+            while self._running:
+                with self._lock:
+                    target_ip = self._target_ip
+                    target_port = self._target_port
+                    party_mode = self._party_mode
+                    if party_mode and self._party_targets:
+                        targets_snapshot = list(self._party_targets.items())
+                        if (
+                            target_ip
+                            and target_ip not in ("0.0.0.0", "255.255.255.255")
+                            and (target_ip, target_port) not in targets_snapshot
+                        ):
+                            targets_snapshot.insert(0, (target_ip, target_port))
+                    elif target_ip:
+                        if target_ip == "255.255.255.255":
+                            targets_snapshot = get_active_broadcast_targets(target_port)
+                        else:
+                            targets_snapshot = [(target_ip, target_port)]
+                    else:
+                        targets_snapshot = []
+                    send_enabled = self._send_enabled
+                    sock = self._sock
+                    if self._frame_ms != frame_ms:
+                        frame_ms = self._frame_ms
+                        interval = frame_ms / 1000.0
+                        silence_threshold = 0.085
+                        silence_frame = (
+                            SILENCE_PCM_20MS if frame_ms == 20
+                            else (SILENCE_PCM_10MS if frame_ms == 10 else SILENCE_PCM_5MS)
+                        )
+                        next_tick = time.monotonic()
+
+                if not targets_snapshot or sock is None:
+                    time.sleep(0.010)
                     next_tick = time.monotonic()
+                    continue
 
-            if not targets_snapshot or sock is None:
-                time.sleep(0.010)
-                next_tick = time.monotonic()
-                continue
+                # Pull next audio frame; if empty, block up to `interval` (5ms) releasing the GIL
+                frame = self._audio_queue.get_nowait()
+                if frame is None:
+                    frame = self._audio_queue.get(timeout=interval)
 
-            # Pull next audio frame; if empty, block up to `interval` (5ms) releasing the GIL
-            frame = self._audio_queue.get_nowait()
-            if frame is None:
-                frame = self._audio_queue.get(timeout=interval)
-
-            now = time.monotonic()
-            if frame is not None:
-                last_audio_time = now
-                packet = self._build_packet(frame) if send_enabled else None
-            else:
-                # We already waited `interval` (5ms) inside get(timeout=interval)
-                if (now - last_audio_time) >= silence_threshold and send_enabled:
-                    packet = self._build_packet(silence_frame)
+                now = time.monotonic()
+                if frame is not None:
+                    last_audio_time = now
+                    packet = self._build_packet(frame) if send_enabled else None
                 else:
-                    packet = None
-                next_tick = now
+                    # We already waited `interval` (5ms) inside get(timeout=interval)
+                    if (now - last_audio_time) >= silence_threshold and send_enabled:
+                        packet = self._build_packet(silence_frame)
+                    else:
+                        packet = None
+                    next_tick = now
 
-            if packet is not None and send_enabled:
-                sent_any = False
-                for t_ip, t_port in targets_snapshot:
-                    try:
-                        sock.sendto(packet, (t_ip, t_port))
-                        sent_any = True
-                    except OSError as exc:
-                        logger.warning("Send error on bound socket (%s), falling back to unbound socket", exc)
+                if packet is not None and send_enabled:
+                    sent_any = False
+                    for t_ip, t_port in targets_snapshot:
                         try:
-                            with self._lock:
-                                if self._sock:
-                                    try:
-                                        self._sock.close()
-                                    except Exception:
-                                        pass
-                                self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
-                                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                                sock = self._sock
                             sock.sendto(packet, (t_ip, t_port))
                             sent_any = True
-                        except Exception as retry_exc:
-                            logger.error("Retry send error on unbound socket: %s", retry_exc)
-                    except Exception as exc:
-                        logger.error("Send error to %s:%d: %s", t_ip, t_port, exc)
-                if sent_any:
-                    pps_count += 1
+                        except OSError as exc:
+                            # Only recreate socket on bad descriptor / broken socket, not transient unreachable routes
+                            if getattr(exc, "errno", None) in (9, 10038):
+                                logger.warning("UDP socket invalidated (%s), recreating socket", exc)
+                                try:
+                                    with self._lock:
+                                        if self._sock:
+                                            try:
+                                                self._sock.close()
+                                            except Exception:
+                                                pass
+                                        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                                        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                                        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                                        sock = self._sock
+                                    sock.sendto(packet, (t_ip, t_port))
+                                    sent_any = True
+                                except Exception as retry_exc:
+                                    logger.debug("Retry send error: %s", retry_exc)
+                            else:
+                                logger.debug("Transient send error to %s:%d: %s", t_ip, t_port, exc)
+                        except Exception as exc:
+                            logger.debug("Send error to %s:%d: %s", t_ip, t_port, exc)
+                    if sent_any:
+                        pps_count += 1
 
-            # PPS stat reporting (every 1 second)
-            now_stat = time.monotonic()
-            elapsed = now_stat - pps_window_start
-            if elapsed >= 1.0:
-                if self._on_stats:
-                    try:
-                        self._on_stats(int(round(pps_count / elapsed)))
-                    except Exception:
-                        pass
-                pps_count = 0
-                pps_window_start = now_stat
+                # PPS stat reporting (every 1 second)
+                now_stat = time.monotonic()
+                elapsed = now_stat - pps_window_start
+                if elapsed >= 1.0:
+                    if self._on_stats:
+                        try:
+                            self._on_stats(int(round(pps_count / elapsed)))
+                        except Exception:
+                            pass
+                    pps_count = 0
+                    pps_window_start = now_stat
 
-            if frame is not None:
-                next_tick += interval
-                now_after = time.monotonic()
-                sleep_time = next_tick - now_after
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                elif sleep_time < -0.040:
-                    # Only re-anchor if more than 40ms (8 frames) behind
-                    next_tick = now_after
+                if frame is not None:
+                    next_tick += interval
+                    now_after = time.monotonic()
+                    sleep_time = next_tick - now_after
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                    elif sleep_time < -0.040:
+                        # Only re-anchor if more than 40ms (8 frames) behind
+                        next_tick = now_after
+        finally:
+            clear_timer_resolution(1)
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +607,7 @@ class UDPSender:
 
 class ControlListener:
     """
-    Listens on UDP port 5005 for BEACON, STATS, and CONFIG_SYNC messages.
+    Listens on UDP port 5005 for BEACON, STATS, CONFIG_SYNC, and PC_ANNOUNCE messages.
     """
 
     def __init__(
@@ -583,18 +615,43 @@ class ControlListener:
         on_beacon: Optional[Callable[[dict], None]] = None,
         on_stats: Optional[Callable[[dict], None]] = None,
         on_config_sync: Optional[Callable[[dict], None]] = None,
+        on_pc_announce: Optional[Callable[[dict], None]] = None,
+        on_party_kick: Optional[Callable[[dict], None]] = None,
         bind_port: int = CONTROL_PORT,
+        port: Optional[int] = None,
     ):
         self._on_beacon = on_beacon
         self._on_stats = on_stats
         self._on_config_sync = on_config_sync
-        self._bind_port = bind_port
+        self._on_pc_announce = on_pc_announce
+        self._on_party_kick = on_party_kick
+        self._bind_port = port if port is not None else bind_port
         self._sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._announce_thread: Optional[threading.Thread] = None
         self._running = False
         self._party_mode_enabled: bool = False
         self._target_ip: str = ""
+        self._local_ips: set = set()
+        self._last_local_ips_refresh: float = 0.0
+
+    def _get_local_ips(self) -> set:
+        now = time.monotonic()
+        if now - self._last_local_ips_refresh > 5.0 or not self._local_ips:
+            ips = {"127.0.0.1", "0.0.0.0"}
+            for a in list_real_adapters():
+                ip = a.get("ip")
+                if ip:
+                    ips.add(ip)
+            try:
+                hostname = socket.gethostname()
+                for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+                    ips.add(info[4][0])
+            except Exception:
+                pass
+            self._local_ips = ips
+            self._last_local_ips_refresh = now
+        return self._local_ips
 
     def set_party_mode(self, enabled: bool) -> None:
         self._party_mode_enabled = bool(enabled)
@@ -626,6 +683,8 @@ class ControlListener:
                 except Exception:
                     pass
                 for a in list_real_adapters():
+                    if not a.get("is_up"):
+                        continue
                     bcast = a.get("broadcast")
                     if not bcast:
                         ip = a.get("ip", "")
@@ -702,6 +761,8 @@ class ControlListener:
                         pass
                     # 3. Subnet broadcast for each adapter
                     for a in adapters:
+                        if not a.get("is_up"):
+                            continue
                         bcast = a.get("broadcast")
                         if not bcast:
                             ip = a.get("ip", "")
@@ -729,9 +790,13 @@ class ControlListener:
                 break
             try:
                 data, addr = sock.recvfrom(4096)
+                sender_ip = addr[0]
+                if sender_ip in self._get_local_ips():
+                    continue
+
                 try:
                     msg = json.loads(data.decode("utf-8"))
-                    msg["_sender_ip"] = addr[0]
+                    msg["_sender_ip"] = sender_ip
                     msg_type = msg.get("type", "")
                     if msg_type in ("BEACON", "STATS", "CONFIG_SYNC"):
                         try:
@@ -743,7 +808,7 @@ class ControlListener:
                                 "party_mode": bool(self._party_mode_enabled),
                                 "is_party_host": bool(self._party_mode_enabled),
                             }).encode("utf-8")
-                            sock.sendto(reply, (addr[0], self._bind_port))
+                            sock.sendto(reply, (sender_ip, self._bind_port))
                         except Exception:
                             pass
                     if msg_type == "BEACON" and self._on_beacon:
@@ -752,6 +817,19 @@ class ControlListener:
                         self._on_stats(msg)
                     elif msg_type == "CONFIG_SYNC" and self._on_config_sync:
                         self._on_config_sync(msg)
+                    elif msg_type == "PARTY_KICK" and self._on_party_kick:
+                        self._on_party_kick(msg)
+                    elif msg_type == "PC_ANNOUNCE":
+                        norm_msg = dict(msg)
+                        norm_msg.setdefault("device", msg.get("pc_name", "PC"))
+                        norm_msg.setdefault("audio_port", 5004)
+                        norm_msg.setdefault("control_port", self._bind_port)
+                        norm_msg.setdefault("party_mode", msg.get("party_mode", False))
+                        norm_msg.setdefault("is_party_host", msg.get("is_party_host", False))
+                        if self._on_pc_announce:
+                            self._on_pc_announce(norm_msg)
+                        elif self._on_beacon:
+                            self._on_beacon(norm_msg)
                 except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                     logger.debug("Control message parse error from %s: %s", addr, exc)
             except socket.timeout:

@@ -107,7 +107,30 @@ def main() -> None:
             "qrcode>=7.4.2",
         ]
         run([pip, "install"] + mac_pkgs)
-        subprocess.run([pip, "install", "soxr", "pyaudio"], check=False)
+
+        build_env = os.environ.copy()
+        brew_prefix = ""
+        if shutil.which("brew"):
+            try:
+                brew_prefix = subprocess.check_output(
+                    ["brew", "--prefix", "portaudio"], text=True, stderr=subprocess.DEVNULL
+                ).strip()
+            except Exception:
+                brew_prefix = ""
+        if not brew_prefix:
+            for candidate in ("/opt/homebrew", "/usr/local"):
+                if Path(candidate, "include", "portaudio.h").exists():
+                    brew_prefix = candidate
+                    break
+        if brew_prefix:
+            inc = str(Path(brew_prefix) / "include")
+            lib = str(Path(brew_prefix) / "lib")
+            build_env["CFLAGS"] = f"-I{inc} {build_env.get('CFLAGS', '')}".strip()
+            build_env["LDFLAGS"] = f"-L{lib} {build_env.get('LDFLAGS', '')}".strip()
+            print(f"Using PortAudio headers/libs from: {brew_prefix}", flush=True)
+
+        run([pip, "install", "pyaudio"], env=build_env)
+        subprocess.run([pip, "install", "soxr"], env=build_env, check=False)
 
     # 3. Locate system libopus
     opus_dylib = VENDOR / "libopus.dylib"

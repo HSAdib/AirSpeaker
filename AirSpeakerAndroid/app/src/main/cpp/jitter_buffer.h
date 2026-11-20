@@ -1,5 +1,16 @@
 #pragma once
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#else
+#include <cstdio>
+#define ANDROID_LOG_DEBUG 3
+#define ANDROID_LOG_INFO  4
+#define ANDROID_LOG_WARN  5
+#define ANDROID_LOG_ERROR 6
+#define __android_log_print(prio, tag, fmt, ...) ((void)0)
+#endif
+
 #include "protocol.h"
 #include "opus_wrapper.h"
 #include "pcm_ring_buffer.h"
@@ -32,6 +43,7 @@ struct JitterStatsSnapshot {
     uint64_t rxPacketsPerSecond{0};
     uint8_t activeCodec{0};
     bool autoMode{true};
+    uint64_t rxPackets{0};
 };
 
 // Legacy alias for compatibility with existing JNI / UI references
@@ -50,6 +62,22 @@ public:
 
     // Receiver thread only: called when a new UDP packet is received
     void pushPacket(const AudioPacket& packet);
+    void pushPacket(const uint8_t* wireData, size_t size);
+
+#ifdef AIRSPEAKER_UNIT_TEST
+    // Runs one decode/trim cycle synchronously without starting a worker thread
+    void processPacketsForTest() {
+        int16_t decoded_buf[960 * 2];
+        processPackets(decoded_buf);
+    }
+    size_t getPacketMapSizeForTest() {
+        std::lock_guard<std::mutex> lock(mPacketMutex);
+        return mPacketMap.size();
+    }
+    size_t getRingOccupiedFramesForTest() const {
+        return mPcmRingBuffer.getOccupiedFrames();
+    }
+#endif
 
     // Audio callback thread only (e.g. Oboe onAudioReady):
     // Real-time safe: ZERO mutexes, ZERO allocations, ZERO opus decodes, ZERO vector erases.
@@ -107,6 +135,7 @@ private:
     // Receiver Thread Atomic Telemetry
     // ---------------------------------------------------------
     alignas(64) std::atomic<int64_t> mLastPacketRecvTimeMs{0};
+    alignas(64) std::atomic<uint64_t> mTotalRxPackets{0};
     alignas(64) std::atomic<uint64_t> mRxPacketsInterval{0};
     alignas(64) std::atomic<uint64_t> mCurrentRxPps{0};
     alignas(64) std::atomic<int64_t> mLastPpsCalcTimeMs{0};
@@ -119,6 +148,8 @@ private:
     // ---------------------------------------------------------
     alignas(64) std::atomic<float> mConfiguredTargetBufferMs{30.0f};
     alignas(64) std::atomic<bool> mAutoMode{true};
+    float mLastAppliedConfiguredTargetMs{-1.0f};
+    std::atomic<float> mReportedTargetBufferMs{30.0f};
 
     // ---------------------------------------------------------
     // Worker Thread Published Atomics (Read by Telemetry / Receiver)
@@ -130,6 +161,8 @@ private:
     alignas(64) std::atomic<uint64_t> mLostCount{0};
     alignas(64) std::atomic<uint64_t> mConcealedPackets{0};
     alignas(64) std::atomic<uint64_t> mIntentionalDriftDrops{0};
+    alignas(64) std::atomic<float> mPacketDurationMs{5.0f};
+    alignas(64) std::atomic<int32_t> mSampleRate{48000};
 
     // ---------------------------------------------------------
     // Decode Worker Private State (Strictly owned by Decode Worker Thread)
@@ -140,9 +173,7 @@ private:
     float mLocalTargetBufferMs{30.0f};
     uint8_t mCurrentCodec{0};
     int mChannels{2};
-    int mSampleRate{48000};
     int mLastFrameSamplesPerCh{240};
-    float mPacketDurationMs{5.0f};
     int mConsecutiveLosses{0};
     std::vector<int16_t> mLastValidFrame;
     OpusDecoderWrapper mOpusDecoder;

@@ -233,14 +233,20 @@ struct PlayerStudioTab: View {
                     HStack(spacing: 4) {
                         RadioChip(title: "Balanced (Auto)", isSelected: engine.soundMode == "BALANCED") {
                             engine.soundMode = "BALANCED"
+                            engine.bufferMode = "AUTO"
+                            engine.bufferTargetMs = 30
                             engine.sendConfigSync()
                         }
                         RadioChip(title: "Gaming", isSelected: engine.soundMode == "GAMING") {
                             engine.soundMode = "GAMING"
+                            engine.bufferMode = "LOW"
+                            engine.bufferTargetMs = 20
                             engine.sendConfigSync()
                         }
                         RadioChip(title: "Quality", isSelected: engine.soundMode == "QUALITY") {
                             engine.soundMode = "QUALITY"
+                            engine.bufferMode = "HIGH"
+                            engine.bufferTargetMs = 80
                             engine.sendConfigSync()
                         }
                         RadioChip(title: "Custom", isSelected: engine.soundMode == "CUSTOM") {
@@ -359,7 +365,7 @@ struct PlayerStudioTab: View {
                         TelemetryRow(label: "CODEC:", value: "PCM16 (48kHz Stereo)")
                         TelemetryRow(label: "RX PACKETS / SEC:", value: "\(engine.rxPps) pps")
                         TelemetryRow(label: "UNDERRUNS:", value: "\(engine.underrunCount)")
-                        TelemetryRow(label: "LOST PACKETS:", value: String(format: "%.0f (%.1f%%)", (Double(engine.rxPps) * (engine.packetLossPercent / 100.0)), engine.packetLossPercent))
+                        TelemetryRow(label: "LOST PACKETS:", value: String(format: "%llu (%.1f%%)", engine.packetsLostCount, engine.packetLossPercent))
                         TelemetryRow(label: "LATE PACKETS:", value: "0")
                     }
                     .padding(8)
@@ -383,11 +389,11 @@ struct ServeStudioTab: View {
             VStack(alignment: .leading, spacing: 14) {
                 // Header & Target IP card
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("📡 INTERNAL SYSTEM AUDIO SENDER (PORT 5004)")
+                    Text("📡 IN-APP AUDIO CAPTURE (REPLAYKIT — PORT 5004)")
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
 
-                    Text("Streams iOS internal audio (apps, games, YouTube) in real-time to PC, Mac, Linux, or another phone.")
+                    Text("Captures audio from this device using ReplayKit in real-time and streams to PC, Mac, Linux, or another phone.")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Color(white: 0.6))
 
@@ -429,7 +435,7 @@ struct ServeStudioTab: View {
                     let target = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
                     engine.toggleServingInternalAudio(targetIp: target)
                 }) {
-                    Text(engine.isInternalAudioServing ? "[ ■ STOP SERVING AUDIO ]" : "[ 📡 START SERVING AUDIO (PORT 5004) ]")
+                    Text(engine.isInternalAudioServing ? "[ ■ STOP IN-APP AUDIO CAPTURE ]" : "[ 📡 START IN-APP AUDIO CAPTURE (PORT 5004) ]")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : Color(red: 0.0, green: 1.0, blue: 0.0))
                         .frame(maxWidth: .infinity, minHeight: 46)
@@ -463,18 +469,15 @@ struct ServeStudioTab: View {
                     }
                 }
 
-                // Codec & Bitrate Selection
+                // Codec Locked to PCM16
                 VStack(alignment: .leading, spacing: 4) {
                     Text("STREAM CODEC:")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
 
                     HStack(spacing: 8) {
-                        RadioChip(title: "Lossless PCM16 [Default]", isSelected: engine.activeCodecName == "PCM16") {
+                        RadioChip(title: "Lossless PCM16 [Locked]", isSelected: true) {
                             engine.activeCodecName = "PCM16"
-                        }
-                        RadioChip(title: "Opus Codec", isSelected: engine.activeCodecName == "OPUS") {
-                            engine.activeCodecName = "OPUS"
                         }
                     }
                 }
@@ -700,61 +703,26 @@ struct PartyStudioTab: View {
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
 
-                        // Stream Quality Card (Host Broadcast)
+                        // Stream Quality Card (Host Broadcast) - Locked to PCM16
                         VStack(alignment: .leading, spacing: 8) {
                             Text("STREAM QUALITY (HOST BROADCAST):")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
 
-                            HStack(spacing: 8) {
-                                Button(action: {
-                                    engine.activeCodecName = "PCM16"
-                                    engine.sendConfigSync(forcePcm: true)
-                                }) {
-                                    Text("PCM16 (Lossless)")
-                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                        .foregroundColor(engine.activeCodecName == "PCM16" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.6))
-                                        .frame(maxWidth: .infinity, minHeight: 32)
-                                        .background(engine.activeCodecName == "PCM16" ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.07))
-                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.activeCodecName == "PCM16" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                                }
+                            Text("Audio Codec: PCM16 (Uncompressed)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .frame(maxWidth: .infinity, minHeight: 32)
+                                .background(Color(red: 0.06, green: 0.13, blue: 0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1))
 
-                                Button(action: {
-                                    engine.activeCodecName = "Opus"
-                                    engine.sendConfigSync()
-                                }) {
-                                    Text("Opus (Compressed)")
-                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                        .foregroundColor(engine.activeCodecName == "Opus" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.6))
-                                        .frame(maxWidth: .infinity, minHeight: 32)
-                                        .background(engine.activeCodecName == "Opus" ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.07))
-                                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.activeCodecName == "Opus" ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
-                                }
-                            }
-
-                            if engine.activeCodecName == "Opus" {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("MUSIC BITRATE: \(engine.opusBitrateKbps) kbps")
-                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                        .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
-
-                                    HStack(spacing: 4) {
-                                        ForEach(["64", "96", "128", "192", "256", "320"], id: \.self) { rate in
-                                            Button(action: {
-                                                engine.opusBitrateKbps = rate
-                                                engine.sendConfigSync()
-                                            }) {
-                                                Text("\(rate)k")
-                                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(engine.opusBitrateKbps == rate ? Color(red: 0.22, green: 0.71, blue: 1.0) : Color(white: 0.5))
-                                                    .frame(maxWidth: .infinity, minHeight: 28)
-                                                    .background(engine.opusBitrateKbps == rate ? Color(red: 0.05, green: 0.12, blue: 0.20) : Color(white: 0.07))
-                                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.opusBitrateKbps == rate ? Color(red: 0.22, green: 0.71, blue: 1.0) : Color(white: 0.2), lineWidth: 1))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            Text("Note: Party broadcast operates in relay or internal ReplayKit mode (stream PC audio to this device to feed the party, or broadcast local audio).")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(Color(white: 0.6))
+                        }
+                        .padding(8)
+                        .background(Color(white: 0.05))
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.15), lineWidth: 1))
 
                             TargetBufferControlSection(engine: engine)
 
@@ -831,8 +799,7 @@ struct PartyStudioTab: View {
                                 .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 0.93, blue: 0.93), lineWidth: 1))
 
                                 Button("CLEAR") {
-                                    engine.partyMembers.removeAll()
-                                    engine.partyPeerIps.removeAll()
+                                    engine.clearPartyPeers()
                                 }
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundColor(Color(red: 1.0, green: 0.27, blue: 0.27))
@@ -845,6 +812,18 @@ struct PartyStudioTab: View {
                         .padding(10)
                         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("PARTY HOST LIVE DELAY GRAPH:")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+
+                            LiveDelayGraphView(
+                                history: engine.delayHistory,
+                                targetMs: Double(engine.bufferTargetMs),
+                                currentBufMs: engine.latencyMs
+                            )
+                        }
                     }
 
                 } else if engine.partyScreen == "JOIN" {
@@ -932,6 +911,68 @@ struct PartyStudioTab: View {
                                     }
                                 }
                             }
+                        }
+
+                        // Manual Host IP Input & Connect
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("MANUAL PARTY HOST IP:")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.22, green: 0.71, blue: 1.0))
+
+                            HStack(spacing: 6) {
+                                TextField("Host IP (e.g. 192.168.1.100)", text: $manualJoinIp)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .padding(6)
+                                    .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                                    .foregroundColor(.white)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(white: 0.2), lineWidth: 1))
+
+                                Button("JOIN") {
+                                    let trimmed = manualJoinIp.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !trimmed.isEmpty {
+                                        engine.joinParty(hostIp: trimmed, port: 5004)
+                                    }
+                                }
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 1.0, blue: 0.0))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(red: 0.0, green: 1.0, blue: 0.0), lineWidth: 1))
+                            }
+                        }
+                        .padding(10)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.07))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        // Target Buffer Control in Party Join
+                        TargetBufferControlSection(engine: engine)
+
+                        // Party Join Equalizer Trigger
+                        Button(action: {
+                            showJoinEQSheet = true
+                        }) {
+                            Text("[ 🎛️ PARTY JOIN EQUALIZER: \(engine.partyJoinEQ.enabled ? engine.partyJoinEQ.presetName : "OFF") ]")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.7))
+                                .frame(maxWidth: .infinity, minHeight: 34)
+                                .background(engine.partyJoinEQ.enabled ? Color(red: 0.06, green: 0.13, blue: 0.06) : Color(white: 0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(engine.partyJoinEQ.enabled ? Color(red: 0.0, green: 1.0, blue: 0.0) : Color(white: 0.25), lineWidth: 1))
+                        }
+                        .sheet(isPresented: $showJoinEQSheet) {
+                            StudioEqualizerSheetView(title: "PARTY JOIN EQUALIZER", config: $engine.partyJoinEQ, engine: engine)
+                        }
+
+                        // Live Delay Graph in Party Join
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("PARTY JOIN LIVE DELAY GRAPH:")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+
+                            LiveDelayGraphView(
+                                history: engine.delayHistory,
+                                targetMs: Double(engine.bufferTargetMs),
+                                currentBufMs: engine.latencyMs
+                            )
                         }
 
                         // Active Connection / Joined Card
@@ -1025,6 +1066,10 @@ struct SettingsStudioTab: View {
     @ObservedObject var engine: AirSpeakerEngine
     @State private var showUniversalEQSheet: Bool = false
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -1056,8 +1101,8 @@ struct SettingsStudioTab: View {
                         engine.outputEngineMode = "OBOE_LOW_LATENCY"
                         engine.sendConfigSync()
                     }
-                    RadioLine(title: "Standard AudioUnit Output", isSelected: engine.outputEngineMode == "AUDIOTRACK_LEGACY") {
-                        engine.outputEngineMode = "AUDIOTRACK_LEGACY"
+                    RadioLine(title: "Standard AudioUnit Output", isSelected: engine.outputEngineMode == "AUDIOTRACK_STANDARD") {
+                        engine.outputEngineMode = "AUDIOTRACK_STANDARD"
                         engine.sendConfigSync()
                     }
                 }
@@ -1122,10 +1167,17 @@ struct SettingsStudioTab: View {
 
                     RadioLine(title: "Mix With Others", isSelected: engine.exclusiveAudioMode == "MIX_WITH_OTHERS") {
                         engine.exclusiveAudioMode = "MIX_WITH_OTHERS"
+                        engine.applyAudioSessionMode()
                         engine.sendConfigSync()
                     }
-                    RadioLine(title: "Duck Others When Playing", isSelected: engine.exclusiveAudioMode == "DUCK_OTHERS") {
-                        engine.exclusiveAudioMode = "DUCK_OTHERS"
+                    RadioLine(title: "Exclusive (Mute on other apps)", isSelected: engine.exclusiveAudioMode == "EXCLUSIVE") {
+                        engine.exclusiveAudioMode = "EXCLUSIVE"
+                        engine.applyAudioSessionMode()
+                        engine.sendConfigSync()
+                    }
+                    RadioLine(title: "Always Play", isSelected: engine.exclusiveAudioMode == "ALWAYS_PLAY") {
+                        engine.exclusiveAudioMode = "ALWAYS_PLAY"
+                        engine.applyAudioSessionMode()
                         engine.sendConfigSync()
                     }
                 }
@@ -1171,7 +1223,7 @@ struct SettingsStudioTab: View {
                 VStack(alignment: .leading, spacing: 8) {
                     let buildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
                     let buildStr = buildSha != "dev" ? " (\(buildSha.prefix(7)))" : ""
-                    Text("Version: v1.0.0\(buildStr)")
+                    Text("Version: v\(appVersion)\(buildStr)")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(Color(red: 0.0, green: 0.93, blue: 0.93))
 
@@ -1337,23 +1389,27 @@ struct TargetBufferControlSection: View {
                 .foregroundColor(.white)
 
             HStack(spacing: 4) {
-                RadioChip(title: "20 ms (Low)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 20) {
-                    engine.bufferMode = "FIXED"
+                RadioChip(title: "20 ms (Low)", isSelected: engine.bufferMode == "LOW") {
+                    engine.bufferMode = "LOW"
                     engine.bufferTargetMs = 20
                     engine.sendConfigSync()
                 }
-                RadioChip(title: "40 ms (Med)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 40) {
-                    engine.bufferMode = "FIXED"
+                RadioChip(title: "40 ms (Med)", isSelected: engine.bufferMode == "MEDIUM") {
+                    engine.bufferMode = "MEDIUM"
                     engine.bufferTargetMs = 40
                     engine.sendConfigSync()
                 }
-                RadioChip(title: "80 ms (High)", isSelected: engine.bufferMode == "FIXED" && engine.bufferTargetMs == 80) {
-                    engine.bufferMode = "FIXED"
+                RadioChip(title: "80 ms (High)", isSelected: engine.bufferMode == "HIGH") {
+                    engine.bufferMode = "HIGH"
                     engine.bufferTargetMs = 80
                     engine.sendConfigSync()
                 }
                 RadioChip(title: "Auto", isSelected: engine.bufferMode == "AUTO") {
                     engine.bufferMode = "AUTO"
+                    engine.sendConfigSync()
+                }
+                RadioChip(title: "Custom", isSelected: engine.bufferMode == "CUSTOM") {
+                    engine.bufferMode = "CUSTOM"
                     engine.sendConfigSync()
                 }
             }
@@ -1372,12 +1428,13 @@ struct TargetBufferControlSection: View {
                 value: Binding(
                     get: { Double(engine.bufferTargetMs) },
                     set: { newVal in
-                        engine.bufferTargetMs = Int(newVal)
+                        engine.bufferTargetMs = Int(round(newVal))
+                        engine.bufferMode = "CUSTOM"
                         engine.sendConfigSync()
                     }
                 ),
                 in: 10.0...200.0,
-                step: 2.5
+                step: 5.0
             )
             .accentColor(.white)
         }
@@ -1598,7 +1655,7 @@ AIR SPEAKER v1 STUDIO — CROSS-PLATFORM GUIDE
 
 PLATFORMS:
 • iOS 16.0–18+ (iPhone & iPad with AVAudioEngine)
-• Android 8.0–15+ (Oboe C++ AAudio ultra-low latency)
+• Android 7.0–15+ (API 24+) (Oboe C++ AAudio ultra-low latency)
 • Windows 11 / 10 (WASAPI Loopback, BlackHole / PipeWire)
 • macOS Sonoma / Ventura / Monterey (CoreAudio / BlackHole)
 • Linux: Ubuntu, Mint, Arch, Debian (PipeWire / PulseAudio)

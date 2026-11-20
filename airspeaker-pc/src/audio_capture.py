@@ -650,9 +650,6 @@ class AudioCapture:
         """Stop the capture stream and clean up."""
         with self._lock:
             self._running = False
-            with self._dsp_lock:
-                self._resampler = None
-                self._remainder.clear()
             if getattr(self, "_parec_proc", None) is not None:
                 try:
                     self._parec_proc.terminate()
@@ -670,6 +667,9 @@ class AudioCapture:
                 except Exception as exc:
                     logger.warning("Error stopping stream: %s", exc)
                 self._stream = None
+            with self._dsp_lock:
+                self._resampler = None
+                self._remainder.clear()
             if self._pa is not None:
                 try:
                     self._pa.terminate()

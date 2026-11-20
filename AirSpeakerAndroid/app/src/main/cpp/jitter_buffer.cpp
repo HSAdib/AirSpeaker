@@ -55,6 +55,7 @@ void JitterBuffer::reset() {
         mHighestSeq64 = 0;
         mQueuedPacketCount.store(0, std::memory_order_relaxed);
     }
+    mTotalRxPackets.store(0, std::memory_order_relaxed);
     mPcmRingBuffer.reset();
 
     // Reset worker state
@@ -69,10 +70,21 @@ void JitterBuffer::reset() {
     mWorkerExpectedSeq.store(0, std::memory_order_relaxed);
 }
 
+void JitterBuffer::pushPacket(const uint8_t* wireData, size_t size) {
+    if (!wireData || size < 12) return;
+    AudioPacket pkt;
+    std::memcpy(&pkt.header, wireData, 12);
+    if (size > 12) {
+        pkt.payload.assign(wireData + 12, wireData + size);
+    }
+    pushPacket(pkt);
+}
+
 void JitterBuffer::pushPacket(const AudioPacket& packet) {
     if (packet.payload.empty() || packet.payload.size() > 2048) {
         return;
     }
+    mTotalRxPackets.fetch_add(1, std::memory_order_relaxed);
 
     int64_t nowMs = getNowMs();
     int64_t prevRecvMs = mLastPacketRecvTimeMs.exchange(nowMs, std::memory_order_relaxed);
@@ -192,25 +204,55 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
         mCurrentCodec = first->second.header.codec;
         mActiveCodec.store(mCurrentCodec, std::memory_order_relaxed);
+        int sr = 48000;
         if (first->second.header.sample_rate_div100 > 0) {
-            mSampleRate = first->second.header.sample_rate_div100 * 100;
+            sr = first->second.header.sample_rate_div100 * 100;
+            mSampleRate.store(sr, std::memory_order_relaxed);
+        }
+        // Inspect actual packet duration before prebuffering so 10ms/20ms streams don't over-buffer
+        int detectedFrames = 0;
+        if (first->second.header.codec == CODEC_PCM16) {
+            int pktCh = (first->second.header.channels == 1) ? 1 : 2;
+            detectedFrames = static_cast<int>(first->second.payload.size() / (pktCh * sizeof(int16_t)));
+        } else if (!first->second.payload.empty()) {
+#if defined(HAS_OPUS) || defined(__ANDROID__)
+            int nb = opus_packet_get_nb_samples(
+                first->second.payload.data(),
+                static_cast<opus_int32>(first->second.payload.size()),
+                sr
+            );
+            if (nb > 0 && nb <= 960) {
+                detectedFrames = nb;
+            }
+#endif
+        }
+        if (detectedFrames > 0) {
+            mLastFrameSamplesPerCh = detectedFrames;
+            mPacketDurationMs.store((detectedFrames * 1000.0f) / static_cast<float>(sr), std::memory_order_relaxed);
         }
         mHasStarted = true;
     }
 
     // Apply cross-thread configuration changes
-    mLocalTargetBufferMs = std::clamp(mConfiguredTargetBufferMs.load(std::memory_order_relaxed), 10.0f, 200.0f);
+    bool autoMode = mAutoMode.load(std::memory_order_relaxed);
+    float configured = std::clamp(mConfiguredTargetBufferMs.load(std::memory_order_relaxed), 10.0f, 200.0f);
+    if (!autoMode || configured != mLastAppliedConfiguredTargetMs) {
+        mLocalTargetBufferMs = configured;
+        mLastAppliedConfiguredTargetMs = configured;
+    }
     adaptTargetBuffer();
     mEffectiveTargetBufferMs.store(mLocalTargetBufferMs, std::memory_order_relaxed);
+    mReportedTargetBufferMs.store(mLocalTargetBufferMs, std::memory_order_relaxed);
 
-    float ringOccupiedMs = mPcmRingBuffer.getOccupiedMs(mSampleRate);
+    float ringOccupiedMs = mPcmRingBuffer.getOccupiedMs(mSampleRate.load(std::memory_order_relaxed));
     size_t packetQueueSize = mQueuedPacketCount.load(std::memory_order_relaxed);
-    float totalQueuedMs = (packetQueueSize * mPacketDurationMs) + ringOccupiedMs;
+    float pktDurMs = std::max(1.0f, mPacketDurationMs.load(std::memory_order_relaxed));
+    float totalQueuedMs = (packetQueueSize * pktDurMs) + ringOccupiedMs;
 
     // Startup prebuffering: wait until queued audio reaches configured target buffer
     if (mIsPrebuffering) {
         float startThreshold = mLocalTargetBufferMs;
-        int minPackets = std::max(2, static_cast<int>(startThreshold / std::max(1.0f, mPacketDurationMs)));
+        int minPackets = std::max(2, static_cast<int>(std::ceil(startThreshold / pktDurMs)));
         if (totalQueuedMs < startThreshold || static_cast<int>(packetQueueSize) < minPackets) {
             return;
         }
@@ -223,12 +265,20 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         }
     }
 
-    // Decode packets and push PCM to the SPSC ring buffer while space permits
-    while (mPcmRingBuffer.getOccupiedFrames() + 480 <= PcmRingBuffer::CAPACITY_FRAMES) {
+    // Keep only ~15 ms buffered in the lock-free PCM ring buffer so excess jitter
+    // margin remains in mPacketMap for reordering and drift trimming.
+    const size_t sampleRate = (mSampleRate.load(std::memory_order_relaxed) > 0)
+        ? static_cast<size_t>(mSampleRate.load(std::memory_order_relaxed))
+        : 48000;
+    const size_t lowWaterFrames = std::max<size_t>(480, (sampleRate * 15) / 1000);
+
+    // Decode packets and push PCM to the SPSC ring buffer while space permits (up to 960 frames = 20ms)
+    while (mPcmRingBuffer.getOccupiedFrames() < lowWaterFrames &&
+           mPcmRingBuffer.getOccupiedFrames() + 960 <= PcmRingBuffer::CAPACITY_FRAMES) {
         // Drift trimming: if total queued duration exceeds target + 15ms, discard oldest packet
         {
             std::lock_guard<std::mutex> lock(mPacketMutex);
-            float currentQueuedMs = (mPacketMap.size() * mPacketDurationMs) + mPcmRingBuffer.getOccupiedMs(mSampleRate);
+            float currentQueuedMs = (mPacketMap.size() * mPacketDurationMs.load(std::memory_order_relaxed)) + mPcmRingBuffer.getOccupiedMs(mSampleRate.load(std::memory_order_relaxed));
             if (currentQueuedMs > (mLocalTargetBufferMs + 15.0f) && mPacketMap.size() > 4) {
                 auto oldest = mPacketMap.begin();
                 mExpectedSeq = oldest->first + 1;
@@ -283,7 +333,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
             mCurrentCodec = pkt.header.codec;
             mActiveCodec.store(mCurrentCodec, std::memory_order_relaxed);
             if (pkt.header.sample_rate_div100 > 0) {
-                mSampleRate = pkt.header.sample_rate_div100 * 100;
+                mSampleRate.store(pkt.header.sample_rate_div100 * 100, std::memory_order_relaxed);
             }
 
             // Normal decode
@@ -294,7 +344,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
                 int frame_count = pkt.payload.size() / (pktChannels * sizeof(int16_t));
                 if (frame_count <= 0) frame_count = 240;
                 mLastFrameSamplesPerCh = frame_count;
-                mPacketDurationMs = (frame_count * 1000.0f) / mSampleRate;
+                mPacketDurationMs.store((frame_count * 1000.0f) / mSampleRate.load(std::memory_order_relaxed), std::memory_order_relaxed);
                 total_frames = frame_count;
 
                 if (pktChannels == 2) {
@@ -313,7 +363,7 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
                 int decoded = mOpusDecoder.decode(pkt.payload.data(), pkt.payload.size(), decoded_buf, max_frames, false);
                 if (decoded > 0) {
                     mLastFrameSamplesPerCh = decoded;
-                    mPacketDurationMs = (decoded * 1000.0f) / mSampleRate;
+                    mPacketDurationMs.store((decoded * 1000.0f) / mSampleRate.load(std::memory_order_relaxed), std::memory_order_relaxed);
                     total_frames = decoded;
                 } else {
                     total_frames = mLastFrameSamplesPerCh;
@@ -432,7 +482,8 @@ void JitterBuffer::adaptTargetBuffer() {
     auto decayIntervalSec = std::chrono::duration_cast<std::chrono::seconds>(now - mLastDecayAdaptTime).count();
 
     if (noUnderrunSec >= 10 && decayIntervalSec >= 10) {
-        mLocalTargetBufferMs = std::max(15.0f, mLocalTargetBufferMs - 2.5f);
+        float floorTarget = std::max(10.0f, mConfiguredTargetBufferMs.load(std::memory_order_relaxed));
+        mLocalTargetBufferMs = std::max(floorTarget, mLocalTargetBufferMs - 2.5f);
         mLastDecayAdaptTime = now;
     }
 }
@@ -456,10 +507,10 @@ bool JitterBuffer::isAutoMode() const {
 JitterStatsSnapshot JitterBuffer::getStatsSnapshot() const {
     JitterStatsSnapshot stats;
     size_t packetCount = mQueuedPacketCount.load(std::memory_order_relaxed);
-    float ringMs = mPcmRingBuffer.getOccupiedMs(mSampleRate);
+    float ringMs = mPcmRingBuffer.getOccupiedMs(mSampleRate.load(std::memory_order_relaxed));
 
-    stats.bufferMs = (packetCount * mPacketDurationMs) + ringMs;
-    stats.targetMs = mEffectiveTargetBufferMs.load(std::memory_order_relaxed);
+    stats.bufferMs = (packetCount * mPacketDurationMs.load(std::memory_order_relaxed)) + ringMs;
+    stats.targetMs = mReportedTargetBufferMs.load(std::memory_order_relaxed);
     stats.underruns = mUnderrunCount.load(std::memory_order_relaxed) + (mPcmRingBuffer.underrunFrames() / 240);
     stats.lostPackets = mLostCount.load(std::memory_order_relaxed);
     stats.latePackets = mLateCount.load(std::memory_order_relaxed);
@@ -473,6 +524,7 @@ JitterStatsSnapshot JitterBuffer::getStatsSnapshot() const {
     stats.rxPacketsPerSecond = mCurrentRxPps.load(std::memory_order_relaxed);
     stats.activeCodec = mActiveCodec.load(std::memory_order_relaxed);
     stats.autoMode = mAutoMode.load(std::memory_order_relaxed);
+    stats.rxPackets = mTotalRxPackets.load(std::memory_order_relaxed);
 
     return stats;
 }

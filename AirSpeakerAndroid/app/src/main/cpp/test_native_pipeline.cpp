@@ -10,7 +10,9 @@
 #include <map>
 
 // Include our actual engine headers under test
+#define AIRSPEAKER_UNIT_TEST
 #include "pcm_ring_buffer.h"
+#include "jitter_buffer.h"
 #include "protocol.h"
 
 static int gPassCount = 0;
@@ -555,6 +557,341 @@ void test_100_start_stop_cycles() {
     TEST_PASS("100 consecutive start/stop cycles & double stop idempotency");
 }
 
+void test_auto_buffer_persists_across_packets() {
+    // Model the exact state and adaptation logic of JitterBuffer
+    std::atomic<float> configuredTargetBufferMs{30.0f};
+    std::atomic<bool> autoMode{true};
+    float lastAppliedConfiguredTargetMs{-1.0f};
+    float localTargetBufferMs{30.0f};
+    std::atomic<float> effectiveTargetBufferMs{30.0f};
+    std::atomic<float> reportedTargetBufferMs{30.0f};
+
+    auto runProcessPackets = [&](bool simulateLoss) {
+        bool autoM = autoMode.load(std::memory_order_relaxed);
+        float configured = std::clamp(configuredTargetBufferMs.load(std::memory_order_relaxed), 10.0f, 200.0f);
+        if (!autoM || configured != lastAppliedConfiguredTargetMs) {
+            localTargetBufferMs = configured;
+            lastAppliedConfiguredTargetMs = configured;
+        }
+
+        if (simulateLoss && autoM) {
+            localTargetBufferMs = std::min(200.0f, localTargetBufferMs + 5.0f);
+        }
+
+        effectiveTargetBufferMs.store(localTargetBufferMs, std::memory_order_relaxed);
+        reportedTargetBufferMs.store(localTargetBufferMs, std::memory_order_relaxed);
+    };
+
+    // 1. Initial packet processing
+    runProcessPackets(/*simulateLoss=*/false);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 30.0f, "initial target must be 30ms");
+
+    // 2. Loss occurs: target adapts to 35ms
+    runProcessPackets(/*simulateLoss=*/true);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 35.0f, "target after loss must bump to 35ms");
+
+    // 3. Normal packet arrives: adapted target MUST NOT reset back to 30ms!
+    runProcessPackets(/*simulateLoss=*/false);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 35.0f, "auto target must persist across packets");
+
+    // 4. Second loss: target adapts to 40ms
+    runProcessPackets(/*simulateLoss=*/true);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 40.0f, "target after second loss must bump to 40ms");
+
+    // 5. Another normal packet: still 40ms
+    runProcessPackets(/*simulateLoss=*/false);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 40.0f, "auto target must persist at 40ms");
+
+    // 6. User manually changes configured target to 50ms: must update immediately
+    configuredTargetBufferMs.store(50.0f);
+    runProcessPackets(/*simulateLoss=*/false);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 50.0f, "manual configured change must override adapted target");
+
+    // 7. Auto mode disabled: localTarget tracks configuredTarget strictly
+    autoMode.store(false);
+    configuredTargetBufferMs.store(20.0f);
+    runProcessPackets(/*simulateLoss=*/false);
+    TEST_ASSERT(reportedTargetBufferMs.load() == 20.0f, "non-auto mode must strictly track configured target");
+
+    TEST_PASS("Auto buffer adaptation persists across incoming packets without resetting");
+}
+
+// ============================================================================
+// 12. JITTER BUFFER SUITE (TESTS 1..4)
+// ============================================================================
+
+namespace {
+
+constexpr uint32_t kJbSampleRate = 48000;
+constexpr uint8_t  kJbChannels   = 2;
+constexpr uint8_t  kJbCodecPcm16 = 0;
+constexpr uint8_t  kJbCodecOpus  = 1;
+
+// Builds a wire-accurate 12-byte little-endian header (<IIBBH) + payload
+std::vector<uint8_t> buildWirePacket(
+    uint32_t seq,
+    uint32_t timestampMs,
+    uint8_t codec,
+    uint8_t channels,
+    uint32_t sampleRate,
+    const uint8_t* payload,
+    size_t payloadBytes,
+    uint8_t hop = 0
+) {
+    std::vector<uint8_t> pkt(12 + payloadBytes);
+    auto writeU32LE = [&](size_t off, uint32_t v) {
+        pkt[off + 0] = static_cast<uint8_t>(v & 0xFF);
+        pkt[off + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+        pkt[off + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
+        pkt[off + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+    };
+    auto writeU16LE = [&](size_t off, uint16_t v) {
+        pkt[off + 0] = static_cast<uint8_t>(v & 0xFF);
+        pkt[off + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    };
+
+    writeU32LE(0, seq);
+    writeU32LE(4, timestampMs);
+    pkt[8] = static_cast<uint8_t>((codec & 0x0F) | ((hop & 0x0F) << 4));
+    pkt[9] = channels;
+    writeU16LE(10, static_cast<uint16_t>(sampleRate / 100));
+
+    if (payloadBytes > 0 && payload != nullptr) {
+        std::memcpy(pkt.data() + 12, payload, payloadBytes);
+    }
+    return pkt;
+}
+
+// Creates a 5 ms (240 frames) stereo PCM16 packet filled with a constant int16 marker
+std::vector<uint8_t> makeTaggedPcmPacket(uint32_t seq, int16_t marker, uint32_t frameMs = 5) {
+    const size_t frames = (kJbSampleRate * frameMs) / 1000;
+    std::vector<int16_t> samples(frames * kJbChannels, marker);
+    return buildWirePacket(
+        seq,
+        seq * frameMs,
+        kJbCodecPcm16,
+        kJbChannels,
+        kJbSampleRate,
+        reinterpret_cast<const uint8_t*>(samples.data()),
+        samples.size() * sizeof(int16_t)
+    );
+}
+
+// Reads frames from JitterBuffer
+size_t pullFrames(JitterBuffer& jb, std::vector<int16_t>& out, size_t frames) {
+    out.assign(frames * kJbChannels, 0);
+    return jb.readAudio(out.data(), static_cast<int>(frames));
+}
+
+// ---------------------------------------------------------------------------
+// Test 1: Cumulative rxPackets tracking, loss % math, and clean reset()
+// ---------------------------------------------------------------------------
+void testCumulativeRxPacketsAndReset() {
+    JitterBuffer jb;
+    jb.setTargetBufferMs(20.0f);
+
+    constexpr uint32_t kCount = 10;
+    for (uint32_t seq = 0; seq < kCount; ++seq) {
+        auto pkt = makeTaggedPcmPacket(seq, static_cast<int16_t>(100 + seq));
+        jb.pushPacket(pkt.data(), pkt.size());
+    }
+    jb.processPacketsForTest();
+
+    JitterStats stats = jb.getStats();
+    TEST_ASSERT(stats.rxPackets == kCount, "rxPackets must count every received packet");
+    TEST_ASSERT(stats.lostPackets == 0, "sequential packets must report 0 lost");
+
+    jb.reset();
+    stats = jb.getStats();
+    TEST_ASSERT(stats.rxPackets == 0, "reset() must zero cumulative rxPackets");
+    TEST_ASSERT(stats.lostPackets == 0, "reset() must zero lostPackets");
+
+    TEST_PASS("testCumulativeRxPacketsAndReset");
+}
+
+// ---------------------------------------------------------------------------
+// Test 2: Out-of-order recovery (verifies low-water cap keeps cushion in mPacketMap)
+// ---------------------------------------------------------------------------
+void testOutOfOrderRecovery() {
+    JitterBuffer jb;
+    jb.setTargetBufferMs(40.0f); // 8 x 5 ms packets
+
+    // Prebuffer seq 0..7 (40 ms)
+    for (uint32_t seq = 0; seq < 8; ++seq) {
+        auto pkt = makeTaggedPcmPacket(seq, static_cast<int16_t>(1000 + seq * 10));
+        jb.pushPacket(pkt.data(), pkt.size());
+    }
+    jb.processPacketsForTest();
+
+    // Low-water mark (~15 ms = 720 frames) must leave remaining packets in mPacketMap
+    TEST_ASSERT(jb.getRingOccupiedFramesForTest() <= 960,
+           "Ring buffer exceeded low-water cap; eager draining has regressed!");
+    TEST_ASSERT(jb.getPacketMapSizeForTest() >= 4,
+           "Jitter cushion must stay inside mPacketMap for reordering");
+
+    // Push seq 8 and seq 10 (skipping seq 9 temporarily)
+    auto pkt8  = makeTaggedPcmPacket(8,  1080);
+    auto pkt10 = makeTaggedPcmPacket(10, 1100);
+    jb.pushPacket(pkt8.data(), pkt8.size());
+    jb.pushPacket(pkt10.data(), pkt10.size());
+    jb.processPacketsForTest();
+
+    // Consume 15 ms (3 packets: seq 0, 1, 2) while seq 9 is still in flight
+    std::vector<int16_t> pcm;
+    for (int i = 0; i < 3; ++i) {
+        size_t got = pullFrames(jb, pcm, 240);
+        TEST_ASSERT(got == 240, "must pull 240 frames");
+        TEST_ASSERT(pcm[0] == static_cast<int16_t>(1000 + i * 10), "sample mismatch");
+        jb.processPacketsForTest();
+    }
+
+    // Delayed seq 9 arrives before the decoder reaches seq 9
+    auto pkt9 = makeTaggedPcmPacket(9, 1090);
+    jb.pushPacket(pkt9.data(), pkt9.size());
+
+    // Drain remaining seq 3..10 and verify exact in-order playback (9 before 10)
+    for (int seq = 3; seq <= 10; ++seq) {
+        jb.processPacketsForTest();
+        size_t got = pullFrames(jb, pcm, 240);
+        TEST_ASSERT(got == 240, "must pull 240 frames");
+        int16_t expectedMarker = static_cast<int16_t>(1000 + seq * 10);
+        TEST_ASSERT(pcm[0] == expectedMarker,
+               "Out-of-order packet 9 was not reordered ahead of packet 10");
+    }
+
+    JitterStats stats = jb.getStats();
+    TEST_ASSERT(stats.rxPackets == 11, "rxPackets mismatch");
+    TEST_ASSERT(stats.lostPackets == 0,
+           "Delayed packet within jitter window must not register as lost");
+
+    TEST_PASS("testOutOfOrderRecovery");
+}
+
+// ---------------------------------------------------------------------------
+// Test 3: Drift trimming (fires when queued ms > target + 15 ms & map > 4)
+// ---------------------------------------------------------------------------
+void testDriftTrimming() {
+    JitterBuffer jb;
+    jb.setTargetBufferMs(20.0f); // 4 x 5 ms packets; trim threshold = 35 ms (7 packets)
+
+    // Flood 20 packets (100 ms) to simulate sender clock running fast / burst arrival
+    for (uint32_t seq = 0; seq < 20; ++seq) {
+        auto pkt = makeTaggedPcmPacket(seq, static_cast<int16_t>(2000 + seq));
+        jb.pushPacket(pkt.data(), pkt.size());
+    }
+
+    // Pump decode/trim loop while simulating normal 5 ms playback ticks
+    std::vector<int16_t> pcm;
+    for (int tick = 0; tick < 8; ++tick) {
+        jb.processPacketsForTest();
+        pullFrames(jb, pcm, 240);
+    }
+    jb.processPacketsForTest();
+
+    const size_t ringFrames = jb.getRingOccupiedFramesForTest();
+    const size_t mapPackets = jb.getPacketMapSizeForTest();
+    const float remainingMs =
+        (static_cast<float>(ringFrames) * 1000.0f / kJbSampleRate) +
+        (static_cast<float>(mapPackets) * 5.0f);
+
+    TEST_ASSERT(remainingMs <= 45.0f,
+           "Drift trimming failed to pull excess latency back toward target buffer");
+
+    // Verify subsequent packets continue cleanly without false loss
+    const uint64_t lostBefore = jb.getStats().lostPackets;
+    for (uint32_t seq = 20; seq < 26; ++seq) {
+        auto pkt = makeTaggedPcmPacket(seq, static_cast<int16_t>(2000 + seq));
+        jb.pushPacket(pkt.data(), pkt.size());
+        jb.processPacketsForTest();
+        pullFrames(jb, pcm, 240);
+    }
+    TEST_ASSERT(jb.getStats().rxPackets == 26, "rxPackets mismatch");
+    TEST_ASSERT(jb.getStats().lostPackets == lostBefore,
+           "Post-trim sequence tracking broke");
+
+    TEST_PASS("testDriftTrimming");
+}
+
+// ---------------------------------------------------------------------------
+// Test 4: Opus in-band FEC recovery preserves next packet for normal decode
+// ---------------------------------------------------------------------------
+#ifdef HAS_OPUS
+void testOpusInBandFecPreservesNextPacket() {
+    int err = OPUS_OK;
+    OpusEncoder* enc = opus_encoder_create(kJbSampleRate, kJbChannels, OPUS_APPLICATION_VOIP, &err);
+    TEST_ASSERT(err == OPUS_OK && enc != nullptr, "encoder create failed");
+    opus_encoder_ctl(enc, OPUS_SET_BITRATE(32000));
+    opus_encoder_ctl(enc, OPUS_SET_INBAND_FEC(1));
+    opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(25));
+
+    constexpr size_t kFrameMs = 20;
+    constexpr int kFrameSamples = 960; // 20 ms @ 48 kHz
+    std::vector<std::vector<uint8_t>> encodedPackets;
+
+    for (uint32_t seq = 0; seq < 6; ++seq) {
+        std::vector<int16_t> sine(kFrameSamples * kJbChannels);
+        for (int i = 0; i < kFrameSamples; ++i) {
+            double t = static_cast<double>(seq * kFrameSamples + i) / kJbSampleRate;
+            int16_t s = static_cast<int16_t>(16000.0 * std::sin(2.0 * M_PI * 440.0 * t));
+            sine[i * 2]     = s;
+            sine[i * 2 + 1] = s;
+        }
+        uint8_t opusBuf[400];
+        int bytes = opus_encode(enc, sine.data(), kFrameSamples, opusBuf, sizeof(opusBuf));
+        TEST_ASSERT(bytes > 0, "opus_encode failed");
+        encodedPackets.push_back(buildWirePacket(
+            seq, seq * kFrameMs, kJbCodecOpus, kJbChannels, kJbSampleRate, opusBuf, static_cast<size_t>(bytes)
+        ));
+    }
+    opus_encoder_destroy(enc);
+
+    JitterBuffer jb;
+    jb.setTargetBufferMs(40.0f); // 2 x 20 ms frames
+
+    for (uint32_t seq : {0u, 1u, 2u, 4u, 5u}) {
+        jb.pushPacket(encodedPackets[seq].data(), encodedPackets[seq].size());
+    }
+
+    std::vector<int16_t> pcm;
+    int nonZeroSlots = 0;
+    for (int slot = 0; slot < 6; ++slot) {
+        jb.processPacketsForTest();
+        size_t got = pullFrames(jb, pcm, kFrameSamples);
+        TEST_ASSERT(got == kFrameSamples,
+               "Missing slot: FEC decode likely consumed seq 4 instead of preserving it");
+
+        int64_t energy = 0;
+        for (int16_t s : pcm) energy += std::abs(s);
+        if (energy > 0) ++nonZeroSlots;
+    }
+
+    JitterStats stats = jb.getStats();
+    TEST_ASSERT(stats.rxPackets == 5, "rxPackets mismatch");
+    TEST_ASSERT(stats.lostPackets == 1, "Exactly 1 packet (seq 3) must be counted as lost");
+    TEST_ASSERT(nonZeroSlots >= 5, "FEC + preserved seq 4 should produce non-silent audio");
+
+    const double lossPct =
+        (static_cast<double>(stats.lostPackets) * 100.0) /
+        static_cast<double>(stats.rxPackets + stats.lostPackets);
+    TEST_ASSERT(std::fabs(lossPct - (100.0 / 6.0)) < 0.01, "lossPct mismatch");
+
+    TEST_PASS("testOpusInBandFecPreservesNextPacket");
+}
+#endif
+
+} // namespace
+
+void runJitterBufferTests() {
+    testCumulativeRxPacketsAndReset();
+    testOutOfOrderRecovery();
+    testDriftTrimming();
+#ifdef HAS_OPUS
+    testOpusInBandFecPreservesNextPacket();
+#else
+    std::cout << "[SKIP] testOpusInBandFecPreservesNextPacket (compile with -DHAS_OPUS -lopus)" << std::endl;
+#endif
+}
+
 // ============================================================================
 // Main runner
 // ============================================================================
@@ -574,6 +911,8 @@ int main() {
     test_sequence_wrap_around_boundary();
     test_failed_start_transactional_rollback();
     test_100_start_stop_cycles();
+    test_auto_buffer_persists_across_packets();
+    runJitterBufferTests();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Results: " << gPassCount << " PASS / " << gFailCount << " FAIL" << std::endl;

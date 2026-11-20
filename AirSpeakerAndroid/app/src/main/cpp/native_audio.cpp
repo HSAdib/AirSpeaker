@@ -19,6 +19,7 @@ NativeAudioEngine::~NativeAudioEngine() {
 
 bool NativeAudioEngine::start(int audio_port) {
     std::lock_guard<std::mutex> lock(mStartStopMutex);
+    mShuttingDown.store(false, std::memory_order_release);
     if (mIsRunning.load(std::memory_order_acquire)) return true;
 
     mAudioPort = audio_port;
@@ -112,8 +113,23 @@ void NativeAudioEngine::cleanupAfterFailedStart() noexcept {
 }
 
 void NativeAudioEngine::stop() {
+    mShuttingDown.store(true, std::memory_order_release);
+    mIsRunning.store(false, std::memory_order_release);
+
+    // Move reopen thread out under mReopenMutex, then join outside locks to prevent deadlock.
+    std::thread reopenToJoin;
+    {
+        std::lock_guard<std::mutex> reopenLock(mReopenMutex);
+        if (mReopenThread.joinable() &&
+            mReopenThread.get_id() != std::this_thread::get_id()) {
+            reopenToJoin = std::move(mReopenThread);
+        }
+    }
+    if (reopenToJoin.joinable()) {
+        reopenToJoin.join();
+    }
+
     std::lock_guard<std::mutex> lock(mStartStopMutex);
-    if (!mIsRunning.exchange(false, std::memory_order_acq_rel)) return;
 
     // 1. Unblock UDP recvfrom by shutting down and closing socket
     int fd = mSocketFd.exchange(-1, std::memory_order_acq_rel);
@@ -130,15 +146,7 @@ void NativeAudioEngine::stop() {
         mReceiverThread.join();
     }
 
-    // 4. Join reopen thread if running
-    {
-        std::lock_guard<std::mutex> rLock(mReopenMutex);
-        if (mReopenThread.joinable()) {
-            mReopenThread.join();
-        }
-    }
-
-    // 5. Stop and join JitterBuffer decode worker
+    // 4. Stop and join JitterBuffer decode worker
     mJitterBuffer.stop();
 
     LOGI("NativeAudioEngine stopped cleanly");
@@ -146,6 +154,7 @@ void NativeAudioEngine::stop() {
 
 bool NativeAudioEngine::openOboeStream() {
     std::lock_guard<std::mutex> lock(mStreamMutex);
+    bool effectsEnabled = mEnableAudioEffects.load(std::memory_order_relaxed);
     auto tryOpen = [&](oboe::SharingMode sharing, oboe::PerformanceMode perf) -> bool {
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Output)
@@ -161,6 +170,10 @@ bool NativeAudioEngine::openOboeStream() {
             ->setDataCallback(this)
             ->setErrorCallback(this);
 
+        if (sharing == oboe::SharingMode::Shared || effectsEnabled) {
+            builder.setSessionId(oboe::SessionId::Allocate);
+        }
+
         oboe::Result result = builder.openStream(mAudioStream);
         if (result != oboe::Result::OK) {
             LOGW("Oboe openStream (sharing=%d, perf=%d) failed: %s",
@@ -171,10 +184,14 @@ bool NativeAudioEngine::openOboeStream() {
         return true;
     };
 
-    if (mLowLatencyMode.load(std::memory_order_relaxed)) {
+    if (mLowLatencyMode.load(std::memory_order_relaxed) && !effectsEnabled) {
         if (tryOpen(oboe::SharingMode::Exclusive, oboe::PerformanceMode::LowLatency)) {
             return true;
         }
+        if (tryOpen(oboe::SharingMode::Shared, oboe::PerformanceMode::LowLatency)) {
+            return true;
+        }
+    } else if (mLowLatencyMode.load(std::memory_order_relaxed) && effectsEnabled) {
         if (tryOpen(oboe::SharingMode::Shared, oboe::PerformanceMode::LowLatency)) {
             return true;
         }
@@ -204,23 +221,27 @@ void NativeAudioEngine::stopAndCloseOboeStream() {
 }
 
 void NativeAudioEngine::scheduleStreamReopen() {
+    std::lock_guard<std::mutex> lock(mReopenMutex);
+    if (!mIsRunning.load(std::memory_order_acquire) ||
+        mShuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
     bool expected = false;
     if (!mReopenPending.compare_exchange_strong(expected, true)) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(mReopenMutex);
     if (mReopenThread.joinable()) {
-        mReopenThread.join();
+        mReopenThread.detach(); // Previous finished reopen worker
     }
 
     mReopenThread = std::thread([this]() {
         LOGI("Oboe stream reopen worker started");
         stopAndCloseOboeStream();
 
-        for (int retry = 0; retry < 5 && mIsRunning.load(); ++retry) {
+        for (int retry = 0; retry < 5 && mIsRunning.load() && !mShuttingDown.load(); ++retry) {
             std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
-            if (!mIsRunning.load()) break;
+            if (!mIsRunning.load() || mShuttingDown.load()) break;
 
             if (openOboeStream() && startOboeStream()) {
                 LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
@@ -412,11 +433,25 @@ float NativeAudioEngine::getVolumeGain() const {
 }
 
 void NativeAudioEngine::setLowLatencyMode(bool lowLatency) {
-    mLowLatencyMode.store(lowLatency, std::memory_order_relaxed);
+    bool prev = mLowLatencyMode.exchange(lowLatency, std::memory_order_relaxed);
+    if (prev != lowLatency && mIsRunning.load(std::memory_order_relaxed)) {
+        scheduleStreamReopen();
+    }
 }
 
 bool NativeAudioEngine::isLowLatencyMode() const {
     return mLowLatencyMode.load(std::memory_order_relaxed);
+}
+
+void NativeAudioEngine::setEnableAudioEffects(bool enabled) {
+    bool prev = mEnableAudioEffects.exchange(enabled, std::memory_order_relaxed);
+    if (prev != enabled && mIsRunning.load(std::memory_order_relaxed)) {
+        scheduleStreamReopen();
+    }
+}
+
+bool NativeAudioEngine::isEnableAudioEffects() const {
+    return mEnableAudioEffects.load(std::memory_order_relaxed);
 }
 
 void NativeAudioEngine::setPartyRelayEnabled(bool enabled) {

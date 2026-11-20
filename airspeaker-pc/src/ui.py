@@ -324,6 +324,8 @@ class AirSpeakerApp:
             on_beacon=self._on_beacon,
             on_stats=self._on_phone_stats,
             on_config_sync=self._on_config_sync_received,
+            on_pc_announce=self._on_pc_announce,
+            on_party_kick=self._on_party_kicked,
         )
         self._control_listener.start()
         self._control_listener.set_target_ip(self.ip_var.get().strip())
@@ -380,6 +382,11 @@ class AirSpeakerApp:
         return row
 
     def _on_eq_changed(self) -> None:
+        u_ctx = self._eq_manager.get_context("universal")
+        if hasattr(self, "univ_eq_tx_var"):
+            self.univ_eq_tx_var.set(bool(u_ctx.get("apply_tx", False)))
+        if hasattr(self, "univ_eq_rx_var"):
+            self.univ_eq_rx_var.set(bool(u_ctx.get("apply_rx", False)))
         if hasattr(self, "_eq_status_vars"):
             for k, v in self._eq_status_vars.items():
                 v.set(self._eq_manager.summary_text(k))
@@ -1425,6 +1432,8 @@ class AirSpeakerApp:
             pc_out_idx = self._pc_output_devices[sel]["index"]
         if self._phone_receiver:
             self._phone_receiver.set_output_device(pc_out_idx)
+        if self._party_join_receiver:
+            self._party_join_receiver.set_output_device(pc_out_idx)
 
     def _sanitize_ip_and_port(self) -> Tuple[str, int]:
         raw_ip = self.ip_var.get().strip()
@@ -1461,9 +1470,10 @@ class AirSpeakerApp:
         ips = []
         if cur_ip and cur_ip not in ips:
             ips.append(cur_ip)
-        for dev_ip in self._party_devices.keys():
-            if dev_ip and dev_ip not in ips:
-                ips.append(dev_ip)
+        with self._party_lock:
+            for dev_ip in self._party_devices.keys():
+                if dev_ip and dev_ip not in ips:
+                    ips.append(dev_ip)
         return ips
 
     def _register_party_device(self, ip: str, name: str = "Android Phone", port: int = AUDIO_PORT, force: bool = False) -> None:
@@ -1473,30 +1483,34 @@ class AirSpeakerApp:
         local_ips = [a.get("ip") for a in self._adapter_data if a.get("ip")]
         if ip in local_ips:
             return
-        # If not actively hosting or extending party, do not auto-pollute party devices from normal mode beacons
         if not force and getattr(self, "_party_view_state", "CHOOSER") != "HOST" and not getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get() and not getattr(self, "party_mode_var", tk.BooleanVar(value=False)).get():
             return
-        self._party_devices[ip] = {
-            "name": name or "Android Phone",
-            "last_seen": time.monotonic(),
-            "port": int(port),
-        }
+        with self._party_lock:
+            self._party_devices[ip] = {
+                "name": name or "Android Phone",
+                "last_seen": time.monotonic(),
+                "port": int(port),
+            }
         if self._udp_sender:
             self._udp_sender.add_party_target(ip, int(port))
         self._refresh_party_ui()
 
     def _refresh_party_ui(self) -> None:
         now = time.monotonic()
-        to_prune = []
-        for dev_ip, dev_info in self._party_devices.items():
-            if dev_ip != self._manual_ip_override and (now - dev_info["last_seen"]) > 12.0:
-                to_prune.append(dev_ip)
+        with self._party_lock:
+            to_prune = [
+                dev_ip for dev_ip, dev_info in self._party_devices.items()
+                if dev_ip != self._manual_ip_override and (now - dev_info["last_seen"]) > 12.0
+            ]
+            for dev_ip in to_prune:
+                self._party_devices.pop(dev_ip, None)
+            snapshot = list(self._party_devices.items())
+
         for dev_ip in to_prune:
-            self._party_devices.pop(dev_ip, None)
             if self._udp_sender:
                 self._udp_sender.remove_party_target(dev_ip)
 
-        n = len(self._party_devices)
+        n = len(snapshot)
         if n == 0:
             cur = self.ip_var.get().strip()
             if cur:
@@ -1504,17 +1518,17 @@ class AirSpeakerApp:
             else:
                 self.party_status_var.set("🎉 Party Mode: Waiting for devices to join...")
         else:
-            dev_str = ", ".join(f"{d['name']} ({ip})" for ip, d in self._party_devices.items())
+            dev_str = ", ".join(f"{d['name']} ({ip})" for ip, d in snapshot)
             self.party_status_var.set(f"🎉 {n} Joined: {dev_str}")
             if self._party_view_state == "HOST" and self.party_mode_var.get() and not self._manual_ip_override:
-                first_ip = next(iter(self._party_devices))
-                first_name = self._party_devices[first_ip]["name"]
+                first_ip, first_info = snapshot[0]
+                first_name = first_info["name"]
                 self.conn_device_name_var.set(f"{first_name} (+{n-1} party)" if n > 1 else first_name)
                 self.conn_device_ip_var.set(f"{first_ip}  •  PARTY ACTIVE")
 
         if hasattr(self, "party_listbox"):
             self.party_listbox.delete(0, tk.END)
-            for idx, (dev_ip, dev_info) in enumerate(self._party_devices.items(), start=1):
+            for idx, (dev_ip, dev_info) in enumerate(snapshot, start=1):
                 age = max(0.0, now - dev_info["last_seen"])
                 state_tag = "ONLINE" if age < 5.0 else f"IDLE ({int(age)}s ago)"
                 self.party_listbox.insert(
@@ -1523,7 +1537,7 @@ class AirSpeakerApp:
                 )
 
         if hasattr(self, "party_extend_peers_label"):
-            ext_peers = [f"{d['name']} ({ip})" for ip, d in self._party_devices.items()]
+            ext_peers = [f"{d['name']} ({ip})" for ip, d in snapshot]
             if ext_peers:
                 self.party_extend_peers_label.config(
                     text=f"Extended Peers ({len(ext_peers)}): {', '.join(ext_peers)} • Re-broadcasting",
@@ -1565,10 +1579,13 @@ class AirSpeakerApp:
         if not sel:
             return
         idx = sel[0]
-        ips = list(self._party_devices.keys())
-        if 0 <= idx < len(ips):
-            ip_to_remove = ips[idx]
-            self._party_devices.pop(ip_to_remove, None)
+        ip_to_remove = None
+        with self._party_lock:
+            ips = list(self._party_devices.keys())
+            if 0 <= idx < len(ips):
+                ip_to_remove = ips[idx]
+                self._party_devices.pop(ip_to_remove, None)
+        if ip_to_remove:
             if self._udp_sender:
                 self._udp_sender.remove_party_target(ip_to_remove)
             self._refresh_party_ui()
@@ -1581,7 +1598,8 @@ class AirSpeakerApp:
         self._on_local_setting_changed()
 
     def _clear_party_devices(self) -> None:
-        self._party_devices.clear()
+        with self._party_lock:
+            self._party_devices.clear()
         if self._udp_sender:
             self._udp_sender.clear_party_targets()
         self._refresh_party_ui()
@@ -1909,6 +1927,8 @@ class AirSpeakerApp:
             self._start_party_join()
 
     def _start_party_join(self) -> None:
+        if self._play_active or (self._phone_receiver and self._phone_receiver.is_running):
+            self._stop_audio_receiver()
         if self._streaming:
             self._stop_stream(from_party=False)
             self._stop_stream(from_party=True)
@@ -1989,6 +2009,7 @@ class AirSpeakerApp:
                         "app": "AirSpeaker",
                         "version": 1,
                         "party_join": False,
+                        "party_leave": True,
                         "is_party_host": False,
                         "is_extended_host": False,
                         "device": socket.gethostname(),
@@ -2009,7 +2030,7 @@ class AirSpeakerApp:
             self._party_relay_sock = None
         if hasattr(self, "party_join_btn"):
             self.party_join_btn.config(
-                text="🎧  JOIN SELECTED HOST", bg="#002B00", fg=ACCENT,
+                text="🎧  JOIN PARTY STREAM (LISTEN TO HOST)", bg="#002B00", fg=ACCENT,
                 activebackground="#004400", activeforeground=ACCENT
             )
         self._party_joined_active = False
@@ -2029,16 +2050,7 @@ class AirSpeakerApp:
 
     def _on_party_join_stats(self, pps: int) -> None:
         self._party_join_rx_pps = pps
-        if self._party_join_receiver and self._party_join_receiver.is_running:
-            host_ip = self.party_join_host_ip_var.get().strip()
-            port = self.party_join_port_var.get().strip()
-            ext_suffix = ""
-            if self.party_extend_var.get():
-                n_ext = len(self._party_devices)
-                ext_suffix = f" • 📡 Extending to {n_ext} peer(s)"
-            self.party_join_status_var.set(
-                f"🎧 Playing Host {host_ip}:{port} • {pps} pkts/s{ext_suffix}"
-            )
+        self._ui_queue.put(("party_join_pps", pps))
 
     def _on_manual_ip_applied(self, event=None) -> None:
         new_ip, new_port = self._sanitize_ip_and_port()
@@ -2206,8 +2218,6 @@ class AirSpeakerApp:
             self.bitrate_combo_tab1.config(state=state)
         if hasattr(self, "bitrate_combo_tab2"):
             self.bitrate_combo_tab2.config(state=state)
-        if hasattr(self, "bitrate_combo_tab_host"):
-            self.bitrate_combo_tab_host.config(state=state)
         if hasattr(self, "frame_combo_tab2"):
             self.frame_combo_tab2.config(state=state)
         if not is_opus and self.frame_ms_var.get() != "5":
@@ -2248,6 +2258,8 @@ class AirSpeakerApp:
                 pass
         if hasattr(self, "buffer_val_label"):
             self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
+        if hasattr(self, "play_target_var"):
+            self.play_target_var.set(f"{self.custom_buffer_var.get():.1f} ms")
         if self._phone_receiver:
             self._phone_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
         if self._party_join_receiver:
@@ -2264,6 +2276,8 @@ class AirSpeakerApp:
                 pass
         if hasattr(self, "buffer_val_label"):
             self.buffer_val_label.config(text=f"{float(val):.1f} ms")
+        if hasattr(self, "play_target_var"):
+            self.play_target_var.set(f"{float(val):.1f} ms")
         if self._phone_receiver:
             self._phone_receiver.set_target_buffer_ms(float(val))
         if self._party_join_receiver:
@@ -2326,6 +2340,19 @@ class AirSpeakerApp:
 
     def _on_config_sync_received(self, msg: dict) -> None:
         self._ui_queue.put(("config_sync", msg))
+
+    def _on_party_kicked(self, msg: dict) -> None:
+        reason = msg.get("reason", "Removed by party host")
+        self.root.after(0, lambda: self._handle_party_kicked(reason))
+
+    def _handle_party_kicked(self, reason: str) -> None:
+        if self._party_join_receiver and self._party_join_receiver.is_running:
+            self._stop_party_join()
+        if hasattr(self, "party_join_status_label"):
+            try:
+                self.party_join_status_label.config(text=f"KICKED: {reason}", fg="#FF4444")
+            except Exception:
+                pass
 
     def _apply_incoming_config(self, msg: dict) -> None:
         if not isinstance(msg, dict):
@@ -2433,6 +2460,12 @@ class AirSpeakerApp:
                     self.gain_val_label.config(text=f"{int(round(g * 100))}%")
                     if hasattr(self, "conn_vol_pct_label"):
                         self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
+                    if self._udp_sender:
+                        self._udp_sender.set_volume_gain(g)
+                    if self._phone_receiver:
+                        self._phone_receiver.set_volume_gain(g)
+                    if self._party_join_receiver:
+                        self._party_join_receiver.set_volume_gain(g)
                 except (ValueError, TypeError):
                     pass
 
@@ -2442,6 +2475,12 @@ class AirSpeakerApp:
                 self.mute_btn.config(bg="#990000" if m else "#333333", text="MUTED" if m else "MUTE")
                 if hasattr(self, "conn_mute_icon_btn"):
                     self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
+                if self._udp_sender:
+                    self._udp_sender.set_muted(m)
+                if self._phone_receiver:
+                    self._phone_receiver.set_muted(m)
+                if self._party_join_receiver:
+                    self._party_join_receiver.set_muted(m)
 
             if "direction" in msg:
                 d = str(msg["direction"])
@@ -2513,10 +2552,7 @@ class AirSpeakerApp:
         if self._control_listener and target_ip:
             self._control_listener.set_target_ip(target_ip)
         if as_party:
-            if not target_ip and self._party_devices:
-                target_ip = next(iter(self._party_devices))
-            if not target_ip:
-                target_ip = "255.255.255.255"
+            target_ip = ""
         else:
             if not target_ip:
                 target_ip = "255.255.255.255"
@@ -2565,7 +2601,7 @@ class AirSpeakerApp:
                 on_stats=self._on_pps_update,
             )
             self._udp_sender.set_party_mode(as_party or self.party_mode_var.get())
-            self._udp_sender.configure(target_ip, target_port, codec, frame_ms, bind_ip=bind_ip)
+            self._udp_sender.configure(target_ip, target_port, codec, frame_ms, bind_ip=bind_ip, is_party_host=as_party)
             if as_party or self.party_mode_var.get():
                 for dev_ip, dev_info in self._party_devices.items():
                     self._udp_sender.add_party_target(dev_ip, dev_info.get("port", AUDIO_PORT))
@@ -2684,6 +2720,8 @@ class AirSpeakerApp:
     def _start_audio_receiver(self) -> None:
         if self._play_active:
             return
+        if self._party_join_receiver and self._party_join_receiver.is_running:
+            self._stop_party_join()
         pc_out_idx = None
         if hasattr(self, "pc_output_combo"):
             out_sel = self.pc_output_combo.current()
@@ -2758,6 +2796,9 @@ class AirSpeakerApp:
 
     def _on_beacon(self, msg: dict) -> None:
         self._ui_queue.put(("beacon", msg))
+
+    def _on_pc_announce(self, msg: dict) -> None:
+        self._ui_queue.put(("pc_announce", msg))
 
     def _on_phone_stats(self, stats: dict) -> None:
         self._phone_stats = stats
@@ -2848,12 +2889,14 @@ class AirSpeakerApp:
                     losses = self._phone_stats.get("lost_packets", 0)
                 if buf_val == 0.0 and getattr(self, "_party_joined_active", False) and getattr(self, "_party_join_receiver", None) and getattr(self, "_party_join_rx_pps", 0) > 0:
                     try:
-                        buf_val = float(len(self._party_join_receiver._pcm_queue) * 5.0)
+                        f_ms = float(getattr(self._party_join_receiver, "_frame_duration_ms", 5.0))
+                        buf_val = float(len(self._party_join_receiver._pcm_queue) * f_ms)
                     except Exception:
                         pass
                 elif buf_val == 0.0 and self._play_active and self._phone_receiver and self._rx_pps > 0:
                     try:
-                        buf_val = float(len(self._phone_receiver._pcm_queue) * 5.0)
+                        f_ms = float(getattr(self._phone_receiver, "_frame_duration_ms", 5.0))
+                        buf_val = float(len(self._phone_receiver._pcm_queue) * f_ms)
                         if hasattr(self, "play_buf_level_var"):
                             self.play_buf_level_var.set(f"{buf_val:.1f} ms")
                     except Exception:
@@ -2959,9 +3002,19 @@ class AirSpeakerApp:
                         self._rx_pps = data
                         if hasattr(self, "play_rx_pps_var"):
                             self.play_rx_pps_var.set(f"{data} pps")
-                        if hasattr(self, "rx_pps_var"):
-                            self.rx_pps_var.set(f"RX Packets: {data}/s")
                         self._update_combined_status()
+                    elif kind == "party_join_pps":
+                        if self._party_join_receiver and self._party_join_receiver.is_running:
+                            host_ip = self.party_join_host_ip_var.get().strip()
+                            port = self.party_join_port_var.get().strip()
+                            ext_suffix = ""
+                            if self.party_extend_var.get():
+                                with self._party_lock:
+                                    n_ext = len(self._party_devices)
+                                ext_suffix = f" • 📡 Extending to {n_ext} peer(s)"
+                            self.party_join_status_var.set(
+                                f"🎧 Playing Host {host_ip}:{port} • {data} pkts/s{ext_suffix}"
+                            )
                     elif kind == "driver_done":
                         ok, msg = data
                         if ok:
@@ -2988,8 +3041,9 @@ class AirSpeakerApp:
                                     self._udp_sender.update_target(sender_ip, int(self.ip_port_var.get() or AUDIO_PORT))
                             if data.get("party_join") is True:
                                 self._register_party_device(sender_ip, data.get("device", "Phone Joiner"), data.get("audio_port", AUDIO_PORT), force=True)
-                            elif data.get("party_join") is False:
-                                self._party_devices.pop(sender_ip, None)
+                            elif data.get("party_leave") is True:
+                                with self._party_lock:
+                                    self._party_devices.pop(sender_ip, None)
                                 if self._udp_sender:
                                     self._udp_sender.remove_party_target(sender_ip)
                                 self._refresh_party_ui()
@@ -3001,10 +3055,24 @@ class AirSpeakerApp:
                                     "last_seen": time.monotonic(),
                                     "port": data.get("audio_port", AUDIO_PORT),
                                 }
-                            elif "is_party_host" in data or "is_extended_host" in data:
+                            elif data.get("party_leave") is True:
                                 self._discovered_party_hosts.pop(sender_ip, None)
                                 self._refresh_discovered_hosts_ui()
                         self._apply_incoming_config(data)
+                    elif kind == "pc_announce":
+                        host_ip = data.get("_sender_ip")
+                        if host_ip and host_ip not in ("127.0.0.1", "0.0.0.0"):
+                            dev_name = data.get("device") or data.get("pc_name") or "PC Host"
+                            if data.get("is_party_host"):
+                                self._discovered_party_hosts[host_ip] = {
+                                    "name": dev_name,
+                                    "last_seen": time.monotonic(),
+                                    "port": data.get("audio_port", AUDIO_PORT),
+                                }
+                                self._refresh_discovered_hosts_ui()
+                            elif data.get("party_leave") is True or data.get("is_party_host") is False:
+                                self._discovered_party_hosts.pop(host_ip, None)
+                                self._refresh_discovered_hosts_ui()
                     elif kind == "beacon":
                         msg = data
                         sender_ip = msg.get("_sender_ip")
@@ -3076,8 +3144,9 @@ class AirSpeakerApp:
                             self._on_local_setting_changed()
                         if msg.get("party_join") is True:
                             self._register_party_device(best_ip, dev_name or "Phone Joiner", msg.get("audio_port", AUDIO_PORT), force=True)
-                        elif msg.get("party_join") is False:
-                            self._party_devices.pop(best_ip, None)
+                        elif msg.get("party_leave") is True:
+                            with self._party_lock:
+                                self._party_devices.pop(best_ip, None)
                             if self._udp_sender:
                                 self._udp_sender.remove_party_target(best_ip)
                             self._refresh_party_ui()
@@ -3089,7 +3158,7 @@ class AirSpeakerApp:
                                 "last_seen": time.monotonic(),
                                 "port": msg.get("audio_port", AUDIO_PORT),
                             }
-                        elif "is_party_host" in msg or "is_extended_host" in msg:
+                        elif msg.get("party_leave") is True:
                             self._discovered_party_hosts.pop(best_ip, None)
                             self._refresh_discovered_hosts_ui()
 
@@ -3163,7 +3232,8 @@ class AirSpeakerApp:
                         if sender_ip and s.get("party_join") is True:
                             self._register_party_device(sender_ip, dev_name or "Phone Joiner", s.get("audio_port", AUDIO_PORT))
                         elif sender_ip and s.get("party_join") is False:
-                            self._party_devices.pop(sender_ip, None)
+                            with self._party_lock:
+                                self._party_devices.pop(sender_ip, None)
                             if self._udp_sender:
                                 self._udp_sender.remove_party_target(sender_ip)
                             self._refresh_party_ui()
@@ -3178,7 +3248,10 @@ class AirSpeakerApp:
                             tgt_ms = s.get("target_ms", self.custom_buffer_var.get())
                             self.play_target_var.set(f"{tgt_ms:.1f} ms" if isinstance(tgt_ms, (int, float)) else f"{self.custom_buffer_var.get():.1f} ms")
                         if hasattr(self, "play_codec_var"):
-                            self.play_codec_var.set(f"{s.get('codec', 'PCM16')} (48kHz Stereo)")
+                            codec_name = s.get("codec")
+                            if not codec_name and "active_codec" in s:
+                                codec_name = "Opus" if int(s.get("active_codec", 0)) == 1 else "PCM16"
+                            self.play_codec_var.set(f"{codec_name or 'PCM16'} (48kHz Stereo)")
                         if hasattr(self, "play_rx_pps_var"):
                             self.play_rx_pps_var.set(f"{self._rx_pps} pps")
                         if hasattr(self, "play_underruns_var"):
@@ -3263,43 +3336,50 @@ class AirSpeakerApp:
     # ------------------------------------------------------------------
 
     def _load_config_into_ui(self) -> None:
-        phone_ip = self.cfg.get("phone_ip") or self.cfg.get("target_ip", "")
-        if phone_ip:
-            self.ip_var.set(phone_ip)
-        self.ip_port_var.set(str(self.cfg.get("phone_port", self.cfg.get("target_port", AUDIO_PORT))))
-        self.codec_var.set(int(self.cfg.get("codec", CODEC_PCM16)))
-        self.bitrate_var.set(str(self.cfg.get("opus_bitrate_kbps", 192)))
-        self.frame_ms_var.set(str(self.cfg.get("frame_ms", 5)))
-        self.buffer_mode_var.set(self.cfg.get("buffer_mode", "AUTO"))
-        self.custom_buffer_var.set(float(self.cfg.get("custom_buffer_ms", 30.0)))
-        for lbl in getattr(self, "_buffer_val_labels", []):
-            try:
-                lbl.config(text=f"{self.custom_buffer_var.get():.1f} ms")
-            except Exception:
-                pass
-        if hasattr(self, "buffer_val_label"):
-            self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
-        if self._phone_receiver:
-            self._phone_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
-        if self._party_join_receiver:
-            self._party_join_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
-        self.volume_gain_var.set(float(self.cfg.get("volume_gain", 1.0)))
-        self.gain_val_label.config(text=f"{int(self.volume_gain_var.get() * 100)}%")
-        if hasattr(self, "conn_vol_pct_label"):
-            self.conn_vol_pct_label.config(text=f"{int(self.volume_gain_var.get() * 100)}%")
-        m = bool(self.cfg.get("muted", False))
-        self.muted_var.set(m)
-        self.mute_btn.config(bg="#990000" if m else "#333333", text="MUTED" if m else "MUTE")
-        if hasattr(self, "conn_mute_icon_btn"):
-            self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
-        self.direction_var.set(self.cfg.get("direction", "PC_TO_PHONE"))
-        self.audio_profile_var.set(self.cfg.get("audio_profile", "BALANCED"))
-        self.tray_var.set(bool(self.cfg.get("minimize_to_tray", True)))
-        self.party_mode_var.set(False)
-        if self._control_listener:
-            self._control_listener.set_party_mode(False)
-        self._update_codec_ui_state()
-        self._update_expected_delay_label()
+        self._suppress_sync = True
+        try:
+            phone_ip = self.cfg.get("phone_ip") or self.cfg.get("target_ip", "")
+            if phone_ip:
+                self.ip_var.set(phone_ip)
+            self.ip_port_var.set(str(self.cfg.get("phone_port", self.cfg.get("target_port", AUDIO_PORT))))
+            self.codec_var.set(int(self.cfg.get("codec", CODEC_PCM16)))
+            self.bitrate_var.set(str(self.cfg.get("opus_bitrate_kbps", 192)))
+            self.frame_ms_var.set(str(self.cfg.get("frame_ms", 5)))
+            self.buffer_mode_var.set(self.cfg.get("buffer_mode", "AUTO"))
+            buf_ms = float(self.cfg.get("custom_buffer_ms", 30.0))
+            self.custom_buffer_var.set(buf_ms)
+            for lbl in getattr(self, "_buffer_val_labels", []):
+                try:
+                    lbl.config(text=f"{buf_ms:.1f} ms")
+                except Exception:
+                    pass
+            if hasattr(self, "buffer_val_label"):
+                self.buffer_val_label.config(text=f"{buf_ms:.1f} ms")
+            if hasattr(self, "play_target_var"):
+                self.play_target_var.set(f"{buf_ms:.1f} ms")
+            if self._phone_receiver:
+                self._phone_receiver.set_target_buffer_ms(buf_ms)
+            if self._party_join_receiver:
+                self._party_join_receiver.set_target_buffer_ms(buf_ms)
+            self.volume_gain_var.set(float(self.cfg.get("volume_gain", 1.0)))
+            self.gain_val_label.config(text=f"{int(self.volume_gain_var.get() * 100)}%")
+            if hasattr(self, "conn_vol_pct_label"):
+                self.conn_vol_pct_label.config(text=f"{int(self.volume_gain_var.get() * 100)}%")
+            m = bool(self.cfg.get("muted", False))
+            self.muted_var.set(m)
+            self.mute_btn.config(bg="#990000" if m else "#333333", text="MUTED" if m else "MUTE")
+            if hasattr(self, "conn_mute_icon_btn"):
+                self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
+            self.direction_var.set(self.cfg.get("direction", "PC_TO_PHONE"))
+            self.audio_profile_var.set(self.cfg.get("audio_profile", "BALANCED"))
+            self.tray_var.set(bool(self.cfg.get("minimize_to_tray", True)))
+            self.party_mode_var.set(False)
+            if self._control_listener:
+                self._control_listener.set_party_mode(False)
+            self._update_codec_ui_state()
+            self._update_expected_delay_label()
+        finally:
+            self._suppress_sync = False
 
     def _save_config(self) -> None:
         self.cfg["phone_ip"] = self.ip_var.get().strip()
@@ -3323,7 +3403,8 @@ class AirSpeakerApp:
         self.cfg["exclusive_audio_mode"] = self._phone_exclusive_mode
         self.cfg["stop_on_headset_disconnect"] = self._phone_headset_disc
         self.cfg["party_mode"] = self.party_mode_var.get()
-        self.cfg["party_ips"] = list(self._party_devices.keys())
+        with self._party_lock:
+            self.cfg["party_ips"] = list(self._party_devices.keys())
         self.cfg["config_rev"] = self._config_rev
         save(self.cfg)
 
@@ -3364,7 +3445,7 @@ PLATFORMS SUPPORTED:
 • Windows 11 / 10 (WASAPI Loopback, VB-CABLE Virtual Sink)
 • Linux: Ubuntu, Mint, Arch, Debian (PipeWire / PulseAudio native)
 • macOS: Sonoma, Ventura, Monterey (CoreAudio / BlackHole loopback)
-• Android: 8.0 through 15+ (Oboe C++ AAudio ultra-low latency & internal capture)
+• Android: 7.0 through 15+ (API 24+) (Oboe C++ AAudio ultra-low latency & internal capture)
 • iOS: 16.0 through 18+ (AVAudioEngine 48 kHz stereo player & ReplayKit capture)
 
 TABS:
@@ -3431,11 +3512,28 @@ TABS:
     def _quit_app(self) -> None:
         if self._streaming:
             self._stop_streaming()
+        if self._party_joined_active or self._party_join_receiver:
+            try:
+                self._stop_party_join()
+            except Exception:
+                pass
         if self._phone_receiver:
-            self._phone_receiver.stop()
+            try:
+                self._phone_receiver.stop()
+            except Exception:
+                pass
             self._phone_receiver = None
+        if hasattr(self, "_party_relay_sock") and self._party_relay_sock:
+            try:
+                self._party_relay_sock.close()
+            except Exception:
+                pass
+            self._party_relay_sock = None
         if self._control_listener:
-            self._control_listener.stop()
+            try:
+                self._control_listener.stop()
+            except Exception:
+                pass
             self._control_listener = None
         if self._tray_icon:
             try:

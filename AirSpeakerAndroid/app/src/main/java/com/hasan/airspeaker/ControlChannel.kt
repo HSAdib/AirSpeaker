@@ -14,9 +14,12 @@ import kotlin.concurrent.thread
 class ControlChannel(
     private val audioPort: Int = 5004,
     private val controlPort: Int = 5005,
-    @Volatile var onConfigSyncReceived: ((JSONObject) -> Unit)? = null
+    @Volatile var onConfigSyncReceived: ((JSONObject) -> Unit)? = null,
+    @Volatile var onPartyKicked: ((String) -> Unit)? = null
 ) {
     private val TAG = "ControlChannel"
+    @Volatile
+    var isPartyJoinerActive: Boolean = false
     @Volatile
     private var isRunning = false
     private var beaconThread: Thread? = null
@@ -209,15 +212,17 @@ class ControlChannel(
                                 }
 
                                 // Rule 4: Handle downstream peers
+                                val wantsJoin = json.optBoolean("party_join", false)
+                                val explicitLeave = json.optBoolean("party_leave", false)
                                 if (isHostingOrExtendingParty || AudioNative.nativeIsPartyRelay()) {
-                                    if (hasPartyJoin && isPartyJoin && !isHost) {
+                                    if (wantsJoin && !isHost) {
                                         partyPeerLastSeen[senderIp] = android.os.SystemClock.elapsedRealtime()
                                         if (partyPeerIps.add(senderIp)) {
                                             AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
                                             onPartyHostDiscovered?.invoke()
                                             Log.i(TAG, "Party Mode: registered downstream peer $senderIp (total=${partyPeerIps.size})")
                                         }
-                                    } else if (hasPartyJoin && !isPartyJoin) {
+                                    } else if (explicitLeave) {
                                         partyPeerLastSeen.remove(senderIp)
                                         if (partyPeerIps.remove(senderIp)) {
                                             AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
@@ -276,6 +281,10 @@ class ControlChannel(
                                 }
                             }
                             onConfigSyncReceived?.invoke(json)
+                        } else if (msgType == "PARTY_KICK") {
+                            val reason = json.optString("reason", "Removed by party host")
+                            onPartyKicked?.invoke(reason)
+                            Companion.onPartyKicked?.invoke(reason)
                         }
                     } catch (_: Exception) {}
                 }
@@ -302,7 +311,7 @@ class ControlChannel(
                         put("ips", JSONArray(ips))
                         put("audio_port", audioPort)
                         put("device", getPhoneModelName())
-                        put("party_join", false)
+                        put("party_join", isPartyJoinerActive || Companion.isPartyJoinerActive)
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
                         put("serving", AudioStreamService.isServing)
@@ -372,16 +381,20 @@ class ControlChannel(
                     }
 
                     val stats = AudioNative.getStats()
+                    val totalPkts = stats.rxPackets + stats.lostPackets
+                    val lossPct = if (totalPkts > 0L) (stats.lostPackets.toDouble() * 100.0) / totalPkts.toDouble() else 0.0
                     val json = JSONObject().apply {
                         put("type", "STATS")
                         put("buffer_ms", stats.bufferMs.toDouble())
                         put("target_ms", stats.targetMs.toDouble())
                         put("underruns", stats.underruns)
                         put("lost_packets", stats.lostPackets)
+                        put("packet_loss_pct", lossPct)
                         put("late_packets", stats.latePackets)
                         put("auto_mode", stats.autoMode)
                         put("rx_pps", stats.rxPps)
                         put("active_codec", stats.codec)
+                        put("codec", if (stats.codec == 1) "Opus" else "PCM16")
                         put("device", getPhoneModelName())
                         put("serving", AudioStreamService.isServing)
                         put("playing", AudioStreamService.isStreaming)
@@ -423,6 +436,7 @@ class ControlChannel(
 
     companion object {
         private const val TAG = "ControlChannel"
+        @Volatile var isPartyJoinerActive: Boolean = false
         @Volatile var isHostingOrExtendingParty: Boolean = false
         @Volatile var isExtendingParty: Boolean = false
         @Volatile var lastKnownPcIp: String? = null
@@ -431,6 +445,7 @@ class ControlChannel(
         val partyPeerLastSeen = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val discoveredPartyHosts = java.util.concurrent.ConcurrentHashMap<String, DiscoveredPartyHost>()
         var onPartyHostDiscovered: (() -> Unit)? = null
+        @Volatile var onPartyKicked: ((String) -> Unit)? = null
 
         fun prunePartyHostsAndPeers() {
             val now = android.os.SystemClock.elapsedRealtime()
@@ -496,6 +511,7 @@ class ControlChannel(
         }
 
         fun sendPartyJoinAnnouncement(hostIp: String) {
+            isPartyJoinerActive = true
             kotlin.concurrent.thread(name = "PartyJoinAnnouncer", isDaemon = true) {
                 try {
                     val sock = DatagramSocket()
@@ -505,6 +521,8 @@ class ControlChannel(
                         put("version", 1)
                         put("device", getPhoneModelName())
                         put("party_join", true)
+                        put("is_party_host", false)
+                        put("is_extended_host", isExtendingParty)
                         put("audio_port", 5004)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
@@ -520,6 +538,7 @@ class ControlChannel(
         }
 
         fun sendPartyLeaveAnnouncement(hostIp: String) {
+            isPartyJoinerActive = false
             if (hostIp.isBlank()) return
             kotlin.concurrent.thread(name = "PartyLeaveAnnouncer", isDaemon = true) {
                 try {
@@ -530,6 +549,7 @@ class ControlChannel(
                         put("version", 1)
                         put("device", getPhoneModelName())
                         put("party_join", false)
+                        put("party_leave", true)
                         put("is_party_host", false)
                         put("is_extended_host", false)
                         put("audio_port", 5004)
@@ -541,6 +561,11 @@ class ControlChannel(
                     sock.close()
                 } catch (_: Exception) {}
             }
+        }
+
+        fun sendPartyLeaveBeacon(hostIp: String, deviceName: String = getPhoneModelName(), audioPort: Int = 5004) {
+            isPartyJoinerActive = false
+            sendPartyLeaveAnnouncement(hostIp)
         }
 
         fun sendPartyHostStopAnnouncement() {
@@ -555,10 +580,23 @@ class ControlChannel(
                         put("is_party_host", false)
                         put("is_extended_host", false)
                         put("party_mode", false)
+                        put("party_leave", true)
                         put("audio_port", 5004)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
-                    sock.send(DatagramPacket(data, data.size, InetAddress.getByName("255.255.255.255"), 5005))
+                    val targets = mutableSetOf("255.255.255.255")
+                    targets.addAll(partyPeerIps)
+                    for (ip in getLocalIpv4Addresses()) {
+                        val parts = ip.split(".")
+                        if (parts.size == 4 && !parts[0].startsWith("127")) {
+                            targets.add("${parts[0]}.${parts[1]}.${parts[2]}.255")
+                        }
+                    }
+                    for (t in targets) {
+                        try {
+                            sock.send(DatagramPacket(data, data.size, InetAddress.getByName(t), 5005))
+                        } catch (_: Exception) {}
+                    }
                     sock.close()
                 } catch (_: Exception) {}
             }
@@ -583,7 +621,7 @@ class ControlChannel(
                         put("ips", org.json.JSONArray(ips))
                         put("audio_port", 5004)
                         put("device", getPhoneModelName())
-                        put("party_join", false)
+                        put("party_join", isPartyJoinerActive)
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
                         put("serving", AudioStreamService.isServing)

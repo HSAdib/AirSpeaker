@@ -1,8 +1,19 @@
 #include "opus_wrapper.h"
+#ifdef __ANDROID__
 #include <android/log.h>
+#else
+#include <cstdio>
+#define ANDROID_LOG_DEBUG 3
+#define ANDROID_LOG_INFO  4
+#define ANDROID_LOG_WARN  5
+#define ANDROID_LOG_ERROR 6
+#define __android_log_print(prio, tag, fmt, ...) ((void)0)
+#endif
 
 #define TAG "OpusDecoderWrapper"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+#if defined(HAS_OPUS) || defined(__ANDROID__)
 
 OpusDecoderWrapper::OpusDecoderWrapper() {}
 
@@ -41,4 +52,14 @@ int OpusDecoderWrapper::decode(const uint8_t* data, int len, int16_t* out_pcm, i
     }
     return result;
 }
+
+#else
+
+OpusDecoderWrapper::OpusDecoderWrapper() {}
+OpusDecoderWrapper::~OpusDecoderWrapper() {}
+void OpusDecoderWrapper::reset() {}
+bool OpusDecoderWrapper::init(int, int) { return false; }
+int OpusDecoderWrapper::decode(const uint8_t*, int, int16_t*, int, bool) { return -1; }
+
+#endif
 

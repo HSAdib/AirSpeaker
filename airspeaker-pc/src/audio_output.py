@@ -312,7 +312,7 @@ class AudioReceiver:
         self._manual_mute = False
         self._rx_thread: Optional[threading.Thread] = None
         self._play_thread: Optional[threading.Thread] = None
-        self._pcm_queue: collections.deque = collections.deque(maxlen=40)
+        self._pcm_queue: collections.deque = collections.deque(maxlen=128)
         self._is_prebuffering = True
         self._last_rx_time = 0.0
         self._last_seq: Optional[int] = None
@@ -326,6 +326,26 @@ class AudioReceiver:
         self._pps_count = 0
         self._last_pps_time = 0.0
         self.peak_level: float = 0.0
+        self._frame_duration_ms: float = 5.0
+
+    def _update_frame_duration_ms(self, decoded_pcm: bytes, channels: int = 2) -> float:
+        if not decoded_pcm:
+            return self._frame_duration_ms
+        bytes_per_frame = max(1, channels) * 2
+        total_samples_per_ch = len(decoded_pcm) // bytes_per_frame
+        if total_samples_per_ch > 0:
+            duration_ms = (total_samples_per_ch * 1000.0) / float(SAMPLE_RATE)
+            if 1.0 <= duration_ms <= 100.0:
+                self._frame_duration_ms = duration_ms
+        return self._frame_duration_ms
+
+    def _compute_buffer_packet_bounds(self) -> Tuple[int, int]:
+        frame_ms = max(1.0, getattr(self, "_frame_duration_ms", 5.0))
+        target_ms = max(10.0, float(self._target_buffer_ms))
+        queue_cap = self._pcm_queue.maxlen or 128
+        min_packets = max(2, min(queue_cap - 6, int(round(target_ms / frame_ms))))
+        max_packets = max(min_packets + 4, min(queue_cap - 1, int(round((target_ms + 30.0) / frame_ms))))
+        return min_packets, max_packets
 
     def set_target_buffer_ms(self, target_ms: float) -> None:
         self._target_buffer_ms = max(10.0, min(200.0, float(target_ms)))
@@ -404,6 +424,11 @@ class AudioReceiver:
         self._resampler = None
         if self._pacat_proc:
             try:
+                if self._pacat_proc.stdin:
+                    self._pacat_proc.stdin.close()
+            except Exception:
+                pass
+            try:
                 self._pacat_proc.terminate()
                 self._pacat_proc.wait(timeout=1.0)
             except Exception:
@@ -442,6 +467,15 @@ class AudioReceiver:
             with self._lock:
                 if not self._open_audio_sink():
                     logger.warning("PhoneAudioReceiver could not open audio output device")
+                    self._close_audio_sink()
+                    if self._sock:
+                        try:
+                            self._sock.close()
+                        except Exception:
+                            pass
+                        self._sock = None
+                    self._running = False
+                    return False
 
             self._opus_decoder = OpusDecoder(SAMPLE_RATE, CHANNELS)
             self._running = True
@@ -512,7 +546,9 @@ class AudioReceiver:
                     seq = header["seq"]
                     sender_ip = addr[0]
                     now_rx = time.monotonic()
-                    if (now_rx - self._last_rx_time) > 0.6 or (self._last_seq is not None and self._last_seq > 30 and seq < 15):
+                    if (now_rx - self._last_rx_time) > 0.6 or (
+                        self._last_seq is not None and 30 < self._last_seq < 0xFFFE0000 and seq < 15
+                    ):
                         self._last_seq = None
                     if sender_ip == self._last_sender_ip and self._last_seq is not None:
                         diff = (self._last_seq - seq) & 0xFFFFFFFF
@@ -526,10 +562,13 @@ class AudioReceiver:
                     channels = header["channels"]
 
                     decoded_pcm = None
+                    out_channels = CHANNELS
                     if codec == CODEC_OPUS and self._opus_decoder and self._opus_decoder.available:
                         decoded_pcm = self._opus_decoder.decode(payload, frame_size=960)
+                        out_channels = CHANNELS  # OpusDecoder is configured for 2-channel stereo output
                     elif codec == CODEC_PCM16:
                         decoded_pcm = payload
+                        out_channels = 1 if channels == 1 else 2
 
                     if decoded_pcm:
                         self._pps_count += 1
@@ -537,10 +576,13 @@ class AudioReceiver:
                         if not self._manual_mute:
                             self._muted = False
                         if not self._muted:
-                            pcm_arr = np.frombuffer(decoded_pcm, dtype="<i2")
-                            if len(pcm_arr) > 0:
-                                self.peak_level = float(np.max(np.abs(pcm_arr))) / 32768.0
-                            self._pcm_queue.append((decoded_pcm, channels))
+                            usable = (len(decoded_pcm) // 2) * 2
+                            if usable > 0:
+                                pcm_arr = np.frombuffer(decoded_pcm[:usable], dtype="<i2")
+                                if len(pcm_arr) > 0:
+                                    self.peak_level = float(np.max(np.abs(pcm_arr))) / 32768.0
+                            self._update_frame_duration_ms(decoded_pcm, out_channels)
+                            self._pcm_queue.append((decoded_pcm, out_channels))
                             self._queue_event.set()
             except socket.timeout:
                 self.peak_level = 0.0
@@ -562,7 +604,13 @@ class AudioReceiver:
 
     def _render_and_write(self, pcm_data: bytes, channels: int) -> None:
         try:
-            pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, channels)
+            in_ch = channels if channels in (1, 2) else 2
+            usable = (len(pcm_data) // (2 * in_ch)) * (2 * in_ch)
+            if usable == 0:
+                return
+            pcm_data = pcm_data[:usable]
+
+            pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, in_ch)
             gain = self._volume_gain
             if abs(gain - 1.0) > 0.01:
                 norm = (np.frombuffer(pcm_data, dtype="<i2").astype(np.float32) * gain) / 32767.0
@@ -574,9 +622,8 @@ class AudioReceiver:
                     norm = np.clip(norm, -1.0, 1.0)
                 pcm_data = np.rint(norm * 32767.0).astype("<i2").tobytes()
             out_pcm = pcm_data
-            if self._dev_rate != SAMPLE_RATE or self._dev_channels != channels:
+            if self._dev_rate != SAMPLE_RATE or self._dev_channels != in_ch:
                 pcm_arr = np.frombuffer(pcm_data, dtype="<i2")
-                in_ch = channels if channels in (1, 2) else 2
                 pcm_2d = pcm_arr.reshape(-1, in_ch)
                 if self._dev_channels == 1 and in_ch == 2:
                     pcm_2d = pcm_2d.mean(axis=1, keepdims=True).astype(np.int16)
@@ -629,12 +676,11 @@ class AudioReceiver:
         """Dedicated audio playback thread consuming decoded mic frames smoothly."""
         while self._running:
             try:
-                min_packets = max(2, int(round(self._target_buffer_ms / 5.0)))
-                max_packets = max(min_packets + 6, int(round((self._target_buffer_ms + 30.0) / 5.0)))
+                min_packets, max_packets = self._compute_buffer_packet_bounds()
                 if self._is_prebuffering:
+                    self._queue_event.clear()
                     if len(self._pcm_queue) < min_packets:
                         self._queue_event.wait(timeout=0.02)
-                        self._queue_event.clear()
                         continue
                     self._is_prebuffering = False
 
@@ -654,6 +700,7 @@ class AudioReceiver:
                     if self._muted or not decoded_pcm:
                         continue
 
+                    self._update_frame_duration_ms(decoded_pcm, channels)
                     self._last_valid_frame = decoded_pcm
                     self._last_channels = channels
                     self._render_and_write(decoded_pcm, channels)
@@ -661,7 +708,6 @@ class AudioReceiver:
                     now = time.monotonic()
                     if (now - self._last_rx_time) < 0.060 and self._conceal_count < 4 and not self._muted:
                         self._conceal_count += 1
-                        # Wi-Fi micro-jitter gap during active speech: conceal 5ms gap by decaying last frame (* 0.80)
                         arr = np.frombuffer(self._last_valid_frame, dtype="<i2").astype(np.float32) * 0.80
                         self._last_valid_frame = arr.astype("<i2").tobytes()
                         self._render_and_write(self._last_valid_frame, getattr(self, "_last_channels", CHANNELS))
@@ -669,8 +715,9 @@ class AudioReceiver:
                             time.sleep(0.005)
                     else:
                         self._is_prebuffering = True
-                        self._queue_event.wait(timeout=0.02)
                         self._queue_event.clear()
+                        if not self._pcm_queue:
+                            self._queue_event.wait(timeout=0.02)
             except Exception as exc:
                 logger.debug("AudioReceiver play error: %s", exc)
 

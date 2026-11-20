@@ -96,7 +96,7 @@ if [ "$ARCH" = "x86_64" ]; then
         if [ -f "$APP_DIR/AirSpeaker" ]; then
             chmod +x "$APP_DIR/AirSpeaker"
             # Self-check verification
-            if "$APP_DIR/AirSpeaker" --version >/dev/null 2>&1 || [ -x "$APP_DIR/AirSpeaker" ]; then
+            if "$APP_DIR/AirSpeaker" --version >/dev/null 2>&1; then
                 echo "Pre-compiled application binary verified successfully."
                 INSTALL_SUCCESS=1
                 if [ -f "$APP_DIR/app_icon.png" ]; then

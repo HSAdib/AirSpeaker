@@ -10,14 +10,22 @@ Supports 5 independent EQ contexts:
   - 'universal'  : Master device EQ in SETTINGS tab with independent TX/RX checkmarks
 """
 
+from array import array
 import copy
 import math
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+
+try:
+    from scipy.signal import sosfilt
+    _HAS_SCIPY = True
+except ImportError:
+    sosfilt = None
+    _HAS_SCIPY = False
 
 BAND_FREQS = [60, 230, 910, 3600, 14000]
 BAND_LABELS = ["60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz"]
@@ -51,97 +59,225 @@ DEFAULT_EQ_STATE: Dict[str, Any] = {
 
 class StereoFiveBandBiquadDSP:
     """
-    Stateful 5-band stereo peaking/shelving biquad filter bank for 48 kHz PCM16 frames.
-    Maintains filter state across 5ms frame boundaries so there are zero clicks.
+    Real-time 5-band stereo peaking/shelf biquad EQ optimized for 5 ms audio frames.
+    Features:
+      - C-speed SciPy sosfilt fast path when available
+      - Zero-dependency scalar-float Direct Form II Transposed fallback (array('h'))
+      - Snapshotting coefficients under lock; state stays exclusively on the audio thread
+      - Skipping flat bands (|gain| < 0.05 dB)
+      - Soft-knee limiter preventing clipping distortion on high boosts
     """
 
+    BAND_FREQS = (60.0, 230.0, 910.0, 3600.0, 14000.0)
+    BAND_Q = 1.15
+
     def __init__(self, sample_rate: int = 48000):
-        self._sr = float(sample_rate)
+        self.sample_rate = float(sample_rate)
         self._lock = threading.Lock()
-        self._gains_db: List[float] = [0.0, 0.0, 0.0, 0.0, 0.0]
-        self._active = False
-        self._coeffs: List[tuple] = []
-        self._z1 = np.zeros((5, 2), dtype=np.float64)
-        self._z2 = np.zeros((5, 2), dtype=np.float64)
-        self._recompute_coeffs()
+        self._enabled = False
+        self._gains_db = [0.0] * 5
+        self._coeffs: List[Tuple[float, float, float, float, float]] = [(1.0, 0.0, 0.0, 0.0, 0.0)] * 5
+        self._active_indices: Tuple[int, ...] = ()
+        self._sos: Optional[np.ndarray] = None
 
-    def set_gains(self, gains_db: List[float], enabled: bool = True) -> None:
-        clamped = [max(-12.0, min(12.0, float(g))) for g in (gains_db + [0.0] * 5)[:5]]
-        is_active = bool(enabled) and any(abs(g) > 0.05 for g in clamped)
+        # Audio thread filter state
+        self._py_zi = [[[0.0, 0.0], [0.0, 0.0]] for _ in range(5)]
+        self._scipy_zi = np.zeros((5, 2, 2), dtype=np.float64)
+        self._needs_state_reset = False
+
+    def set_enabled(self, enabled: bool) -> None:
         with self._lock:
-            if clamped != self._gains_db or is_active != self._active:
-                self._gains_db = clamped
-                self._active = is_active
-                self._recompute_coeffs()
-                if not is_active:
-                    self._z1.fill(0.0)
-                    self._z2.fill(0.0)
+            if self._enabled != bool(enabled):
+                self._enabled = bool(enabled)
+                if not self._enabled:
+                    self._needs_state_reset = True
 
-    def _recompute_coeffs(self) -> None:
-        coeffs = []
-        q = 1.15
-        for freq, gain_db in zip(BAND_FREQS, self._gains_db):
-            if abs(gain_db) <= 0.05:
-                coeffs.append((1.0, 0.0, 0.0, 0.0, 0.0))
-                continue
-            A = 10.0 ** (gain_db / 40.0)
-            w0 = 2.0 * math.pi * float(freq) / self._sr
-            alpha = math.sin(w0) / (2.0 * q)
-            cos_w0 = math.cos(w0)
+    def set_gains(self, gains_db: List[float], enabled: Optional[bool] = None) -> None:
+        clamped = [max(-12.0, min(12.0, float(g))) for g in (gains_db + [0.0] * 5)[:5]]
+        coeffs = [
+            self._design_peaking_biquad(freq, g, self.BAND_Q, self.sample_rate)
+            for freq, g in zip(self.BAND_FREQS, clamped)
+        ]
+        active = tuple(i for i, g in enumerate(clamped) if abs(g) >= 0.05)
+        sos = None
+        if _HAS_SCIPY and active:
+            sos = np.array(
+                [(coeffs[i][0], coeffs[i][1], coeffs[i][2], 1.0, coeffs[i][3], coeffs[i][4]) for i in active],
+                dtype=np.float64,
+            )
+        with self._lock:
+            self._gains_db = clamped
+            self._coeffs = coeffs
+            self._active_indices = active
+            self._sos = sos
+            if enabled is not None:
+                new_en = bool(enabled)
+                if self._enabled != new_en:
+                    self._enabled = new_en
+                    if not new_en:
+                        self._needs_state_reset = True
+            elif active and not self._enabled:
+                self._enabled = True
 
-            b0 = 1.0 + alpha * A
-            b1 = -2.0 * cos_w0
-            b2 = 1.0 - alpha * A
-            a0 = 1.0 + alpha / A
-            a1 = -2.0 * cos_w0
-            a2 = 1.0 - alpha / A
+    def reset(self) -> None:
+        with self._lock:
+            self._needs_state_reset = True
 
-            coeffs.append((b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0))
-        self._coeffs = coeffs
+    @staticmethod
+    def _design_peaking_biquad(freq: float, gain_db: float, q: float, fs: float) -> Tuple[float, float, float, float, float]:
+        if abs(gain_db) < 0.05:
+            return (1.0, 0.0, 0.0, 0.0, 0.0)
+        a_lin = 10.0 ** (gain_db / 40.0)
+        w0 = 2.0 * math.pi * freq / fs
+        cos_w0 = math.cos(w0)
+        alpha = math.sin(w0) / (2.0 * q)
+
+        b0 = 1.0 + alpha * a_lin
+        b1 = -2.0 * cos_w0
+        b2 = 1.0 - alpha * a_lin
+        a0 = 1.0 + alpha / a_lin
+        a1 = -2.0 * cos_w0
+        a2 = 1.0 - alpha / a_lin
+
+        inv_a0 = 1.0 / a0
+        return (b0 * inv_a0, b1 * inv_a0, b2 * inv_a0, a1 * inv_a0, a2 * inv_a0)
+
+    def _clear_states(self) -> None:
+        for b in range(5):
+            self._py_zi[b][0][0] = 0.0
+            self._py_zi[b][0][1] = 0.0
+            self._py_zi[b][1][0] = 0.0
+            self._py_zi[b][1][1] = 0.0
+        self._scipy_zi.fill(0.0)
 
     def process_pcm16(self, pcm_bytes: bytes, channels: int = 2) -> bytes:
         with self._lock:
-            if not self._active or not pcm_bytes:
-                return pcm_bytes
-            coeffs = list(self._coeffs)
+            enabled = self._enabled
+            active = self._active_indices
+            coeffs = self._coeffs
+            sos = self._sos
+            should_reset = self._needs_state_reset
+            self._needs_state_reset = False
 
+        if should_reset:
+            self._clear_states()
+
+        if not enabled or not active or not pcm_bytes:
+            return pcm_bytes
+
+        if _HAS_SCIPY:
+            return self._process_scipy(pcm_bytes, coeffs, active, channels, sos)
+        return self._process_scalar_python(pcm_bytes, coeffs, active, channels)
+
+    def _process_scipy(
+        self,
+        pcm_bytes: bytes,
+        coeffs: list,
+        active: Tuple[int, ...],
+        channels: int,
+        sos: Optional[np.ndarray] = None,
+    ) -> bytes:
         in_ch = 2 if channels >= 2 else 1
         usable = (len(pcm_bytes) // (2 * in_ch)) * (2 * in_ch)
         if usable == 0:
             return pcm_bytes
 
-        arr = np.frombuffer(pcm_bytes[:usable], dtype="<i2").astype(np.float64) / 32768.0
-        arr = arr.reshape(-1, in_ch)
+        if sos is None or sos.shape[0] != len(active):
+            sos = np.empty((len(active), 6), dtype=np.float64)
+            for row_idx, band_idx in enumerate(active):
+                b0, b1, b2, a1, a2 = coeffs[band_idx]
+                sos[row_idx] = (b0, b1, b2, 1.0, a1, a2)
 
-        with self._lock:
-            for b_idx, (b0, b1, b2, a1, a2) in enumerate(coeffs):
-                if b0 == 1.0 and b1 == 0.0 and b2 == 0.0:
-                    continue
-                z1 = self._z1[b_idx, :in_ch].copy()
-                z2 = self._z2[b_idx, :in_ch].copy()
-                out = np.empty_like(arr)
-                for n in range(arr.shape[0]):
-                    x = arr[n]
-                    y = b0 * x + z1
-                    z1 = b1 * x - a1 * y + z2
-                    z2 = b2 * x - a2 * y
-                    out[n] = y
-                self._z1[b_idx, :in_ch] = z1
-                self._z2[b_idx, :in_ch] = z2
-                arr = out
+        pcm = np.frombuffer(pcm_bytes[:usable], dtype=np.int16).reshape(-1, in_ch)
+        x = pcm.T.astype(np.float64)  # Shape (in_ch, frames)
 
-        # Soft-knee limiter to prevent clipping when boosting bands
+        zi_subset = np.empty((len(active), in_ch, 2), dtype=np.float64)
+        for row_idx, band_idx in enumerate(active):
+            zi_subset[row_idx] = self._scipy_zi[band_idx, :in_ch, :]
+
+        y, zf = sosfilt(sos, x, axis=-1, zi=zi_subset)
+
+        for row_idx, band_idx in enumerate(active):
+            self._scipy_zi[band_idx, :in_ch, :] = zf[row_idx]
+
+        max_val = np.max(np.abs(y))
+        if max_val <= 27852.0:  # Within linear headroom (0.85 * 32768)
+            return np.rint(y).astype(np.int16).T.tobytes()
+
+        # Soft-knee limiter to prevent clipping
         knee = 0.85
-        arr = np.where(
-            arr > knee,
-            knee + (1.0 - knee) * np.tanh((arr - knee) / (1.0 - knee)),
+        norm = y / 32768.0
+        norm = np.where(
+            norm > knee,
+            knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)),
             np.where(
-                arr < -knee,
-                -knee - (1.0 - knee) * np.tanh((-arr - knee) / (1.0 - knee)),
-                arr,
+                norm < -knee,
+                -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)),
+                norm,
             ),
         )
-        return np.rint(np.clip(arr, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+        return np.rint(np.clip(norm, -1.0, 1.0) * 32767.0).astype(np.int16).T.tobytes()
+
+    def _process_scalar_python(self, pcm_bytes: bytes, coeffs: list, active: Tuple[int, ...], channels: int) -> bytes:
+        in_ch = 2 if channels >= 2 else 1
+        usable = (len(pcm_bytes) // (2 * in_ch)) * (2 * in_ch)
+        if usable == 0:
+            return pcm_bytes
+
+        samples = array("h")
+        samples.frombytes(pcm_bytes[:usable])
+        n_frames = len(samples) // in_ch
+        left = [float(s) for s in samples[0::in_ch]]
+        right = [float(s) for s in samples[1::in_ch]] if in_ch == 2 else []
+
+        knee = 0.85
+        inv_32768 = 1.0 / 32768.0
+        one_minus_knee = 1.0 - knee
+
+        for band_idx in active:
+            b0, b1, b2, a1, a2 = coeffs[band_idx]
+            zl = self._py_zi[band_idx][0]
+            z1l, z2l = zl[0], zl[1]
+
+            for i in range(n_frames):
+                xl = left[i]
+                yl = b0 * xl + z1l
+                z1l = b1 * xl - a1 * yl + z2l
+                z2l = b2 * xl - a2 * yl
+                left[i] = yl
+            zl[0], zl[1] = z1l, z2l
+
+            if in_ch == 2:
+                zr = self._py_zi[band_idx][1]
+                z1r, z2r = zr[0], zr[1]
+                for i in range(n_frames):
+                    xr = right[i]
+                    yr = b0 * xr + z1r
+                    z1r = b1 * xr - a1 * yr + z2r
+                    z2r = b2 * xr - a2 * yr
+                    right[i] = yr
+                zr[0], zr[1] = z1r, z2r
+
+        out = array("h", [0]) * len(samples)
+        for i in range(n_frames):
+            xl = left[i] * inv_32768
+            if xl > knee:
+                xl = knee + one_minus_knee * math.tanh((xl - knee) / one_minus_knee)
+            elif xl < -knee:
+                xl = -knee - one_minus_knee * math.tanh((-xl - knee) / one_minus_knee)
+            vl = int(round(max(-1.0, min(1.0, xl)) * 32767.0))
+            out[in_ch * i] = 32767 if vl > 32767 else (-32768 if vl < -32768 else vl)
+
+            if in_ch == 2:
+                xr = right[i] * inv_32768
+                if xr > knee:
+                    xr = knee + one_minus_knee * math.tanh((xr - knee) / one_minus_knee)
+                elif xr < -knee:
+                    xr = -knee - one_minus_knee * math.tanh((-xr - knee) / one_minus_knee)
+                vr = int(round(max(-1.0, min(1.0, xr)) * 32767.0))
+                out[in_ch * i + 1] = 32767 if vr > 32767 else (-32768 if vr < -32768 else vr)
+
+        return out.tobytes()
 
 
 class EqualizerManager:
@@ -202,7 +338,7 @@ class EqualizerManager:
             return True
         return False
 
-    def get_effective_tx_gains(self, is_party_host: bool = False) -> tuple[bool, List[float]]:
+    def get_effective_tx_gains(self, is_party_host: bool = False) -> Tuple[bool, List[float]]:
         mode_key = "party_host" if is_party_host else "serve"
         mode_cfg = self._state["contexts"][mode_key]
         univ_cfg = self._state["contexts"]["universal"]
@@ -222,7 +358,7 @@ class EqualizerManager:
         gains = [max(-12.0, min(12.0, g)) for g in gains]
         return True, gains
 
-    def get_effective_rx_gains(self, is_party_join: bool = False) -> tuple[bool, List[float]]:
+    def get_effective_rx_gains(self, is_party_join: bool = False) -> Tuple[bool, List[float]]:
         mode_key = "party_join" if is_party_join else "play"
         mode_cfg = self._state["contexts"][mode_key]
         univ_cfg = self._state["contexts"]["universal"]
@@ -333,13 +469,21 @@ def open_equalizer_dialog(
 
     _refresh_preset_list()
 
+    suppress_slider_cb = False
+
     def _on_preset_selected(event=None) -> None:
+        nonlocal suppress_slider_cb
         name = preset_var.get()
         all_p = eq_manager.get_all_presets()
         if name in all_p:
-            for i, val in enumerate(all_p[name]):
-                band_vars[i].set(val)
-            enabled_var.set(True)
+            suppress_slider_cb = True
+            try:
+                for i, val in enumerate(all_p[name]):
+                    band_vars[i].set(val)
+                enabled_var.set(True)
+                dlg.update_idletasks()
+            finally:
+                suppress_slider_cb = False
             _push_changes()
 
     preset_combo.bind("<<ComboboxSelected>>", _on_preset_selected)
@@ -367,9 +511,15 @@ def open_equalizer_dialog(
             _refresh_preset_list()
 
     def _reset_flat() -> None:
-        preset_var.set("Flat")
-        for v in band_vars:
-            v.set(0.0)
+        nonlocal suppress_slider_cb
+        suppress_slider_cb = True
+        try:
+            preset_var.set("Flat")
+            for v in band_vars:
+                v.set(0.0)
+            dlg.update_idletasks()
+        finally:
+            suppress_slider_cb = False
         _push_changes()
 
     ttk.Button(p_frame, text="💾 Save Preset", command=_save_preset).pack(side="left", padx=2)
@@ -385,6 +535,8 @@ def open_equalizer_dialog(
 
     def _make_slider_cb(idx: int):
         def _cb(val: str) -> None:
+            if suppress_slider_cb:
+                return
             preset_var.set("Custom")
             enabled_var.set(True)
             _push_changes()

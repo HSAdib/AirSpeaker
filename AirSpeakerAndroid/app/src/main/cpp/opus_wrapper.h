@@ -2,7 +2,12 @@
 
 #include <cstdint>
 #include <vector>
+
+#if defined(HAS_OPUS) || defined(__ANDROID__)
 #include <opus.h>
+#else
+struct OpusDecoder;
+#endif
 
 class OpusDecoderWrapper {
 public:

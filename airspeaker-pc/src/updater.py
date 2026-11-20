@@ -197,7 +197,7 @@ def download_and_run_windows_installer(
                 on_complete(target_path)
 
             # Launch installer
-            subprocess.Popen([target_path, "/SILENT"])
+            subprocess.Popen([target_path, "/SILENT", "/CLOSEAPPLICATIONS"])
         except Exception as exc:
             logger.error("Failed to download or run Windows installer: %s", exc)
             if on_error:
