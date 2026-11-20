@@ -56,10 +56,25 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
 
     private var mediaProjectionManager: MediaProjectionManager? = null
+    private var awaitingMediaProjectionResult = false
+
+    private fun resetPendingPartyHostIfIdle() {
+        if (isPartyHostBroadcastActive && !AudioStreamService.isStreaming && !AudioStreamService.isServing) {
+            isPartyHostBroadcastActive = false
+            ControlChannel.isHostingOrExtendingParty = false
+            ControlChannel.isExtendingParty = false
+            AudioNative.nativeSetPartyRelay(false)
+            ControlChannel.sendPartyHostStopAnnouncement()
+            applyEffectiveEqualizerState()
+        }
+    }
+
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        awaitingMediaProjectionResult = false
         if (result.resultCode == RESULT_OK && result.data != null) {
+            lastServiceStartTimeMs = SystemClock.elapsedRealtime()
             val targetIp = if (isPartyHostBroadcastActive) {
                 "0.0.0.0" // Party Host internal mode: stream strictly to joined partyPeerIps
             } else {
@@ -80,14 +95,7 @@ class MainActivity : AppCompatActivity() {
                 startService(intent)
             }
         } else {
-            if (isPartyHostBroadcastActive && !AudioStreamService.isStreaming) {
-                isPartyHostBroadcastActive = false
-                ControlChannel.isHostingOrExtendingParty = false
-                ControlChannel.isExtendingParty = false
-                AudioNative.nativeSetPartyRelay(false)
-                ControlChannel.sendPartyHostStopAnnouncement()
-                applyEffectiveEqualizerState()
-            }
+            resetPendingPartyHostIfIdle()
             Toast.makeText(this, "Internal audio capture permission denied", Toast.LENGTH_SHORT).show()
         }
         handler.postDelayed({ refreshServiceButtonState() }, 200L)
@@ -99,7 +107,10 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             launchMediaProjectionCapture()
         } else {
+            awaitingMediaProjectionResult = false
+            resetPendingPartyHostIfIdle()
             Toast.makeText(this, "Audio permission is required by Android to capture internal system audio", Toast.LENGTH_LONG).show()
+            refreshServiceButtonState()
         }
     }
 
@@ -115,10 +126,22 @@ class MainActivity : AppCompatActivity() {
             } else {
                 mediaProjectionManager!!.createScreenCaptureIntent()
             }
+            awaitingMediaProjectionResult = true
             Toast.makeText(this, "Android requires Screen Capture for internal audio (audio only — select Entire Screen)", Toast.LENGTH_LONG).show()
-            screenCaptureLauncher.launch(captureIntent)
+            try {
+                screenCaptureLauncher.launch(captureIntent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch screen capture intent: ${e.message}")
+                awaitingMediaProjectionResult = false
+                resetPendingPartyHostIfIdle()
+                Toast.makeText(this, "Could not start internal audio capture", Toast.LENGTH_SHORT).show()
+                refreshServiceButtonState()
+            }
         } else {
+            awaitingMediaProjectionResult = false
+            resetPendingPartyHostIfIdle()
             Toast.makeText(this, "Internal system audio capture requires Android 10+", Toast.LENGTH_LONG).show()
+            refreshServiceButtonState()
         }
     }
 
@@ -2289,6 +2312,7 @@ class MainActivity : AppCompatActivity() {
                 refreshServiceButtonState()
             }, 500L)
         } else {
+            awaitingMediaProjectionResult = true
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 launchMediaProjectionCapture()
             } else {
@@ -2299,7 +2323,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshServiceButtonState() {
-        val hostStarting = (SystemClock.elapsedRealtime() - lastServiceStartTimeMs) < 2000L
+        val hostStarting = awaitingMediaProjectionResult ||
+            (SystemClock.elapsedRealtime() - lastServiceStartTimeMs) < 2000L
         if (isPartyHostBroadcastActive && !hostStarting &&
             !AudioStreamService.isStreaming && !AudioStreamService.isServing
         ) {

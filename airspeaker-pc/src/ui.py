@@ -8,6 +8,7 @@ Tabs: Stream / Roles | Audio & Buffer Settings | Windows Virtual Device
 import collections
 import json
 import logging
+import math
 import queue
 import socket
 import subprocess
