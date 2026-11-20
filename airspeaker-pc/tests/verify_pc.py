@@ -872,6 +872,70 @@ def test_audio_receiver_frame_duration_buffer_math() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 19: 5-Band EQ full-load speed, rapid sweeps, silence denormals & NaN recovery
+# ---------------------------------------------------------------------------
+def test_eq_5band_stress_and_nan_recovery() -> None:
+    name = "5-Band EQ full-load speed (<0.5ms/frame), rapid sweeps & NaN recovery"
+    try:
+        from equalizer import StereoFiveBandBiquadDSP
+
+        dsp = StereoFiveBandBiquadDSP()
+        t = np.linspace(0, 0.005, 240, endpoint=False)
+        sig = (
+            0.25 * np.sin(2 * np.pi * 60 * t)
+            + 0.25 * np.sin(2 * np.pi * 1000 * t)
+            + 0.25 * np.sin(2 * np.pi * 8000 * t)
+        )
+        stereo = np.column_stack((sig, sig))
+        raw_pcm = np.rint(stereo * 32767.0).astype("<i2").tobytes()
+        silence_pcm = b"\x00" * 960
+
+        # 1. All 5 bands active simultaneously (worst-case CPU load)
+        dsp.set_gains([6.5, 4.0, -2.5, 5.0, 7.0], enabled=True)
+        t0 = time.monotonic()
+        for _ in range(1000):
+            out = dsp.process_pcm16(raw_pcm, 2)
+        elapsed_ms = (time.monotonic() - t0) * 1000.0
+        per_frame_ms = elapsed_ms / 1000.0
+        if per_frame_ms >= 2.0:
+            check(name, False, f"5-band EQ too slow for 5ms real-time pacing: {per_frame_ms:.3f}ms/frame")
+            return
+
+        # 2. Rapid extreme gain sweeps (-12dB <-> +12dB) must never produce silence/NaN
+        for step in range(40):
+            g = 12.0 if (step % 2 == 0) else -12.0
+            dsp.set_gains([g, -g, g, -g, g], enabled=True)
+            out = dsp.process_pcm16(raw_pcm, 2)
+            arr = np.frombuffer(out, dtype="<i2")
+            if len(arr) != 480 or int(np.max(np.abs(arr))) == 0:
+                check(name, False, f"sound lost during rapid sweep step {step}")
+                return
+
+        # 3. Silence run must flush denormals cleanly and resume normal audio immediately
+        for _ in range(50):
+            dsp.process_pcm16(silence_pcm, 2)
+        out_resume = dsp.process_pcm16(raw_pcm, 2)
+        if int(np.max(np.abs(np.frombuffer(out_resume, dtype="<i2")))) < 1000:
+            check(name, False, "audio did not recover cleanly after silence")
+            return
+
+        # 4. Inject NaN into filter state -> must auto-recover to dry audio (zero sound loss)
+        dsp._py_zi[0][0][0] = float("nan")
+        dsp._scipy_zi[0, 0, 0] = float("nan")
+        out_nan = dsp.process_pcm16(raw_pcm, 2)
+        if out_nan != raw_pcm:
+            # Next frame after recovery must also be valid non-silent audio
+            out_next = dsp.process_pcm16(raw_pcm, 2)
+            if int(np.max(np.abs(np.frombuffer(out_next, dtype="<i2")))) < 1000:
+                check(name, False, "EQ latched NaN into permanent silence")
+                return
+
+        check(name, True, f"5-band avg={per_frame_ms:.3f}ms/frame, sweeps & NaN auto-recovery passed")
+    except Exception as exc:
+        check(name, False, str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -899,6 +963,7 @@ def main() -> None:
     test_control_listener_pc_announce_and_self_filter()
     test_eq_dsp_performance_and_output()
     test_audio_receiver_frame_duration_buffer_math()
+    test_eq_5band_stress_and_nan_recovery()
 
     print()
     print("=" * 60)

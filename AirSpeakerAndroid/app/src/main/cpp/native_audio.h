@@ -107,16 +107,21 @@ private:
     alignas(64) std::atomic<int64_t> mMaxCallbackMicros{0};
     alignas(64) std::atomic<uint64_t> mDeadlineMisses{0};
 
-    // 5-Band Biquad Equalizer state (lock-free double-buffered)
+    // 5-Band Biquad Equalizer state (lock-free seqlock: zero torn reads, zero locks in audio callback)
     struct EqBandCoeffs {
         double b0{1.0}, b1{0.0}, b2{0.0}, a1{0.0}, a2{0.0};
         bool active{false};
     };
-    std::atomic<bool> mEqEnabled{false};
+    std::mutex mEqWriteMutex;
+    std::atomic<uint64_t> mEqSeq{0};
+    bool mEqStagingEnabled{false};
+    EqBandCoeffs mEqStagingCoeffs[5];
     std::atomic<float> mEqGainsDb[5]{{0.0f}, {0.0f}, {0.0f}, {0.0f}, {0.0f}};
-    EqBandCoeffs mEqCoeffs[2][5];
-    std::atomic<int> mActiveEqSlot{0};
-    std::atomic<bool> mEqResetStatePending{false};
+
+    // Audio-thread-exclusive EQ snapshot & filter delay lines
+    uint64_t mAudioEqSeq{0};
+    bool mAudioEqEnabled{false};
+    EqBandCoeffs mAudioEqCoeffs[5];
     double mEqZ1[5][2]{{0.0}};
     double mEqZ2[5][2]{{0.0}};
 

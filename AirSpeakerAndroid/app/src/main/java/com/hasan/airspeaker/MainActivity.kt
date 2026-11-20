@@ -122,6 +122,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var partyModeScreen: String = "CHOOSER" // "CHOOSER", "HOST", "JOIN"
+    private var currentTabIndex: Int = 0
     private var isPartyJoinedActive: Boolean = false
     private var isPartyExtendedActive: Boolean = false
     private var isPartyHostBroadcastActive: Boolean = false
@@ -186,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 startService(intent)
             }
         }
+        applyEffectiveEqualizerState()
         refreshServiceButtonState()
     }
 
@@ -427,8 +429,7 @@ class MainActivity : AppCompatActivity() {
         val univApplyRx = prefs.getBoolean("universal_apply_rx", false)
         val univBands = FloatArray(5) { i -> prefs.getFloat("universal_band_$i", 0f) }
 
-        // RX: Active between play & party_join
-        val isPartyJoin = (partyModeScreen == "JOIN") || binding.rbPartyJoin.isChecked
+        val isPartyJoin = isPartyJoinedActive || (currentTabIndex == 2 && partyModeScreen == "JOIN")
         val rxKey = if (isPartyJoin) "party_join" else "play"
         val rxModeEnabled = prefs.getBoolean("${rxKey}_enabled", false)
         val rxModeBands = FloatArray(5) { i -> prefs.getFloat("${rxKey}_band_$i", 0f) }
@@ -441,8 +442,7 @@ class MainActivity : AppCompatActivity() {
             sum.coerceIn(-12.0f, 12.0f)
         }
 
-        // TX: Active between serve & party_host
-        val isPartyHost = (partyModeScreen == "HOST") || binding.rbPartyHost.isChecked
+        val isPartyHost = isPartyHostBroadcastActive || (currentTabIndex == 2 && partyModeScreen == "HOST")
         val txKey = if (isPartyHost) "party_host" else "serve"
         val txModeEnabled = prefs.getBoolean("${txKey}_enabled", false)
         val txModeBands = FloatArray(5) { i -> prefs.getFloat("${txKey}_band_$i", 0f) }
@@ -802,6 +802,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         startService(intent)
                     }
+                    applyEffectiveEqualizerState()
                     handler.postDelayed({ startPreStreamDiscoveryIfNeeded() }, 500L)
                     Toast.makeText(this, "Party Host: $reason", Toast.LENGTH_LONG).show()
                 }
@@ -1014,6 +1015,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectTab(index: Int) {
+        currentTabIndex = index
         binding.layoutPlayerTab.visibility = if (index == 0) View.VISIBLE else View.GONE
         binding.layoutServerTab.visibility = if (index == 1) View.VISIBLE else View.GONE
         binding.layoutPartyTab.visibility = if (index == 2) View.VISIBLE else View.GONE
@@ -1028,6 +1030,8 @@ class MainActivity : AppCompatActivity() {
                     updateExtendedQrCode()
                 }
             }
+        } else {
+            applyEffectiveEqualizerState()
         }
 
         val tabs = listOf(binding.tabBtnPlayer, binding.tabBtnServer, binding.tabBtnParty, binding.tabBtnSettings)
@@ -1651,6 +1655,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnTogglePartyHost.setTextColor(Color.parseColor("#FF4444"))
                 binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#FF4444"))
             }
+            applyEffectiveEqualizerState()
             refreshServiceButtonState()
         }
 
@@ -1711,6 +1716,7 @@ class MainActivity : AppCompatActivity() {
 
                 lastServiceStartTimeMs = SystemClock.elapsedRealtime()
                 stopPreStreamDiscovery()
+                applyEffectiveEqualizerState()
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_START
                     putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
@@ -1723,6 +1729,7 @@ class MainActivity : AppCompatActivity() {
                     startService(intent)
                 }
             }
+            applyEffectiveEqualizerState()
             refreshServiceButtonState()
         }
 
@@ -1875,11 +1882,12 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.isExtendingParty = false
                 lastServiceStartTimeMs = SystemClock.elapsedRealtime()
                 stopPreStreamDiscovery()
+                applyEffectiveEqualizerState()
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_START
                     putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
                     putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
-                    putExtra(AudioStreamService.EXTRA_AUDIO_PORT, joinedHostPort)
+                    putExtra(AudioStreamService.EXTRA_AUDIO_PORT, 5004)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(intent)
@@ -2447,16 +2455,20 @@ class MainActivity : AppCompatActivity() {
                 binding.btnTogglePartyJoin.visibility = View.VISIBLE
                 binding.btnTogglePartyJoin.text = "[ ■ LEAVE PARTY ]"
             } else {
-                if (isPartyJoinedActive && !joinStarting) {
+                if (isPartyJoinedActive && !joinStarting && !AudioStreamService.isStreaming) {
                     isPartyJoinedActive = false
                     isPartyExtendedActive = false
                     ControlChannel.isPartyJoinerActive = false
                     ControlChannel.isExtendingParty = false
-                    ControlChannel.isHostingOrExtendingParty = false
-                    AudioNative.nativeSetPartyRelay(false)
+                    ControlChannel.isHostingOrExtendingParty = isPartyHostBroadcastActive
+                    AudioNative.nativeSetPartyRelay(isPartyHostBroadcastActive)
                     if (joinedHostIp.isNotEmpty()) {
                         ControlChannel.sendPartyLeaveAnnouncement(joinedHostIp)
                     }
+                    binding.switchExtendParty.isChecked = false
+                    binding.layoutPartyExtendCard.visibility = View.GONE
+                    binding.layoutExtendDetails.visibility = View.GONE
+                    applyEffectiveEqualizerState()
                 }
                 binding.tvPartyJoinStatus.text = "PARTY JOINER: Standby (Scan QR or tap an active host above)"
                 binding.tvPartyJoinStatus.setTextColor(0xFF888888.toInt())

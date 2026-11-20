@@ -223,7 +223,11 @@ void JitterBuffer::processPackets(int16_t* decoded_buf) {
         int detectedFrames = 0;
         if (first->second.header.codec == CODEC_PCM16) {
             int pktCh = (first->second.header.channels == 1) ? 1 : 2;
-            detectedFrames = static_cast<int>(first->second.payload.size() / (pktCh * sizeof(int16_t)));
+            detectedFrames = std::clamp(
+                static_cast<int>(first->second.payload.size() / (pktCh * sizeof(int16_t))),
+                0,
+                960
+            );
         } else if (!first->second.payload.empty()) {
 #if defined(HAS_OPUS) || defined(__ANDROID__)
             int nb = opus_packet_get_nb_samples(

@@ -108,6 +108,14 @@ public final class Swift5BandBiquadDSP {
     private var z2 = [[Double]](repeating: [0.0, 0.0], count: 5)
     private var isEnabled: Bool = false
     private var needsStateReset: Bool = false
+    private var bandResetMask: [Bool] = [false, false, false, false, false]
+    private var lastChannels: Int = 2
+
+    public func reset() {
+        lock.lock()
+        needsStateReset = true
+        lock.unlock()
+    }
 
     public func setGains(enabled: Bool, gains: [Float]) {
         let freqs: [Double] = [60.0, 230.0, 910.0, 3600.0, 14000.0]
@@ -142,54 +150,194 @@ public final class Swift5BandBiquadDSP {
         lock.lock()
         let wasEnabled = self.isEnabled
         let nextEnabled = enabled && anyActive
+        for i in 0..<5 {
+            if self.coeffs[i].active != newCoeffs[i].active {
+                self.bandResetMask[i] = true
+            }
+        }
         self.coeffs = newCoeffs
         self.isEnabled = nextEnabled
-        if !nextEnabled || (!wasEnabled && nextEnabled) {
+        if wasEnabled != nextEnabled {
             self.needsStateReset = true
         }
         lock.unlock()
     }
 
-    public func processInt16Samples(_ samples: inout [Int16], channels: Int = 2) {
+    private func snapshotAndPrepareState(channels: Int) -> (Bool, [Coeffs]) {
         lock.lock()
         let isEn = isEnabled
         let localCoeffs = coeffs
         let shouldReset = needsStateReset
-        if shouldReset {
-            needsStateReset = false
+        if shouldReset { needsStateReset = false }
+        var localBandResets = [false, false, false, false, false]
+        var anyBandReset = false
+        for i in 0..<5 {
+            if bandResetMask[i] {
+                localBandResets[i] = true
+                bandResetMask[i] = false
+                anyBandReset = true
+            }
         }
         lock.unlock()
 
-        if shouldReset {
+        if shouldReset || channels != lastChannels {
             for i in 0..<5 {
-                z1[i] = [0.0, 0.0]
-                z2[i] = [0.0, 0.0]
+                z1[i][0] = 0.0; z1[i][1] = 0.0
+                z2[i][0] = 0.0; z2[i][1] = 0.0
+            }
+            lastChannels = channels
+        } else if anyBandReset {
+            for i in 0..<5 where localBandResets[i] {
+                z1[i][0] = 0.0; z1[i][1] = 0.0
+                z2[i][0] = 0.0; z2[i][1] = 0.0
             }
         }
+        return (isEn, localCoeffs)
+    }
+
+    /// Zero-allocation RX float stereo pass combining EQ + gain + single soft-knee limiter.
+    public func processFloatStereo(
+        left: UnsafeMutablePointer<Float>,
+        right: UnsafeMutablePointer<Float>,
+        frameCount: Int,
+        gain: Float
+    ) {
+        let (isEn, localCoeffs) = snapshotAndPrepareState(channels: 2)
+        guard frameCount > 0 else { return }
+
+        let knee: Double = 0.85
+        let invOneMinusKnee: Double = 1.0 / (1.0 - knee)
+        let dGain = Double(gain)
+        let applyGain = abs(gain - 1.0) > 0.001
+
+        if !isEn {
+            if applyGain {
+                for n in 0..<frameCount {
+                    var l = Double(left[n]) * dGain
+                    var r = Double(right[n]) * dGain
+                    if l > knee { l = knee + (1.0 - knee) * tanh((l - knee) * invOneMinusKnee) }
+                    else if l < -knee { l = -knee - (1.0 - knee) * tanh((-l - knee) * invOneMinusKnee) }
+                    if r > knee { r = knee + (1.0 - knee) * tanh((r - knee) * invOneMinusKnee) }
+                    else if r < -knee { r = -knee - (1.0 - knee) * tanh((-r - knee) * invOneMinusKnee) }
+                    left[n] = Float(max(-1.0, min(1.0, l)))
+                    right[n] = Float(max(-1.0, min(1.0, r)))
+                }
+            }
+            return
+        }
+
+        for n in 0..<frameCount {
+            let dryL = Double(left[n])
+            let dryR = Double(right[n])
+            var xL = dryL
+            var xR = dryR
+            var okL = true
+            var okR = true
+
+            for b in 0..<5 {
+                let c = localCoeffs[b]
+                if !c.active { continue }
+
+                if okL {
+                    let yL = c.b0 * xL + z1[b][0]
+                    let nz1L = c.b1 * xL - c.a1 * yL + z2[b][0]
+                    let nz2L = c.b2 * xL - c.a2 * yL
+                    if yL.isFinite && nz1L.isFinite && nz2L.isFinite {
+                        z1[b][0] = nz1L
+                        z2[b][0] = nz2L
+                        xL = yL
+                    } else {
+                        z1[b][0] = 0.0; z2[b][0] = 0.0
+                        okL = false
+                    }
+                }
+                if okR {
+                    let yR = c.b0 * xR + z1[b][1]
+                    let nz1R = c.b1 * xR - c.a1 * yR + z2[b][1]
+                    let nz2R = c.b2 * xR - c.a2 * yR
+                    if yR.isFinite && nz1R.isFinite && nz2R.isFinite {
+                        z1[b][1] = nz1R
+                        z2[b][1] = nz2R
+                        xR = yR
+                    } else {
+                        z1[b][1] = 0.0; z2[b][1] = 0.0
+                        okR = false
+                    }
+                }
+            }
+
+            if !okL { xL = dryL }
+            if !okR { xR = dryR }
+            if applyGain {
+                xL *= dGain
+                xR *= dGain
+            }
+            if xL > knee { xL = knee + (1.0 - knee) * tanh((xL - knee) * invOneMinusKnee) }
+            else if xL < -knee { xL = -knee - (1.0 - knee) * tanh((-xL - knee) * invOneMinusKnee) }
+            if xR > knee { xR = knee + (1.0 - knee) * tanh((xR - knee) * invOneMinusKnee) }
+            else if xR < -knee { xR = -knee - (1.0 - knee) * tanh((-xR - knee) * invOneMinusKnee) }
+
+            left[n] = Float(max(-1.0, min(1.0, xL)))
+            right[n] = Float(max(-1.0, min(1.0, xR)))
+        }
+
+        // Flush denormals once per packet
+        for b in 0..<5 {
+            if abs(z1[b][0]) < 1e-18 { z1[b][0] = 0.0 }
+            if abs(z2[b][0]) < 1e-18 { z2[b][0] = 0.0 }
+            if abs(z1[b][1]) < 1e-18 { z1[b][1] = 0.0 }
+            if abs(z2[b][1]) < 1e-18 { z2[b][1] = 0.0 }
+        }
+    }
+
+    public func processInt16Samples(_ samples: inout [Int16], channels: Int = 2) {
+        let ch = channels == 1 ? 1 : 2
+        let (isEn, localCoeffs) = snapshotAndPrepareState(channels: ch)
         guard isEn, !samples.isEmpty else { return }
 
-        let ch = channels == 1 ? 1 : 2
         let numFrames = samples.count / ch
         let knee: Double = 0.85
+        let invOneMinusKnee: Double = 1.0 / (1.0 - knee)
 
         for n in 0..<numFrames {
             for c in 0..<ch {
-                var x = Double(samples[n * ch + c]) / 32768.0
+                let dry = Double(samples[n * ch + c]) / 32768.0
+                var x = dry
+                var stateOk = true
                 for b in 0..<5 {
                     let coeff = localCoeffs[b]
                     if !coeff.active { continue }
                     let y = coeff.b0 * x + z1[b][c]
-                    z1[b][c] = coeff.b1 * x - coeff.a1 * y + z2[b][c]
-                    z2[b][c] = coeff.b2 * x - coeff.a2 * y
+                    let nz1 = coeff.b1 * x - coeff.a1 * y + z2[b][c]
+                    let nz2 = coeff.b2 * x - coeff.a2 * y
+                    if !y.isFinite || !nz1.isFinite || !nz2.isFinite {
+                        z1[b][c] = 0.0
+                        z2[b][c] = 0.0
+                        stateOk = false
+                        break
+                    }
+                    z1[b][c] = nz1
+                    z2[b][c] = nz2
                     x = y
                 }
-                if x > knee {
-                    x = knee + (1.0 - knee) * tanh((x - knee) / (1.0 - knee))
-                } else if x < -knee {
-                    x = -knee - (1.0 - knee) * tanh((-x - knee) / (1.0 - knee))
+                if !stateOk {
+                    x = dry
                 }
-                let clamped = Int32(round(max(-1.0, min(1.0, x)) * 32767.0))
+                if x > knee {
+                    x = knee + (1.0 - knee) * tanh((x - knee) * invOneMinusKnee)
+                } else if x < -knee {
+                    x = -knee - (1.0 - knee) * tanh((-x - knee) * invOneMinusKnee)
+                }
+                let safeX = x.isFinite ? max(-1.0, min(1.0, x)) : 0.0
+                let clamped = Int32(round(safeX * 32767.0))
                 samples[n * ch + c] = Int16(max(-32768, min(32767, clamped)))
+            }
+        }
+
+        for b in 0..<5 {
+            for c in 0..<ch {
+                if abs(z1[b][c]) < 1e-18 { z1[b][c] = 0.0 }
+                if abs(z2[b][c]) < 1e-18 { z2[b][c] = 0.0 }
             }
         }
     }
@@ -284,12 +432,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     // Party Mode States
     @Published public var partyScreen: String = "CHOOSER" // CHOOSER, HOST, JOIN
     @Published public var isPartyHost: Bool = false {
-        didSet { syncRelayFlags() }
+        didSet { syncRelayFlags(); updateEffectiveEQ() }
     }
     @Published public var isPartyHostBroadcasting: Bool = false {
-        didSet { syncRelayFlags() }
+        didSet { syncRelayFlags(); updateEffectiveEQ() }
     }
-    @Published public var isPartyJoined: Bool = false
+    @Published public var isPartyJoined: Bool = false {
+        didSet { updateEffectiveEQ() }
+    }
     @Published public var isPartyExtending: Bool = false {
         didSet { syncRelayFlags() }
     }
@@ -643,6 +793,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     public func stopSpeakerPlayer() {
         guard isAudioPlaying else { return }
+        rxEQDSP.reset()
         rxStateLock.lock()
         rxSessionId &+= 1
         isRunningAudio = false
@@ -883,27 +1034,32 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 let left = pcmBuf.floatChannelData![0]
                 let right = pcmBuf.floatChannelData![1]
 
-                let totalInt16Count = channels == 1 ? Int(frameCount) : Int(frameCount) * 2
-                var int16Samples = [Int16](repeating: 0, count: totalInt16Count)
-                for i in 0..<totalInt16Count {
-                    let off = 12 + i * 2
-                    let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                    int16Samples[i] = Int16(bitPattern: u16)
-                }
-                rxEQDSP.processInt16Samples(&int16Samples, channels: channels)
-
-                let gain: Float = curMuted ? 0.0 : curVolume
                 if channels == 1 {
                     for i in 0..<Int(frameCount) {
-                        let sample = AirSpeakerEngine.softKneeLimit((Float(int16Samples[i]) / 32767.0) * gain)
-                        left[i] = sample
-                        right[i] = sample
+                        let off = 12 + i * 2
+                        let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
+                        let s = Float(Int16(bitPattern: u16)) / 32768.0
+                        left[i] = s
+                        right[i] = s
                     }
                 } else {
                     for i in 0..<Int(frameCount) {
-                        left[i] = AirSpeakerEngine.softKneeLimit((Float(int16Samples[i * 2]) / 32767.0) * gain)
-                        right[i] = AirSpeakerEngine.softKneeLimit((Float(int16Samples[i * 2 + 1]) / 32767.0) * gain)
+                        let offL = 12 + i * 4
+                        let offR = offL + 2
+                        let uL = UInt16(buffer[offL]) | (UInt16(buffer[offL + 1]) << 8)
+                        let uR = UInt16(buffer[offR]) | (UInt16(buffer[offR + 1]) << 8)
+                        left[i] = Float(Int16(bitPattern: uL)) / 32768.0
+                        right[i] = Float(Int16(bitPattern: uR)) / 32768.0
                     }
+                }
+
+                let gain: Float = curMuted ? 0.0 : curVolume
+                if curMuted {
+                    memset(left, 0, Int(frameCount) * MemoryLayout<Float>.size)
+                    memset(right, 0, Int(frameCount) * MemoryLayout<Float>.size)
+                    rxEQDSP.reset()
+                } else {
+                    rxEQDSP.processFloatStereo(left: left, right: right, frameCount: Int(frameCount), gain: gain)
                 }
 
                 let minPrebuffer = max(2, Int(round(Double(curTargetMs) / frameDurMs)))
@@ -1055,12 +1211,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func startServingInternalAudio(targetIp: String = "") {
         guard !isInternalAudioServing else { return }
 
+        let cleanTarget = targetIp.trimmingCharacters(in: .whitespacesAndNewlines)
         stateLock.lock()
-        if !targetIp.isEmpty {
-            atomicServeTargetIp = targetIp.trimmingCharacters(in: .whitespacesAndNewlines)
-            atomicConnectedServerIp = atomicServeTargetIp
+        atomicServeTargetIp = cleanTarget
+        if !cleanTarget.isEmpty {
+            atomicConnectedServerIp = cleanTarget
         }
         stateLock.unlock()
+        txEQDSP.reset()
 
         let recorder = RPScreenRecorder.shared()
         guard recorder.isAvailable else {
@@ -1249,6 +1407,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         RPScreenRecorder.shared().stopCapture { [weak self] error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                self.txEQDSP.reset()
                 self.isInternalAudioServing = false
                 self.statusMessage = "Internal Audio Sender Stopped"
                 self.servePeakLevel = 0.0

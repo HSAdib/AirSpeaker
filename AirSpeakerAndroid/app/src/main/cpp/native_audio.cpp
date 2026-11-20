@@ -30,6 +30,9 @@ bool NativeAudioEngine::start(int audio_port) {
     mTotalCallbackMicros.store(0, std::memory_order_relaxed);
     mMaxCallbackMicros.store(0, std::memory_order_relaxed);
     mDeadlineMisses.store(0, std::memory_order_relaxed);
+    std::memset(mEqZ1, 0, sizeof(mEqZ1));
+    std::memset(mEqZ2, 0, sizeof(mEqZ2));
+    mAudioEqSeq = 0;
 
     // 1. Create UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -233,34 +236,41 @@ void NativeAudioEngine::scheduleStreamReopen() {
         if (!mReopenPending.compare_exchange_strong(expected, true)) {
             return;
         }
-
         if (mReopenThread.joinable() &&
             mReopenThread.get_id() != std::this_thread::get_id()) {
             oldReopenThread = std::move(mReopenThread);
         }
-
-        mReopenThread = std::thread([this]() {
-            LOGI("Oboe stream reopen worker started");
-            stopAndCloseOboeStream();
-
-            for (int retry = 0; retry < 5 && mIsRunning.load() && !mShuttingDown.load(); ++retry) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
-                if (!mIsRunning.load() || mShuttingDown.load()) break;
-
-                if (openOboeStream() && startOboeStream()) {
-                    LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
-                    mReopenPending.store(false);
-                    return;
-                }
-            }
-
-            mReopenPending.store(false);
-            LOGW("Failed to reopen Oboe stream after retries");
-        });
     }
+
     if (oldReopenThread.joinable()) {
         oldReopenThread.join();
     }
+
+    std::lock_guard<std::mutex> lock(mReopenMutex);
+    if (!mIsRunning.load(std::memory_order_acquire) ||
+        mShuttingDown.load(std::memory_order_acquire)) {
+        mReopenPending.store(false, std::memory_order_release);
+        return;
+    }
+
+    mReopenThread = std::thread([this]() {
+        LOGI("Oboe stream reopen worker started");
+        stopAndCloseOboeStream();
+
+        for (int retry = 0; retry < 5 && mIsRunning.load(std::memory_order_acquire) && !mShuttingDown.load(std::memory_order_acquire); ++retry) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250 * (1 << retry)));
+            if (!mIsRunning.load(std::memory_order_acquire) || mShuttingDown.load(std::memory_order_acquire)) break;
+
+            if (openOboeStream() && startOboeStream()) {
+                LOGI("Oboe stream successfully reopened on attempt %d", retry + 1);
+                mReopenPending.store(false, std::memory_order_release);
+                return;
+            }
+        }
+
+        mReopenPending.store(false, std::memory_order_release);
+        LOGW("Failed to reopen Oboe stream after retries");
+    });
 }
 
 void NativeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result result) {
@@ -281,51 +291,104 @@ oboe::DataCallbackResult NativeAudioEngine::onAudioReady(
     // Guaranteed real-time safe: ZERO mutexes, ZERO allocations, ZERO opus decodes.
     mJitterBuffer.readAudio(output, numFrames);
 
-    // Real-time safe mute, equalizer, and volume scaling
-    if (mMuted.load(std::memory_order_relaxed)) {
-        std::memset(output, 0, numFrames * 2 * sizeof(int16_t));
-    } else {
-        if (mEqResetStatePending.exchange(false, std::memory_order_acq_rel)) {
-            std::memset(mEqZ1, 0, sizeof(mEqZ1));
-            std::memset(mEqZ2, 0, sizeof(mEqZ2));
+    // Lock-free seqlock check for updated EQ coefficients (never blocks or tears)
+    uint64_t seq1 = mEqSeq.load(std::memory_order_acquire);
+    if ((seq1 & 1ULL) == 0 && seq1 != mAudioEqSeq) {
+        EqBandCoeffs tempCoeffs[5];
+        bool tempEnabled = mEqStagingEnabled;
+        for (int b = 0; b < 5; ++b) {
+            tempCoeffs[b] = mEqStagingCoeffs[b];
         }
+        std::atomic_thread_fence(std::memory_order_acquire);
+        uint64_t seq2 = mEqSeq.load(std::memory_order_acquire);
+        if (seq1 == seq2) {
+            if (tempEnabled != mAudioEqEnabled) {
+                std::memset(mEqZ1, 0, sizeof(mEqZ1));
+                std::memset(mEqZ2, 0, sizeof(mEqZ2));
+            } else {
+                for (int b = 0; b < 5; ++b) {
+                    if (tempCoeffs[b].active != mAudioEqCoeffs[b].active) {
+                        mEqZ1[b][0] = 0.0; mEqZ1[b][1] = 0.0;
+                        mEqZ2[b][0] = 0.0; mEqZ2[b][1] = 0.0;
+                    }
+                }
+            }
+            for (int b = 0; b < 5; ++b) {
+                mAudioEqCoeffs[b] = tempCoeffs[b];
+            }
+            mAudioEqEnabled = tempEnabled;
+            mAudioEqSeq = seq1;
+        }
+    }
 
-        if (mEqEnabled.load(std::memory_order_acquire)) {
-            int slot = mActiveEqSlot.load(std::memory_order_acquire);
+    if (mMuted.load(std::memory_order_relaxed)) {
+        std::memset(output, 0, static_cast<size_t>(numFrames) * 2 * sizeof(int16_t));
+        std::memset(mEqZ1, 0, sizeof(mEqZ1));
+        std::memset(mEqZ2, 0, sizeof(mEqZ2));
+    } else {
+        const float gain = mVolumeGain.load(std::memory_order_relaxed);
+        const bool applyGain = std::abs(gain - 1.0f) > 0.001f;
+
+        if (mAudioEqEnabled) {
             const double knee = 0.85;
+            const double invOneMinusKnee = 1.0 / (1.0 - knee);
+            const double dGain = static_cast<double>(gain);
+
             for (int n = 0; n < numFrames; ++n) {
                 for (int ch = 0; ch < 2; ++ch) {
-                    double x = output[n * 2 + ch] / 32768.0;
+                    const double dry = output[n * 2 + ch] / 32768.0;
+                    double x = dry;
+                    bool stateOk = true;
                     for (int b = 0; b < 5; ++b) {
-                        const auto& c = mEqCoeffs[slot][b];
+                        const auto& c = mAudioEqCoeffs[b];
                         if (!c.active) continue;
                         double y = c.b0 * x + mEqZ1[b][ch];
-                        mEqZ1[b][ch] = c.b1 * x - c.a1 * y + mEqZ2[b][ch];
-                        mEqZ2[b][ch] = c.b2 * x - c.a2 * y;
+                        double nz1 = c.b1 * x - c.a1 * y + mEqZ2[b][ch];
+                        double nz2 = c.b2 * x - c.a2 * y;
+                        if (!std::isfinite(y) || !std::isfinite(nz1) || !std::isfinite(nz2)) {
+                            mEqZ1[b][ch] = 0.0;
+                            mEqZ2[b][ch] = 0.0;
+                            stateOk = false;
+                            break;
+                        }
+                        mEqZ1[b][ch] = nz1;
+                        mEqZ2[b][ch] = nz2;
                         x = y;
                     }
+                    if (!stateOk) {
+                        x = dry;
+                    }
+                    if (applyGain) {
+                        x *= dGain;
+                    }
                     if (x > knee) {
-                        x = knee + (1.0 - knee) * std::tanh((x - knee) / (1.0 - knee));
+                        x = knee + (1.0 - knee) * std::tanh((x - knee) * invOneMinusKnee);
                     } else if (x < -knee) {
-                        x = -knee - (1.0 - knee) * std::tanh((-x - knee) / (1.0 - knee));
+                        x = -knee - (1.0 - knee) * std::tanh((-x - knee) * invOneMinusKnee);
                     }
                     int32_t clamped = static_cast<int32_t>(std::round(std::clamp(x, -1.0, 1.0) * 32767.0));
                     output[n * 2 + ch] = static_cast<int16_t>(std::clamp(clamped, -32768, 32767));
                 }
             }
-        }
 
-        float gain = mVolumeGain.load(std::memory_order_relaxed);
-        if (std::abs(gain - 1.0f) > 0.001f) {
+            // Flush denormals once per callback
+            for (int b = 0; b < 5; ++b) {
+                for (int ch = 0; ch < 2; ++ch) {
+                    if (std::abs(mEqZ1[b][ch]) < 1e-18) mEqZ1[b][ch] = 0.0;
+                    if (std::abs(mEqZ2[b][ch]) < 1e-18) mEqZ2[b][ch] = 0.0;
+                }
+            }
+        } else if (applyGain) {
             int total_samples = numFrames * 2;
             if (gain > 1.0f) {
                 const double knee = 0.85;
+                const double invOneMinusKnee = 1.0 / (1.0 - knee);
                 for (int i = 0; i < total_samples; ++i) {
                     double s = (output[i] / 32768.0) * gain;
                     if (s > knee) {
-                        s = knee + (1.0 - knee) * std::tanh((s - knee) / (1.0 - knee));
+                        s = knee + (1.0 - knee) * std::tanh((s - knee) * invOneMinusKnee);
                     } else if (s < -knee) {
-                        s = -knee - (1.0 - knee) * std::tanh((-s - knee) / (1.0 - knee));
+                        s = -knee - (1.0 - knee) * std::tanh((-s - knee) * invOneMinusKnee);
                     }
                     int32_t clamped = static_cast<int32_t>(std::round(std::clamp(s, -1.0, 1.0) * 32767.0));
                     output[i] = static_cast<int16_t>(std::clamp(clamped, -32768, 32767));
@@ -501,12 +564,12 @@ void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, floa
     const double sr = 48000.0;
     const double q = 1.15;
     bool any_active = false;
+    EqBandCoeffs computed[5];
 
-    int nextSlot = 1 - mActiveEqSlot.load(std::memory_order_relaxed);
     for (int i = 0; i < 5; ++i) {
         double gainDb = bands[i];
         if (std::abs(gainDb) <= 0.05) {
-            mEqCoeffs[nextSlot][i] = {1.0, 0.0, 0.0, 0.0, 0.0, false};
+            computed[i] = {1.0, 0.0, 0.0, 0.0, 0.0, false};
             continue;
         }
         any_active = true;
@@ -522,7 +585,7 @@ void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, floa
         double a_1 = -2.0 * cos_w0;
         double a_2 = 1.0 - alpha / A;
 
-        mEqCoeffs[nextSlot][i] = {
+        computed[i] = {
             b_0 / a_0,
             b_1 / a_0,
             b_2 / a_0,
@@ -532,12 +595,17 @@ void NativeAudioEngine::setEqualizerBands(bool enabled, float b0, float b1, floa
         };
     }
 
-    bool active = enabled && any_active;
-    if (!active) {
-        mEqResetStatePending.store(true, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(mEqWriteMutex);
+    uint64_t seq = mEqSeq.load(std::memory_order_relaxed);
+    mEqSeq.store(seq + 1, std::memory_order_release); // Odd: write in progress
+    std::atomic_thread_fence(std::memory_order_release);
+
+    for (int i = 0; i < 5; ++i) {
+        mEqStagingCoeffs[i] = computed[i];
     }
-    mActiveEqSlot.store(nextSlot, std::memory_order_release);
-    mEqEnabled.store(active, std::memory_order_release);
+    mEqStagingEnabled = enabled && any_active;
+
+    mEqSeq.store(seq + 2, std::memory_order_release); // Even: consistent snapshot ready
 }
 
 int32_t NativeAudioEngine::getAudioSessionId() const {

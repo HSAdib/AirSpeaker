@@ -59,12 +59,13 @@ DEFAULT_EQ_STATE: Dict[str, Any] = {
 
 class StereoFiveBandBiquadDSP:
     """
-    Real-time 5-band stereo peaking/shelf biquad EQ optimized for 5 ms audio frames.
-    Features:
+    Real-time 5-band stereo peaking biquad EQ optimized for 5 ms audio frames.
+    Zero-sound-loss guarantees:
+      - Fused single-pass DF-II-T fallback (runs all active bands in 1 pass + NumPy I/O)
       - C-speed SciPy sosfilt fast path when available
-      - Zero-dependency scalar-float Direct Form II Transposed fallback (array('h'))
-      - Snapshotting coefficients under lock; state stays exclusively on the audio thread
-      - Skipping flat bands (|gain| < 0.05 dB)
+      - NaN/Inf recovery: resets filter states and falls back to dry PCM (never latches silence)
+      - Subnormal/denormal flush (< 1e-18 -> 0.0) to prevent silent-passage CPU spikes
+      - Per-band state reset when a band becomes flat or channel count changes
       - Soft-knee limiter preventing clipping distortion on high boosts
     """
 
@@ -80,17 +81,19 @@ class StereoFiveBandBiquadDSP:
         self._active_indices: Tuple[int, ...] = ()
         self._sos: Optional[np.ndarray] = None
 
-        # Audio thread filter state
+        # Audio-thread-only filter state
         self._py_zi = [[[0.0, 0.0], [0.0, 0.0]] for _ in range(5)]
         self._scipy_zi = np.zeros((5, 2, 2), dtype=np.float64)
+        self._last_channels = 2
         self._needs_state_reset = False
+        self._band_reset_mask = [False] * 5
 
     def set_enabled(self, enabled: bool) -> None:
         with self._lock:
-            if self._enabled != bool(enabled):
-                self._enabled = bool(enabled)
-                if not self._enabled:
-                    self._needs_state_reset = True
+            new_en = bool(enabled)
+            if self._enabled != new_en:
+                self._enabled = new_en
+                self._needs_state_reset = True
 
     def set_gains(self, gains_db: List[float], enabled: Optional[bool] = None) -> None:
         clamped = [max(-12.0, min(12.0, float(g))) for g in (gains_db + [0.0] * 5)[:5]]
@@ -106,6 +109,12 @@ class StereoFiveBandBiquadDSP:
                 dtype=np.float64,
             )
         with self._lock:
+            prev_active = set(self._active_indices)
+            new_active = set(active)
+            for b in range(5):
+                # Clear state whenever a band turns off or turns back on from flat
+                if (b in prev_active) != (b in new_active):
+                    self._band_reset_mask[b] = True
             self._gains_db = clamped
             self._coeffs = coeffs
             self._active_indices = active
@@ -114,10 +123,10 @@ class StereoFiveBandBiquadDSP:
                 new_en = bool(enabled)
                 if self._enabled != new_en:
                     self._enabled = new_en
-                    if not new_en:
-                        self._needs_state_reset = True
+                    self._needs_state_reset = True
             elif active and not self._enabled:
                 self._enabled = True
+                self._needs_state_reset = True
 
     def reset(self) -> None:
         with self._lock:
@@ -150,6 +159,13 @@ class StereoFiveBandBiquadDSP:
             self._py_zi[b][1][1] = 0.0
         self._scipy_zi.fill(0.0)
 
+    def _clear_band_state(self, band_idx: int) -> None:
+        self._py_zi[band_idx][0][0] = 0.0
+        self._py_zi[band_idx][0][1] = 0.0
+        self._py_zi[band_idx][1][0] = 0.0
+        self._py_zi[band_idx][1][1] = 0.0
+        self._scipy_zi[band_idx].fill(0.0)
+
     def process_pcm16(self, pcm_bytes: bytes, channels: int = 2) -> bytes:
         with self._lock:
             enabled = self._enabled
@@ -158,26 +174,60 @@ class StereoFiveBandBiquadDSP:
             sos = self._sos
             should_reset = self._needs_state_reset
             self._needs_state_reset = False
+            band_resets = self._band_reset_mask
+            if any(band_resets):
+                band_resets = list(band_resets)
+                self._band_reset_mask = [False] * 5
+            else:
+                band_resets = None
 
-        if should_reset:
+        in_ch = 2 if channels >= 2 else 1
+        if should_reset or in_ch != self._last_channels:
             self._clear_states()
+            self._last_channels = in_ch
+        elif band_resets is not None:
+            for b, do_reset in enumerate(band_resets):
+                if do_reset:
+                    self._clear_band_state(b)
 
         if not enabled or not active or not pcm_bytes:
             return pcm_bytes
 
         if _HAS_SCIPY:
-            return self._process_scipy(pcm_bytes, coeffs, active, channels, sos)
-        return self._process_scalar_python(pcm_bytes, coeffs, active, channels)
+            return self._process_scipy(pcm_bytes, coeffs, active, in_ch, sos)
+        return self._process_scalar_python(pcm_bytes, coeffs, active, in_ch)
+
+    @staticmethod
+    def _limit_and_pack(y_frames_ch: np.ndarray, dry_bytes: bytes, fallback_reset: Callable[[], None]) -> bytes:
+        if not np.isfinite(y_frames_ch).all():
+            fallback_reset()
+            return dry_bytes
+
+        max_val = float(np.max(np.abs(y_frames_ch)))
+        if max_val <= 27852.0:  # Linear headroom: 0.85 * 32768
+            return np.ascontiguousarray(np.rint(y_frames_ch), dtype="<i2").tobytes()
+
+        knee = 0.85
+        norm = y_frames_ch / 32768.0
+        norm = np.where(
+            norm > knee,
+            knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)),
+            np.where(
+                norm < -knee,
+                -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)),
+                norm,
+            ),
+        )
+        return np.ascontiguousarray(np.rint(np.clip(norm, -1.0, 1.0) * 32767.0), dtype="<i2").tobytes()
 
     def _process_scipy(
         self,
         pcm_bytes: bytes,
         coeffs: list,
         active: Tuple[int, ...],
-        channels: int,
+        in_ch: int,
         sos: Optional[np.ndarray] = None,
     ) -> bytes:
-        in_ch = 2 if channels >= 2 else 1
         usable = (len(pcm_bytes) // (2 * in_ch)) * (2 * in_ch)
         if usable == 0:
             return pcm_bytes
@@ -188,7 +238,7 @@ class StereoFiveBandBiquadDSP:
                 b0, b1, b2, a1, a2 = coeffs[band_idx]
                 sos[row_idx] = (b0, b1, b2, 1.0, a1, a2)
 
-        pcm = np.frombuffer(pcm_bytes[:usable], dtype=np.int16).reshape(-1, in_ch)
+        pcm = np.frombuffer(pcm_bytes[:usable], dtype="<i2").reshape(-1, in_ch)
         x = pcm.T.astype(np.float64)  # Shape (in_ch, frames)
 
         zi_subset = np.empty((len(active), in_ch, 2), dtype=np.float64)
@@ -197,87 +247,173 @@ class StereoFiveBandBiquadDSP:
 
         y, zf = sosfilt(sos, x, axis=-1, zi=zi_subset)
 
+        if not np.isfinite(zf).all():
+            self._clear_states()
+            return pcm_bytes[:usable]
+
+        # Flush denormals so silence never stalls the FPU
+        zf[np.abs(zf) < 1e-18] = 0.0
         for row_idx, band_idx in enumerate(active):
             self._scipy_zi[band_idx, :in_ch, :] = zf[row_idx]
 
-        max_val = np.max(np.abs(y))
-        if max_val <= 27852.0:  # Within linear headroom (0.85 * 32768)
-            return np.rint(y).astype(np.int16).T.tobytes()
+        return self._limit_and_pack(y.T, pcm_bytes[:usable], self._clear_states)
 
-        # Soft-knee limiter to prevent clipping
-        knee = 0.85
-        norm = y / 32768.0
-        norm = np.where(
-            norm > knee,
-            knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)),
-            np.where(
-                norm < -knee,
-                -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)),
-                norm,
-            ),
+    def _filter_channel_fused(
+        self,
+        samples: List[float],
+        coeffs: list,
+        active: Tuple[int, ...],
+        ch_idx: int,
+    ) -> Tuple[List[float], bool]:
+        """Run 1..5 active DF-II-T biquad stages in a single fused Python pass with local registers."""
+        n_act = len(active)
+        isfinite = math.isfinite
+        out = [0.0] * len(samples)
+
+        if n_act == 1:
+            idx0 = active[0]
+            b00, b10, b20, a10, a20 = coeffs[idx0]
+            z0 = self._py_zi[idx0][ch_idx]
+            z10, z20 = z0[0], z0[1]
+            for i, x in enumerate(samples):
+                y = b00 * x + z10
+                z10 = b10 * x - a10 * y + z20
+                z20 = b20 * x - a20 * y
+                out[i] = y
+            if not (isfinite(z10) and isfinite(z20)):
+                return out, False
+            z0[0] = 0.0 if -1e-18 < z10 < 1e-18 else z10
+            z0[1] = 0.0 if -1e-18 < z20 < 1e-18 else z20
+            return out, True
+
+        if n_act == 2:
+            i0, i1 = active
+            b00, b10, b20, a10, a20 = coeffs[i0]
+            b01, b11, b21, a11, a21 = coeffs[i1]
+            z0, z1 = self._py_zi[i0][ch_idx], self._py_zi[i1][ch_idx]
+            z10, z20 = z0[0], z0[1]
+            z11, z21 = z1[0], z1[1]
+            for i, x in enumerate(samples):
+                y = b00 * x + z10
+                z10 = b10 * x - a10 * y + z20
+                z20 = b20 * x - a20 * y
+                x = y
+                y = b01 * x + z11
+                z11 = b11 * x - a11 * y + z21
+                z21 = b21 * x - a21 * y
+                out[i] = y
+            if not (isfinite(z10) and isfinite(z20) and isfinite(z11) and isfinite(z21)):
+                return out, False
+            z0[0] = 0.0 if -1e-18 < z10 < 1e-18 else z10
+            z0[1] = 0.0 if -1e-18 < z20 < 1e-18 else z20
+            z1[0] = 0.0 if -1e-18 < z11 < 1e-18 else z11
+            z1[1] = 0.0 if -1e-18 < z21 < 1e-18 else z21
+            return out, True
+
+        if n_act == 3:
+            i0, i1, i2 = active
+            b00, b10, b20, a10, a20 = coeffs[i0]
+            b01, b11, b21, a11, a21 = coeffs[i1]
+            b02, b12, b22, a12, a22 = coeffs[i2]
+            z0, z1, z2 = self._py_zi[i0][ch_idx], self._py_zi[i1][ch_idx], self._py_zi[i2][ch_idx]
+            z10, z20 = z0[0], z0[1]
+            z11, z21 = z1[0], z1[1]
+            z12, z22 = z2[0], z2[1]
+            for i, x in enumerate(samples):
+                y = b00 * x + z10; z10 = b10 * x - a10 * y + z20; z20 = b20 * x - a20 * y; x = y
+                y = b01 * x + z11; z11 = b11 * x - a11 * y + z21; z21 = b21 * x - a21 * y; x = y
+                y = b02 * x + z12; z12 = b12 * x - a12 * y + z22; z22 = b22 * x - a22 * y
+                out[i] = y
+            states = (z10, z20, z11, z21, z12, z22)
+            if not all(isfinite(s) for s in states):
+                return out, False
+            z0[0], z0[1] = (0.0 if -1e-18 < z10 < 1e-18 else z10), (0.0 if -1e-18 < z20 < 1e-18 else z20)
+            z1[0], z1[1] = (0.0 if -1e-18 < z11 < 1e-18 else z11), (0.0 if -1e-18 < z21 < 1e-18 else z21)
+            z2[0], z2[1] = (0.0 if -1e-18 < z12 < 1e-18 else z12), (0.0 if -1e-18 < z22 < 1e-18 else z22)
+            return out, True
+
+        if n_act == 4:
+            i0, i1, i2, i3 = active
+            b00, b10, b20, a10, a20 = coeffs[i0]
+            b01, b11, b21, a11, a21 = coeffs[i1]
+            b02, b12, b22, a12, a22 = coeffs[i2]
+            b03, b13, b23, a13, a23 = coeffs[i3]
+            z0, z1, z2, z3 = self._py_zi[i0][ch_idx], self._py_zi[i1][ch_idx], self._py_zi[i2][ch_idx], self._py_zi[i3][ch_idx]
+            z10, z20 = z0[0], z0[1]
+            z11, z21 = z1[0], z1[1]
+            z12, z22 = z2[0], z2[1]
+            z13, z23 = z3[0], z3[1]
+            for i, x in enumerate(samples):
+                y = b00 * x + z10; z10 = b10 * x - a10 * y + z20; z20 = b20 * x - a20 * y; x = y
+                y = b01 * x + z11; z11 = b11 * x - a11 * y + z21; z21 = b21 * x - a21 * y; x = y
+                y = b02 * x + z12; z12 = b12 * x - a12 * y + z22; z22 = b22 * x - a22 * y; x = y
+                y = b03 * x + z13; z13 = b13 * x - a13 * y + z23; z23 = b23 * x - a23 * y
+                out[i] = y
+            states = (z10, z20, z11, z21, z12, z22, z13, z23)
+            if not all(isfinite(s) for s in states):
+                return out, False
+            z0[0], z0[1] = (0.0 if -1e-18 < z10 < 1e-18 else z10), (0.0 if -1e-18 < z20 < 1e-18 else z20)
+            z1[0], z1[1] = (0.0 if -1e-18 < z11 < 1e-18 else z11), (0.0 if -1e-18 < z21 < 1e-18 else z21)
+            z2[0], z2[1] = (0.0 if -1e-18 < z12 < 1e-18 else z12), (0.0 if -1e-18 < z22 < 1e-18 else z22)
+            z3[0], z3[1] = (0.0 if -1e-18 < z13 < 1e-18 else z13), (0.0 if -1e-18 < z23 < 1e-18 else z23)
+            return out, True
+
+        # 5 active bands
+        b00, b10, b20, a10, a20 = coeffs[0]
+        b01, b11, b21, a11, a21 = coeffs[1]
+        b02, b12, b22, a12, a22 = coeffs[2]
+        b03, b13, b23, a13, a23 = coeffs[3]
+        b04, b14, b24, a14, a24 = coeffs[4]
+        z0, z1, z2, z3, z4 = (
+            self._py_zi[0][ch_idx], self._py_zi[1][ch_idx], self._py_zi[2][ch_idx],
+            self._py_zi[3][ch_idx], self._py_zi[4][ch_idx],
         )
-        return np.rint(np.clip(norm, -1.0, 1.0) * 32767.0).astype(np.int16).T.tobytes()
+        z10, z20 = z0[0], z0[1]
+        z11, z21 = z1[0], z1[1]
+        z12, z22 = z2[0], z2[1]
+        z13, z23 = z3[0], z3[1]
+        z14, z24 = z4[0], z4[1]
+        for i, x in enumerate(samples):
+            y = b00 * x + z10; z10 = b10 * x - a10 * y + z20; z20 = b20 * x - a20 * y; x = y
+            y = b01 * x + z11; z11 = b11 * x - a11 * y + z21; z21 = b21 * x - a21 * y; x = y
+            y = b02 * x + z12; z12 = b12 * x - a12 * y + z22; z22 = b22 * x - a22 * y; x = y
+            y = b03 * x + z13; z13 = b13 * x - a13 * y + z23; z23 = b23 * x - a23 * y; x = y
+            y = b04 * x + z14; z14 = b14 * x - a14 * y + z24; z24 = b24 * x - a24 * y
+            out[i] = y
+        states = (z10, z20, z11, z21, z12, z22, z13, z23, z14, z24)
+        if not all(isfinite(s) for s in states):
+            return out, False
+        z0[0], z0[1] = (0.0 if -1e-18 < z10 < 1e-18 else z10), (0.0 if -1e-18 < z20 < 1e-18 else z20)
+        z1[0], z1[1] = (0.0 if -1e-18 < z11 < 1e-18 else z11), (0.0 if -1e-18 < z21 < 1e-18 else z21)
+        z2[0], z2[1] = (0.0 if -1e-18 < z12 < 1e-18 else z12), (0.0 if -1e-18 < z22 < 1e-18 else z22)
+        z3[0], z3[1] = (0.0 if -1e-18 < z13 < 1e-18 else z13), (0.0 if -1e-18 < z23 < 1e-18 else z23)
+        z4[0], z4[1] = (0.0 if -1e-18 < z14 < 1e-18 else z14), (0.0 if -1e-18 < z24 < 1e-18 else z24)
+        return out, True
 
-    def _process_scalar_python(self, pcm_bytes: bytes, coeffs: list, active: Tuple[int, ...], channels: int) -> bytes:
-        in_ch = 2 if channels >= 2 else 1
+    def _process_scalar_python(self, pcm_bytes: bytes, coeffs: list, active: Tuple[int, ...], in_ch: int) -> bytes:
         usable = (len(pcm_bytes) // (2 * in_ch)) * (2 * in_ch)
         if usable == 0:
             return pcm_bytes
 
-        samples = array("h")
-        samples.frombytes(pcm_bytes[:usable])
-        n_frames = len(samples) // in_ch
-        left = [float(s) for s in samples[0::in_ch]]
-        right = [float(s) for s in samples[1::in_ch]] if in_ch == 2 else []
+        dry = pcm_bytes[:usable]
+        pcm = np.frombuffer(dry, dtype="<i2").reshape(-1, in_ch)
+        left_out, ok_l = self._filter_channel_fused(pcm[:, 0].astype(np.float64).tolist(), coeffs, active, 0)
+        if not ok_l:
+            self._clear_states()
+            return dry
 
-        knee = 0.85
-        inv_32768 = 1.0 / 32768.0
-        one_minus_knee = 1.0 - knee
+        if in_ch == 2:
+            right_out, ok_r = self._filter_channel_fused(pcm[:, 1].astype(np.float64).tolist(), coeffs, active, 1)
+            if not ok_r:
+                self._clear_states()
+                return dry
+            y = np.empty((len(left_out), 2), dtype=np.float64)
+            y[:, 0] = left_out
+            y[:, 1] = right_out
+        else:
+            y = np.asarray(left_out, dtype=np.float64).reshape(-1, 1)
 
-        for band_idx in active:
-            b0, b1, b2, a1, a2 = coeffs[band_idx]
-            zl = self._py_zi[band_idx][0]
-            z1l, z2l = zl[0], zl[1]
-
-            for i in range(n_frames):
-                xl = left[i]
-                yl = b0 * xl + z1l
-                z1l = b1 * xl - a1 * yl + z2l
-                z2l = b2 * xl - a2 * yl
-                left[i] = yl
-            zl[0], zl[1] = z1l, z2l
-
-            if in_ch == 2:
-                zr = self._py_zi[band_idx][1]
-                z1r, z2r = zr[0], zr[1]
-                for i in range(n_frames):
-                    xr = right[i]
-                    yr = b0 * xr + z1r
-                    z1r = b1 * xr - a1 * yr + z2r
-                    z2r = b2 * xr - a2 * yr
-                    right[i] = yr
-                zr[0], zr[1] = z1r, z2r
-
-        out = array("h", [0]) * len(samples)
-        for i in range(n_frames):
-            xl = left[i] * inv_32768
-            if xl > knee:
-                xl = knee + one_minus_knee * math.tanh((xl - knee) / one_minus_knee)
-            elif xl < -knee:
-                xl = -knee - one_minus_knee * math.tanh((-xl - knee) / one_minus_knee)
-            vl = int(round(max(-1.0, min(1.0, xl)) * 32767.0))
-            out[in_ch * i] = 32767 if vl > 32767 else (-32768 if vl < -32768 else vl)
-
-            if in_ch == 2:
-                xr = right[i] * inv_32768
-                if xr > knee:
-                    xr = knee + one_minus_knee * math.tanh((xr - knee) / one_minus_knee)
-                elif xr < -knee:
-                    xr = -knee - one_minus_knee * math.tanh((-xr - knee) / one_minus_knee)
-                vr = int(round(max(-1.0, min(1.0, xr)) * 32767.0))
-                out[in_ch * i + 1] = 32767 if vr > 32767 else (-32768 if vr < -32768 else vr)
-
-        return out.tobytes()
+        return self._limit_and_pack(y, dry, self._clear_states)
 
 
 class EqualizerManager:

@@ -1615,6 +1615,7 @@ struct StudioEqualizerSheetView: View {
                                                 while config.bands.count < 5 { config.bands.append(0.0) }
                                                 config.bands[idx] = Float(newVal)
                                                 config.presetName = "Custom"
+                                                config.enabled = true
                                             }
                                         ),
                                         in: -12.0...12.0,

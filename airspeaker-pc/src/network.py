@@ -332,6 +332,7 @@ class UDPSender:
     def start(self) -> None:
         if self._running:
             return
+        self._tx_eq_dsp.reset()
         self._running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
@@ -392,15 +393,21 @@ class UDPSender:
 
     def set_routing_and_gain(self, send_enabled: bool, gain: float, muted: bool) -> None:
         with self._lock:
+            was_muted = self._muted
             self._send_enabled = bool(send_enabled)
             self._volume_gain = max(0.0, min(2.0, float(gain)))
             self._muted = bool(muted)
+        if bool(muted) and not was_muted:
+            self._tx_eq_dsp.reset()
 
     def set_gain_and_mute(self, gain: float, muted: bool, send_enabled: bool = True) -> None:
         with self._lock:
+            was_muted = self._muted
             self._volume_gain = max(0.0, min(2.0, float(gain)))
             self._muted = bool(muted)
             self._send_enabled = bool(send_enabled)
+        if bool(muted) and not was_muted:
+            self._tx_eq_dsp.reset()
 
     def set_volume_gain(self, gain: float) -> None:
         with self._lock:
@@ -408,7 +415,10 @@ class UDPSender:
 
     def set_muted(self, muted: bool) -> None:
         with self._lock:
+            was_muted = self._muted
             self._muted = bool(muted)
+        if bool(muted) and not was_muted:
+            self._tx_eq_dsp.reset()
 
     def stop(self) -> None:
         self._running = False

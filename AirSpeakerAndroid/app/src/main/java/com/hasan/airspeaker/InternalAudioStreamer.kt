@@ -47,11 +47,10 @@ class InternalAudioStreamer {
         const val CODEC_PCM16 = 0
 
         data class EqCoeffs(val b0: Double, val b1: Double, val b2: Double, val a1: Double, val a2: Double, val active: Boolean)
+        data class EqSnapshot(val enabled: Boolean, val coeffs: Array<EqCoeffs>)
 
-        @Volatile var eqEnabled = false
         @Volatile var eqGainsDb = FloatArray(5)
-        @Volatile var eqCoeffs = Array(5) { EqCoeffs(1.0, 0.0, 0.0, 0.0, 0.0, false) }
-        @Volatile var eqResetGeneration = 0
+        @Volatile var eqSnapshot = EqSnapshot(false, Array(5) { EqCoeffs(1.0, 0.0, 0.0, 0.0, 0.0, false) })
 
         fun setOutboundEq(enabled: Boolean, gains: FloatArray) {
             val copy = FloatArray(5)
@@ -84,11 +83,7 @@ class InternalAudioStreamer {
                 }
             }
             val nowActive = enabled && newCoeffs.any { it.active }
-            eqCoeffs = newCoeffs
-            eqEnabled = nowActive
-            if (!nowActive) {
-                eqResetGeneration++
-            }
+            eqSnapshot = EqSnapshot(nowActive, newCoeffs)
         }
     }
 
@@ -211,7 +206,12 @@ class InternalAudioStreamer {
         var sequence: Long = 1
         var ppsCounter = 0
         var lastPpsTimeMs = SystemClock.elapsedRealtime()
-        var lastEqResetGen = -1
+        var prevEqEnabled = false
+        val prevBandActive = BooleanArray(5)
+        for (b in 0 until 5) {
+            z1[b][0] = 0.0; z1[b][1] = 0.0
+            z2[b][0] = 0.0; z2[b][1] = 0.0
+        }
 
         try {
             record.startRecording()
@@ -248,37 +248,68 @@ class InternalAudioStreamer {
                 }
                 peakLevel.set(maxSample.toFloat() / 32768.0f)
 
-                val curResetGen = eqResetGeneration
-                if (curResetGen != lastEqResetGen) {
-                    lastEqResetGen = curResetGen
+                val snap = eqSnapshot
+                if (snap.enabled != prevEqEnabled) {
                     for (b in 0 until 5) {
                         z1[b][0] = 0.0; z1[b][1] = 0.0
                         z2[b][0] = 0.0; z2[b][1] = 0.0
+                        prevBandActive[b] = snap.coeffs[b].active
+                    }
+                    prevEqEnabled = snap.enabled
+                } else if (snap.enabled) {
+                    for (b in 0 until 5) {
+                        val act = snap.coeffs[b].active
+                        if (act != prevBandActive[b]) {
+                            z1[b][0] = 0.0; z1[b][1] = 0.0
+                            z2[b][0] = 0.0; z2[b][1] = 0.0
+                            prevBandActive[b] = act
+                        }
                     }
                 }
 
-                if (eqEnabled) {
-                    val coeffs = eqCoeffs
+                if (snap.enabled) {
+                    val coeffs = snap.coeffs
                     val knee = 0.85
+                    val invOneMinusKnee = 1.0 / (1.0 - knee)
                     val numFrames = totalSamples / 2
                     for (n in 0 until numFrames) {
                         for (ch in 0 until 2) {
-                            var x = shortBuf[n * 2 + ch].toDouble() / 32768.0
+                            val dry = shortBuf[n * 2 + ch].toDouble() / 32768.0
+                            var x = dry
+                            var stateOk = true
                             for (b in 0 until 5) {
                                 val c = coeffs[b]
                                 if (!c.active) continue
                                 val y = c.b0 * x + z1[b][ch]
-                                z1[b][ch] = c.b1 * x - c.a1 * y + z2[b][ch]
-                                z2[b][ch] = c.b2 * x - c.a2 * y
+                                val nz1 = c.b1 * x - c.a1 * y + z2[b][ch]
+                                val nz2 = c.b2 * x - c.a2 * y
+                                if (!y.isFinite() || !nz1.isFinite() || !nz2.isFinite()) {
+                                    z1[b][ch] = 0.0
+                                    z2[b][ch] = 0.0
+                                    stateOk = false
+                                    break
+                                }
+                                z1[b][ch] = nz1
+                                z2[b][ch] = nz2
                                 x = y
                             }
+                            if (!stateOk) {
+                                x = dry
+                            }
                             if (x > knee) {
-                                x = knee + (1.0 - knee) * tanh((x - knee) / (1.0 - knee))
+                                x = knee + (1.0 - knee) * tanh((x - knee) * invOneMinusKnee)
                             } else if (x < -knee) {
-                                x = -knee - (1.0 - knee) * tanh((-x - knee) / (1.0 - knee))
+                                x = -knee - (1.0 - knee) * tanh((-x - knee) * invOneMinusKnee)
                             }
                             val clamped = round(x.coerceIn(-1.0, 1.0) * 32767.0).toInt()
                             shortBuf[n * 2 + ch] = clamped.coerceIn(-32768, 32767).toShort()
+                        }
+                    }
+                    // Flush denormals once per frame
+                    for (b in 0 until 5) {
+                        for (ch in 0 until 2) {
+                            if (abs(z1[b][ch]) < 1e-18) z1[b][ch] = 0.0
+                            if (abs(z2[b][ch]) < 1e-18) z2[b][ch] = 0.0
                         }
                     }
                 }

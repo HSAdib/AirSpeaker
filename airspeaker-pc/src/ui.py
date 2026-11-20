@@ -1530,17 +1530,31 @@ class AirSpeakerApp:
                 self.conn_device_ip_var.set(f"{first_ip}  •  PARTY ACTIVE")
 
         if hasattr(self, "party_listbox"):
+            selected_ip = None
             prev_sel = self.party_listbox.curselection()
+            if prev_sel and prev_sel[0] < self.party_listbox.size():
+                sel_text = self.party_listbox.get(prev_sel[0])
+                for dev_ip, _ in snapshot:
+                    if f"{dev_ip}:" in sel_text:
+                        selected_ip = dev_ip
+                        break
+
             self.party_listbox.delete(0, tk.END)
+            reselect_idx = -1
             for idx, (dev_ip, dev_info) in enumerate(snapshot, start=1):
-                age = max(0.0, now - dev_info["last_seen"])
-                state_tag = "ONLINE" if age < 5.0 else f"IDLE ({int(age)}s ago)"
+                if dev_info.get("manual", False):
+                    state_tag = "MANUAL"
+                else:
+                    age = max(0.0, now - dev_info["last_seen"])
+                    state_tag = "ONLINE" if age < 5.0 else f"IDLE ({int(age)}s ago)"
                 self.party_listbox.insert(
                     tk.END,
                     f" #{idx}  {dev_info['name']:<20} •  {dev_ip}:{dev_info['port']}  •  {state_tag}"
                 )
-            if prev_sel and prev_sel[0] < len(snapshot):
-                self.party_listbox.selection_set(prev_sel[0])
+                if dev_ip == selected_ip:
+                    reselect_idx = idx - 1
+            if reselect_idx >= 0:
+                self.party_listbox.selection_set(reselect_idx)
 
         if hasattr(self, "party_extend_peers_label"):
             ext_peers = [f"{d['name']} ({ip})" for ip, d in snapshot]
@@ -2094,8 +2108,8 @@ class AirSpeakerApp:
             self._control_listener.set_target_ip(new_ip)
         self.phone_ip_var.set(f"Phone: {new_ip}")
         self.conn_device_ip_var.set(f"{new_ip}  •  TARGET SET")
-        self._register_party_device(new_ip, "Manual Device", new_port)
-        if self._streaming and self._udp_sender:
+        self._register_party_device(new_ip, "Manual Device", new_port, manual=True)
+        if self._normal_streaming and self._udp_sender:
             self._udp_sender.update_target(new_ip, new_port)
             self._update_combined_status()
         self._save_config()

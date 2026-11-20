@@ -368,6 +368,7 @@ class AudioReceiver:
             self.peak_level = 0.0
             self._pcm_queue.clear()
             self._is_prebuffering = True
+            self._rx_eq_dsp.reset()
 
     def _open_audio_sink(self) -> bool:
         """Open either PipeWire/PulseAudio sink via pacat or PyAudio stream."""
@@ -478,6 +479,7 @@ class AudioReceiver:
                     return False
 
             self._opus_decoder = OpusDecoder(SAMPLE_RATE, CHANNELS)
+            self._rx_eq_dsp.reset()
             self._running = True
             self._is_prebuffering = True
             self._last_rx_time = 0.0
@@ -607,24 +609,26 @@ class AudioReceiver:
 
     def _render_and_write(self, pcm_data: bytes, channels: int) -> None:
         try:
-            with self._lock:
-                in_ch = channels if channels in (1, 2) else 2
-                usable = (len(pcm_data) // (2 * in_ch)) * (2 * in_ch)
-                if usable == 0:
-                    return
-                pcm_data = pcm_data[:usable]
+            in_ch = channels if channels in (1, 2) else 2
+            usable = (len(pcm_data) // (2 * in_ch)) * (2 * in_ch)
+            if usable == 0:
+                return
+            pcm_data = pcm_data[:usable]
 
-                pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, in_ch)
-                gain = self._volume_gain
-                if abs(gain - 1.0) > 0.01:
-                    norm = (np.frombuffer(pcm_data, dtype="<i2").astype(np.float32) * gain) / 32767.0
-                    if gain > 1.0:
-                        knee = 0.85
-                        norm = np.where(norm > knee, knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)), norm)
-                        norm = np.where(norm < -knee, -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)), norm)
-                    else:
-                        norm = np.clip(norm, -1.0, 1.0)
-                    pcm_data = np.rint(norm * 32767.0).astype("<i2").tobytes()
+            # Run EQ and volume gain outside self._lock so set_output_device() is never blocked by DSP
+            pcm_data = self._rx_eq_dsp.process_pcm16(pcm_data, in_ch)
+            gain = self._volume_gain
+            if abs(gain - 1.0) > 0.01:
+                norm = (np.frombuffer(pcm_data, dtype="<i2").astype(np.float32) * gain) / 32767.0
+                if gain > 1.0:
+                    knee = 0.85
+                    norm = np.where(norm > knee, knee + (1.0 - knee) * np.tanh((norm - knee) / (1.0 - knee)), norm)
+                    norm = np.where(norm < -knee, -knee - (1.0 - knee) * np.tanh((-norm - knee) / (1.0 - knee)), norm)
+                else:
+                    norm = np.clip(norm, -1.0, 1.0)
+                pcm_data = np.rint(norm * 32767.0).astype("<i2").tobytes()
+
+            with self._lock:
                 out_pcm = pcm_data
                 if self._dev_rate != SAMPLE_RATE or self._dev_channels != in_ch:
                     pcm_arr = np.frombuffer(pcm_data, dtype="<i2")
