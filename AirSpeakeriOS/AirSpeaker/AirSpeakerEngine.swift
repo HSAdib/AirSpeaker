@@ -1417,7 +1417,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         let cleanTarget = targetIp.trimmingCharacters(in: .whitespacesAndNewlines)
         stateLock.lock()
         atomicServeTargetIp = cleanTarget
-        if !cleanTarget.isEmpty {
+        if !cleanTarget.isEmpty && cleanTarget != "0.0.0.0" {
             atomicConnectedServerIp = cleanTarget
         }
         stateLock.unlock()
@@ -1754,9 +1754,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             if let pcName = payload["pc_name"] as? String {
                 connectedServerName = pcName
             }
-            let isHost = payload["is_party_host"] as? Bool ?? (payload["party_mode"] as? Bool ?? false)
+            let isExt = payload["is_extended_host"] as? Bool ?? false
+            let isHost = (payload["is_party_host"] as? Bool ?? (payload["party_mode"] as? Bool ?? false)) || isExt
             if isHost {
-                updateDiscoveredPartyHost(name: connectedServerName, ip: senderIp, port: 5004, isExtended: false)
+                updateDiscoveredPartyHost(name: connectedServerName, ip: senderIp, port: 5004, isExtended: isExt)
             } else {
                 discoveredPartyHosts.removeAll { $0.ip == senderIp }
             }

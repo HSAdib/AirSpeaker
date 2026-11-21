@@ -108,8 +108,13 @@ class InternalAudioStreamer {
     private fun resolveAddress(ip: String): InetAddress? {
         val clean = ip.trim()
         if (clean.isEmpty() || clean == "0.0.0.0") return null
-        return addrCache.computeIfAbsent(clean) {
-            try { InetAddress.getByName(clean) } catch (_: Exception) { null }
+        addrCache[clean]?.let { return it }
+        return try {
+            val addr = InetAddress.getByName(clean)
+            addrCache[clean] = addr
+            addr
+        } catch (_: Exception) {
+            null
         }
     }
     private val targetPort = 5004

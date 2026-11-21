@@ -18,6 +18,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any, Dict, List, Optional, Tuple
+import urllib.error
 import webbrowser
 
 from version import APP_VERSION, BUILD_SHA
@@ -1752,7 +1753,7 @@ class AirSpeakerApp:
         with self._party_lock:
             self._party_devices.clear()
         if self._udp_sender:
-            self._udp_sender.set_party_targets([])
+            self._udp_sender.clear_party_targets()
         if self._control_listener:
             self._control_listener.set_party_mode(False)
         if hasattr(self, "party_chooser_frame"):
@@ -3828,6 +3829,9 @@ TABS:
                 self.update_bar_label.config(text=f"⬇ {asset_name}: {txt}")
                 if hasattr(self, "update_progress_label"):
                     self.update_progress_label.config(text=txt)
+                if hasattr(self, "update_bar_progress") and total > 0:
+                    self.update_bar_progress.stop()
+                    self.update_bar_progress.config(mode="determinate", value=pct)
                 if hasattr(self, "update_progress_bar"):
                     if total > 0:
                         self.update_progress_bar.config(mode="determinate", value=pct)

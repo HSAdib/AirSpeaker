@@ -1137,6 +1137,7 @@ struct PartyStudioTab: View {
 struct SettingsStudioTab: View {
     @ObservedObject var engine: AirSpeakerEngine
     @State private var showUniversalEQSheet: Bool = false
+    @State private var showExportPicker: Bool = false
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -1331,6 +1332,9 @@ struct SettingsStudioTab: View {
                             }
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+                        }
+                        .sheet(isPresented: $showExportPicker) {
+                            DocumentExportPicker(url: fileUrl)
                         }
                     } else if !engine.updateDownloadUrl.isEmpty && engine.updateDownloadUrl != "https://github.com/HSAdib/AirSpeaker/releases/latest" {
                         Button(action: {

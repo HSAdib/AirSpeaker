@@ -2183,6 +2183,7 @@ class MainActivity : AppCompatActivity() {
                 progressDialog.setMessage(progText)
             },
             onComplete = { apkUri, displayPath ->
+                if (isFinishing || isDestroyed) return@downloadApkToDownloads
                 try { progressDialog.dismiss() } catch (_: Exception) {}
                 binding.layoutUpdateDownload.visibility = View.GONE
                 binding.tvUpdateStatus.visibility = View.VISIBLE

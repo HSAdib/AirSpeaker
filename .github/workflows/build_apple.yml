@@ -383,8 +383,9 @@ jobs:
         run: |
           TAG_NAME="${GITHUB_REF_NAME}"
           if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
-            TAG_NAME="v1.0.0"
+            TAG_NAME="v1.0.2"
           fi
+          APP_VER="${TAG_NAME#v}"
           SHORT_SHA="${GITHUB_SHA::7}"
           if [ -z "$SHORT_SHA" ]; then SHORT_SHA="dev"; fi
 
@@ -420,9 +421,9 @@ jobs:
           EOF
 
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
-            gh release create "$TAG_NAME" --title "Air Speaker v1.0 Studio" --notes-file RELEASE_NOTES.md
+            gh release create "$TAG_NAME" --title "Air Speaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md
 
-          gh release edit "$TAG_NAME" --title "Air Speaker v1.0 Studio" --notes-file RELEASE_NOTES.md || true
+          gh release edit "$TAG_NAME" --title "Air Speaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md || true
 
           for f in release-artifacts/*; do
             if [ -f "$f" ]; then
@@ -454,12 +455,16 @@ jobs:
           done
 
           if [ ${#ORAS_FILES[@]} -gt 0 ]; then
-            echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF..."
+            APP_VER="1.0.2"
+            if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              APP_VER="${GITHUB_REF_NAME#v}"
+            fi
+            echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF (version ${APP_VER})..."
             oras push --disable-path-validation "${PKG_REF}:latest" \
               --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
               --annotation "org.opencontainers.image.description=Air Speaker v1.0 Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
-              --annotation "org.opencontainers.image.version=1.0.0" \
+              --annotation "org.opencontainers.image.version=${APP_VER}" \
               "${ORAS_FILES[@]}"
 
-            oras tag "${PKG_REF}:latest" "1.0.0"
+            oras tag "${PKG_REF}:latest" "${APP_VER}"
           fi

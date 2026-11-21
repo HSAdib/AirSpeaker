@@ -69,9 +69,7 @@ def write_build_info() -> str:
     app_ver = resolve_app_version()
     build_info_path = ROOT / "src" / "_build_info.py"
     build_info_path.write_text(
-        f'APP_VERSION = "{app_ver}"
-BUILD_SHA = "{sha}"
-',
+        f'APP_VERSION = "{app_ver}"\nBUILD_SHA = "{sha}"\n',
         encoding="utf-8",
     )
     print(f"Stamped APP_VERSION = '{app_ver}', BUILD_SHA = '{sha}' -> {build_info_path}", flush=True)
