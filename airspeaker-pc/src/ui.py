@@ -1650,6 +1650,7 @@ class AirSpeakerApp:
         if not force and getattr(self, "_party_view_state", "CHOOSER") != "HOST" and not getattr(self, "party_extend_var", tk.BooleanVar(value=False)).get() and not getattr(self, "party_mode_var", tk.BooleanVar(value=False)).get():
             return
         with self._party_lock:
+            is_new_peer = ip not in self._party_devices
             existing = self._party_devices.get(ip, {})
             was_manual = existing.get("manual", False)
             self._party_devices[ip] = {
@@ -1661,7 +1662,7 @@ class AirSpeakerApp:
         if self._udp_sender:
             self._udp_sender.add_party_target(ip, int(port))
         self._refresh_party_ui()
-        if self._party_streaming or self._party_view_state == "HOST":
+        if is_new_peer and (self._party_streaming or self._party_view_state == "HOST"):
             self._send_config_reliable([ip], self._get_current_config())
 
     def _refresh_party_ui(self) -> None:
@@ -2524,28 +2525,35 @@ class AirSpeakerApp:
 
 
     def _on_buffer_mode_changed(self) -> None:
-        if not self._suppress_sync:
+        if self._suppress_sync or self._party_joined_active:
+            return
+        self._suppress_sync = True
+        try:
             self.audio_profile_var.set("CUSTOM")
-        mode = self.buffer_mode_var.get()
-        if mode == "LOW":
-            self.custom_buffer_var.set(20.0)
-        elif mode == "MEDIUM":
-            self.custom_buffer_var.set(40.0)
-        elif mode == "HIGH":
-            self.custom_buffer_var.set(80.0)
-        for lbl in getattr(self, "_buffer_val_labels", []):
-            try:
-                lbl.config(text=f"{self.custom_buffer_var.get():.1f} ms")
-            except Exception:
-                pass
-        if hasattr(self, "buffer_val_label"):
-            self.buffer_val_label.config(text=f"{self.custom_buffer_var.get():.1f} ms")
-        if hasattr(self, "play_target_var"):
-            self.play_target_var.set(f"{self.custom_buffer_var.get():.1f} ms")
-        if self._phone_receiver:
-            self._phone_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
-        if self._party_join_receiver:
-            self._party_join_receiver.set_target_buffer_ms(self.custom_buffer_var.get())
+            mode = self.buffer_mode_var.get()
+            if mode == "LOW":
+                self.custom_buffer_var.set(20.0)
+            elif mode == "MEDIUM":
+                self.custom_buffer_var.set(40.0)
+            elif mode == "HIGH":
+                self.custom_buffer_var.set(80.0)
+            cur_ms = round(float(self.custom_buffer_var.get()), 1)
+            self._last_buf_slider_val = cur_ms
+            for lbl in getattr(self, "_buffer_val_labels", []):
+                try:
+                    lbl.config(text=f"{cur_ms:.1f} ms")
+                except Exception:
+                    pass
+            if hasattr(self, "buffer_val_label"):
+                self.buffer_val_label.config(text=f"{cur_ms:.1f} ms")
+            if hasattr(self, "play_target_var"):
+                self.play_target_var.set(f"{cur_ms:.1f} ms")
+            if self._phone_receiver:
+                self._phone_receiver.set_target_buffer_ms(cur_ms)
+            if self._party_join_receiver:
+                self._party_join_receiver.set_target_buffer_ms(cur_ms)
+        finally:
+            self._suppress_sync = False
         self._on_local_setting_changed()
 
     def _on_buffer_slider_changed(self, val) -> None:
@@ -3773,6 +3781,7 @@ class AirSpeakerApp:
                 self._control_listener.set_party_mode(False)
             self._update_codec_ui_state()
             self._update_expected_delay_label()
+            self._update_party_join_host_cfg_label()
         finally:
             self._suppress_sync = False
 

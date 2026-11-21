@@ -178,6 +178,7 @@ private:
     // ---------------------------------------------------------
     bool mHasStarted{false};
     bool mIsPrebuffering{true};
+    bool mHasPlayedAudio{false};
     uint64_t mExpectedSeq{0};
     float mLocalTargetBufferMs{30.0f};
     uint8_t mCurrentCodec{0};

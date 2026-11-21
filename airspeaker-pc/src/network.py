@@ -331,6 +331,10 @@ class UDPSender:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            self._sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0xB8)
+        except Exception:
+            pass
 
         with self._lock:
             target_ip = self._target_ip
@@ -590,6 +594,10 @@ class UDPSender:
                                         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                                         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
                                         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                                        try:
+                                            self._sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0xB8)
+                                        except Exception:
+                                            pass
                                         sock = self._sock
                                     sock.sendto(packet, (t_ip, t_port))
                                     sent_any = True

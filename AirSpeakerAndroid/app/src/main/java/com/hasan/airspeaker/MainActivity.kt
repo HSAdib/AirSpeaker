@@ -345,7 +345,7 @@ class MainActivity : AppCompatActivity() {
     private fun updatePartyJoinHostSettingsCard() {
         val isOpus = binding.rbCodecOpus.isChecked || binding.rbPlayerCodecOpus.isChecked
         val kbps = bitrateValues.getOrElse(binding.spinnerBitrate.selectedItemPosition) { "192" }
-        val codecLabel = if (isOpus) "Opus ($kbps kbps,${currentFrameMs}ms)" else "Lossless PCM16 (5ms)"
+        val codecLabel = if (isOpus) "Opus ($kbps kbps, ${currentFrameMs}ms)" else "Lossless PCM16 (5ms)"
         val bufMode = when (binding.rgBufferMode.checkedRadioButtonId) {
             R.id.rbBufLow -> "LOW (20ms)"
             R.id.rbBufMed -> "MEDIUM (40ms)"
@@ -1432,6 +1432,8 @@ class MainActivity : AppCompatActivity() {
         }
         binding.spinnerBitrate.onItemSelectedListener = makeBitrateListener(binding.spinnerBitrate)
         binding.spPlayerBitrate.onItemSelectedListener = makeBitrateListener(binding.spPlayerBitrate)
+        spinnerProgrammaticTarget[binding.spinnerBitrate.id] = 7
+        spinnerProgrammaticTarget[binding.spPlayerBitrate.id] = 7
 
         // Buffer target sliders (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
         val initialTarget = quantizeTarget(AudioNative.safeGetTargetBufferMs())
@@ -2070,19 +2072,8 @@ class MainActivity : AppCompatActivity() {
             launchQrScanner()
         }
 
-        // Host Codec & Bitrate Controls
+        // Host Codec & Bitrate Controls (listener already wired above via applyCodecSelection)
         binding.layoutPartyHostBitrate.visibility = if (binding.rbPartyHostCodecOpus.isChecked) View.VISIBLE else View.GONE
-        binding.rgPartyHostCodec.setOnCheckedChangeListener { _, checkedId ->
-            val isOpus = (checkedId == binding.rbPartyHostCodecOpus.id)
-            binding.layoutPartyHostBitrate.visibility = if (isOpus) View.VISIBLE else View.GONE
-            if (!suppressSync) {
-                binding.rbCodecOpus.isChecked = isOpus
-                binding.rbCodecPcm.isChecked = !isOpus
-                binding.rbPlayerCodecOpus.isChecked = isOpus
-                binding.rbPlayerCodecPcm.isChecked = !isOpus
-                onLocalSettingChanged()
-            }
-        }
 
         val hostBitrateAdapter = object : ArrayAdapter<String>(
             this,
@@ -2108,6 +2099,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerPartyHostBitrate.adapter = hostBitrateAdapter
         setAllBitrateSpinnersProgrammatically(7)
         binding.spinnerPartyHostBitrate.onItemSelectedListener = makeBitrateListener(binding.spinnerPartyHostBitrate)
+        spinnerProgrammaticTarget[binding.spinnerPartyHostBitrate.id] = 7
 
         binding.btnAddPartyPeer.setOnClickListener {
             val raw = binding.etPartyPeerIp.text?.toString()?.trim().orEmpty()

@@ -72,6 +72,7 @@ void JitterBuffer::reset() {
     // Reset worker state
     mHasStarted = false;
     mIsPrebuffering = true;
+    mHasPlayedAudio = false;
     mExpectedSeq = 0;
     mConsecutiveLosses = 0;
     mLastFrameSamplesPerCh = 240;
@@ -114,8 +115,8 @@ void JitterBuffer::pushPacket(const AudioPacket& packet) {
 
         uint32_t expected = mWorkerExpectedSeq.load(std::memory_order_relaxed);
 
-        // Detect sender restart (seq reset to 1..15) or stream pause > 600ms
-        if (gapSinceLastPacketMs > 600 || (expected > 30 && expected < 0xFFFE0000U && packet.header.seq < 15)) {
+        // Detect sender restart (seq reset to 1..15) or true stream stop > 2500ms (do not wipe on brief Wi-Fi stalls)
+        if (gapSinceLastPacketMs > 2500 || (expected > 30 && expected < 0xFFFE0000U && packet.header.seq < 15)) {
             mPacketMap.clear();
             mFirstPacket = true;
             mHighestSeq64 = 0;
@@ -206,10 +207,11 @@ bool JitterBuffer::processPackets(int16_t* decoded_buf) {
     }
 
     bool resetReq = mStreamResetPending.exchange(false, std::memory_order_acq_rel);
-    if (!mHasStarted || resetReq || sinceLastRxMs > 800) {
+    if (!mHasStarted || resetReq || sinceLastRxMs > 2500) {
         const bool wasStarted = mHasStarted;
         mHasStarted = false;
         mIsPrebuffering = true;
+        mHasPlayedAudio = false;
         if (resetReq) {
             mPcmRingBuffer.flushFromProducer();
         }
@@ -301,14 +303,16 @@ bool JitterBuffer::processPackets(int16_t* decoded_buf) {
     float pktDurMs = std::max(1.0f, mPacketDurationMs.load(std::memory_order_relaxed));
     float totalQueuedMs = (packetQueueSize * pktDurMs) + ringOccupiedMs;
 
-    // Startup prebuffering: wait until queued audio reaches effective target buffer
+    // Prebuffering: full target on startup, fast resume (<= 60ms / 100ms BT) after mid-stream Wi-Fi stall
     if (mIsPrebuffering) {
-        float startThreshold = effectiveTargetMs;
+        float resumeCapMs = btMode ? 100.0f : 60.0f;
+        float startThreshold = mHasPlayedAudio ? std::min(effectiveTargetMs, resumeCapMs) : effectiveTargetMs;
         int minPackets = std::max(2, static_cast<int>(std::ceil(startThreshold / pktDurMs)));
         if (totalQueuedMs < startThreshold || static_cast<int>(packetQueueSize) < minPackets) {
             return false;
         }
         mIsPrebuffering = false;
+        mHasPlayedAudio = true;
         mConsecutiveLosses = 0;
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (!mPacketMap.empty()) {
@@ -356,6 +360,9 @@ bool JitterBuffer::processPackets(int16_t* decoded_buf) {
             uint64_t earliestSeq = mPacketMap.begin()->first;
             int64_t gap = static_cast<int64_t>(earliestSeq) - static_cast<int64_t>(mExpectedSeq);
             if (gap > 4 || gap < -20 || (mConsecutiveLosses >= 2 && gap != 0)) {
+                if (gap > 0) {
+                    mLostCount.fetch_add(static_cast<uint64_t>(gap), std::memory_order_relaxed);
+                }
                 mExpectedSeq = earliestSeq;
                 mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
             }
