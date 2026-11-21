@@ -294,7 +294,7 @@ object UpdateChecker {
                 }
 
                 val totalBytes = conn.contentLength.toLong()
-                val stream = conn.inputStream
+                val stream = conn.inputStream ?: throw RuntimeException("Empty response stream")
                 inputStream = stream
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

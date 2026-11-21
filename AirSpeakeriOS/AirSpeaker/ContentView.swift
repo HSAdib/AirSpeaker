@@ -20,7 +20,6 @@ struct DocumentExportPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 }
 
-import UIKit
 
 private enum M3 {
     static let bg = Color(red: 0.063, green: 0.075, blue: 0.094)               // #101318
