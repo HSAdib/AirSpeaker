@@ -315,6 +315,7 @@ class AudioReceiver:
         self._play_thread: Optional[threading.Thread] = None
         self._pcm_queue: collections.deque = collections.deque(maxlen=128)
         self._is_prebuffering = True
+        self._has_played_audio = False
         self._last_rx_time = 0.0
         self._last_seq: Optional[int] = None
         self._last_sender_ip: str = ""
@@ -377,6 +378,7 @@ class AudioReceiver:
             self.peak_level = 0.0
             self._pcm_queue.clear()
             self._is_prebuffering = True
+            self._has_played_audio = False
             self._rx_eq_dsp.reset()
 
     def _open_audio_sink(self) -> bool:
@@ -513,6 +515,7 @@ class AudioReceiver:
             self._rx_eq_dsp.reset()
             self._running = True
             self._is_prebuffering = True
+            self._has_played_audio = False
             self._last_rx_time = 0.0
             self._last_valid_frame = b"\x00" * 960
             self._pcm_queue.clear()
@@ -585,17 +588,18 @@ class AudioReceiver:
                     seq = header["seq"]
                     sender_ip = addr[0]
                     now_rx = time.monotonic()
-                    if (now_rx - self._last_rx_time) > 0.6 or (
+                    if (now_rx - self._last_rx_time) > 2.5 or (
                         self._last_seq is not None and 30 < self._last_seq < 0xFFFE0000 and seq < 15
                     ):
                         self._last_seq = None
+                        self._has_played_audio = False
                     if sender_ip == self._last_sender_ip and self._last_seq is not None:
                         diff = (self._last_seq - seq) & 0xFFFFFFFF
-                        if seq == self._last_seq or (0 < diff < 500):
+                        if seq == self._last_seq or (0 < diff < 1000):
                             self._late_packets += 1
                             continue
                         fwd_diff = (seq - self._last_seq) & 0xFFFFFFFF
-                        if 1 < fwd_diff < 500:
+                        if 1 < fwd_diff < 1000:
                             self._lost_packets += (fwd_diff - 1)
                     self._last_seq = seq
                     self._last_sender_ip = sender_ip
@@ -738,10 +742,16 @@ class AudioReceiver:
                 min_packets, max_packets = self._compute_buffer_packet_bounds()
                 if self._is_prebuffering:
                     self._queue_event.clear()
-                    if len(self._pcm_queue) < min_packets:
+                    if self._has_played_audio and (time.monotonic() - self._last_rx_time) <= 2.5:
+                        resume_cap_pkts = max(2, int(round(60.0 / max(1.0, self._frame_duration_ms))))
+                        needed_packets = min(min_packets, resume_cap_pkts)
+                    else:
+                        needed_packets = min_packets
+                    if len(self._pcm_queue) < needed_packets:
                         self._queue_event.wait(timeout=0.02)
                         continue
                     self._is_prebuffering = False
+                    self._has_played_audio = True
 
                 if self._pcm_queue:
                     self._conceal_count = 0

@@ -523,6 +523,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private var atomicRelayActive: Bool = false
     private var atomicConnectedServerIp: String = ""
     private var isPrebufferingAudio: Bool = true
+    private var hasPlayedAudioInSession: Bool = false
 
     // MARK: - Audio Engine Components
     private let audioEngine = AVAudioEngine()
@@ -802,6 +803,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.playerNode.stop()
                 self.audioBufferQueueCount.reset()
                 self.isPrebufferingAudio = true
+                self.hasPlayedAudioInSession = false
             }
         } else if type == .ended {
             guard isAudioPlaying else { return }
@@ -817,6 +819,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.playerNode.stop()
                 self.audioBufferQueueCount.reset()
                 self.isPrebufferingAudio = true
+                self.hasPlayedAudioInSession = false
                 if !self.audioEngine.isRunning {
                     try? self.audioEngine.start()
                 }
@@ -851,6 +854,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.playerNode.stop()
                 self.audioBufferQueueCount.reset()
                 self.isPrebufferingAudio = true
+                self.hasPlayedAudioInSession = false
                 if !self.audioEngine.isRunning {
                     try? self.audioEngine.start()
                 }
@@ -904,6 +908,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             self.playbackSessionId &+= 1
             self.audioBufferQueueCount.reset()
             self.isPrebufferingAudio = true
+            self.hasPlayedAudioInSession = false
             self.playerNode.stop()
             if !self.audioEngine.isRunning {
                 try? self.audioEngine.start()
@@ -1160,7 +1165,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             // Audio Playout (PCM16) with 32-bit wrap-safe reordering & accurate loss accounting
             let nowUptime = ProcessInfo.processInfo.systemUptime
             let isStreamRestart = !hasSeqInitialized
-                || (nowUptime - lastPacketArrivalUptime) > 0.6
+                || (nowUptime - lastPacketArrivalUptime) > 2.5
                 || (seq < 15 && (highestSeq64 & 0xFFFF_FFFF) > 30 && (highestSeq64 & 0xFFFF_FFFF) < 0xFFFE_0000)
             lastPacketArrivalUptime = nowUptime
 
@@ -1171,6 +1176,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 seq64 = UInt64(seq)
                 expectedSeq64 = seq64
                 highestSeq64 = seq64
+                audioControlQueue.async { [weak self] in
+                    self?.hasPlayedAudioInSession = false
+                }
             } else {
                 let diffFromHighest = Int32(bitPattern: seq &- UInt32(truncatingIfNeeded: highestSeq64))
                 let signedSeq = Int64(highestSeq64) + Int64(diffFromHighest)
@@ -1264,7 +1272,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                             rxEQDSP.processFloatStereo(left: left, right: right, frameCount: Int(frameCount), gain: gain)
                         }
 
-                        let minPrebuffer = max(2, Int(round(Double(effectiveTargetMs) / frameDurMs)))
+                        let startupMinPrebuffer = max(2, Int(round(Double(effectiveTargetMs) / frameDurMs)))
+                        let resumeCapMs = btRoute ? 100.0 : 60.0
+                        let resumeMinPrebuffer = max(2, Int(round(min(Double(effectiveTargetMs), resumeCapMs) / frameDurMs)))
                         guard isRxSessionActive(sessionId) else { break }
                         audioControlQueue.async { [weak self] in
                             guard let self = self, self.isRxSessionActive(sessionId) else { return }
@@ -1286,8 +1296,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                                     }
                                 }
                             }
-                            if self.isPrebufferingAudio && self.audioBufferQueueCount.value >= minPrebuffer {
+                            let neededPrebuffer = self.hasPlayedAudioInSession ? resumeMinPrebuffer : startupMinPrebuffer
+                            if self.isPrebufferingAudio && self.audioBufferQueueCount.value >= neededPrebuffer {
                                 self.isPrebufferingAudio = false
+                                self.hasPlayedAudioInSession = true
                                 if !self.audioEngine.isRunning {
                                     try? self.audioEngine.start()
                                 }

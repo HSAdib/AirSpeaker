@@ -311,12 +311,20 @@ bool JitterBuffer::processPackets(int16_t* decoded_buf) {
         if (totalQueuedMs < startThreshold || static_cast<int>(packetQueueSize) < minPackets) {
             return false;
         }
+        const bool wasMidStream = mHasPlayedAudio;
         mIsPrebuffering = false;
         mHasPlayedAudio = true;
         mConsecutiveLosses = 0;
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (!mPacketMap.empty()) {
-            mExpectedSeq = mPacketMap.begin()->first;
+            uint64_t nextAvailSeq = mPacketMap.begin()->first;
+            if (wasMidStream && nextAvailSeq > mExpectedSeq) {
+                uint64_t skipped = nextAvailSeq - mExpectedSeq;
+                if (skipped < 2000) {
+                    mLostCount.fetch_add(skipped, std::memory_order_relaxed);
+                }
+            }
+            mExpectedSeq = nextAvailSeq;
             mWorkerExpectedSeq.store(static_cast<uint32_t>(mExpectedSeq), std::memory_order_relaxed);
         }
     }
