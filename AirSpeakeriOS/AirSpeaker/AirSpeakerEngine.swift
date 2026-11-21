@@ -2542,7 +2542,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         guard let url = URL(string: "https://api.github.com/repos/HSAdib/AirSpeaker/releases/latest") else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 6.0
-        let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.2.0"
+        let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.2.1"
         let localBuildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
         request.setValue("AirSpeaker-iOS/\(localVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")

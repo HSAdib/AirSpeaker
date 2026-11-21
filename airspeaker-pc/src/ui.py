@@ -274,6 +274,8 @@ class AirSpeakerApp:
         self._is_dragging_slider = False
         self._last_local_slider_time = 0.0
         self._last_peer_ip: str = ""
+        self._peer_last_seen: Dict[str, float] = {}
+        self._peer_last_playing: Dict[str, bool] = {}
         self.party_join_host_cfg_var = tk.StringVar(
             value="🔒 Host Controls: PCM16 • Buffer: AUTO (30.0 ms) — Only the Party Host can change bitrate, buffer & delay"
         )
@@ -2662,6 +2664,12 @@ class AirSpeakerApp:
             except Exception:
                 pass
 
+    def _is_ip_recently_seen(self, ip: str, max_age: float = 3.5) -> bool:
+        clean = (ip or "").strip()
+        if not clean or clean in ("127.0.0.1", "0.0.0.0", "255.255.255.255"):
+            return False
+        return (time.monotonic() - self._peer_last_seen.get(clean, 0.0)) < max_age
+
     def _apply_incoming_config(self, msg: dict) -> None:
         if not isinstance(msg, dict):
             return
@@ -3439,10 +3447,14 @@ class AirSpeakerApp:
                     elif kind == "config_sync":
                         sender_ip = data.get("_sender_ip")
                         if sender_ip:
+                            self._peer_last_seen[sender_ip] = time.monotonic()
+                        if sender_ip:
+                            cur_ip_cs = self.ip_var.get().strip()
                             if (
                                 self._manual_ip_override is None
-                                and (not self._streaming or not self.ip_var.get().strip())
-                                and self.ip_var.get().strip() != sender_ip
+                                and not data.get("party_join")
+                                and cur_ip_cs != sender_ip
+                                and (not self._streaming or not self._is_ip_recently_seen(cur_ip_cs))
                             ):
                                 self.ip_var.set(sender_ip)
                                 if self._control_listener:
@@ -3490,6 +3502,7 @@ class AirSpeakerApp:
                         msg = data
                         sender_ip = msg.get("_sender_ip")
                         if sender_ip:
+                            self._peer_last_seen[sender_ip] = time.monotonic()
                             self._last_peer_ip = sender_ip
                         ips = msg.get("ips", [])
                         candidates = []
@@ -3541,6 +3554,8 @@ class AirSpeakerApp:
                         elif self._connected_phone_name == "Waiting for phone...":
                             self.conn_device_name_var.set("Android Phone")
                         is_playing = bool(msg.get("playing", False))
+                        was_playing = self._peer_last_playing.get(best_ip, False)
+                        self._peer_last_playing[best_ip] = is_playing
                         is_serving = bool(msg.get("serving", False))
                         if is_playing and is_serving:
                             self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED (PLAYING + SERVING)")
@@ -3593,10 +3608,11 @@ class AirSpeakerApp:
 
                         if not is_ip_focused and self._manual_ip_override is None and not msg.get("party_join"):
                             current_ip = self.ip_var.get().strip()
+                            current_ip_alive = self._is_ip_recently_seen(current_ip)
                             should_update_ip = (
                                 not current_ip
                                 or current_ip in ("127.0.0.1", "0.0.0.0", "255.255.255.255")
-                                or (not self._streaming and current_ip not in candidates)
+                                or (current_ip not in candidates and (not self._streaming or not current_ip_alive))
                             )
                             if not should_update_ip and active_adapter_ip:
                                 act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
@@ -3617,8 +3633,18 @@ class AirSpeakerApp:
                                     except Exception:
                                         pass
 
+                            if self._normal_streaming and is_playing and not was_playing:
+                                if self._manual_ip_override is None and self._udp_sender:
+                                    self._udp_sender.update_target(self.ip_var.get().strip(), int(self.ip_port_var.get() or AUDIO_PORT))
+                                self._send_config_reliable([best_ip], self._get_current_config())
+                                if self._audio_capture:
+                                    threading.Thread(target=self._audio_capture.ensure_alive, daemon=True).start()
+
                     elif kind == "stats":
                         s = data
+                        sender_ip_stat = s.get("_sender_ip")
+                        if sender_ip_stat:
+                            self._peer_last_seen[sender_ip_stat] = time.monotonic()
                         dev_name = s.get("device", "")
                         if dev_name and dev_name != "Android":
                             self._connected_phone_name = dev_name
@@ -3639,6 +3665,17 @@ class AirSpeakerApp:
                         rx_pps_phone = int(s.get("rx_pps", 0) or 0)
                         is_playing = bool(s.get("playing", False)) or rx_pps_phone > 0
                         is_serving = bool(s.get("serving", False)) or int(s.get("serve_pps", 0) or 0) > 0
+
+                        if self._normal_streaming and is_playing and sender_ip and self._manual_ip_override is None and not s.get("party_join"):
+                            if sender_ip != cur_ip and not self._is_ip_recently_seen(cur_ip):
+                                self.ip_var.set(sender_ip)
+                                if self._control_listener:
+                                    self._control_listener.set_target_ip(sender_ip)
+                                if self._udp_sender:
+                                    self._udp_sender.update_target(sender_ip, int(self.ip_port_var.get() or AUDIO_PORT))
+                                self._send_config_reliable([sender_ip], self._get_current_config())
+                                cur_ip = sender_ip
+                                self._update_combined_status()
                         if cur_ip:
                             if is_playing and rx_pps_phone > 0:
                                 self.conn_device_ip_var.set(f"{cur_ip}  •  STREAMING LIVE ({rx_pps_phone} pps)")

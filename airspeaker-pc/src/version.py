@@ -3,7 +3,7 @@ version.py — Application version and GitHub repository identifiers.
 """
 
 GITHUB_REPO = "HSAdib/AirSpeaker"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 BUILD_SHA = "dev"
 
 try:

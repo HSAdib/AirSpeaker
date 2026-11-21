@@ -23,7 +23,7 @@ android {
                 ?.trim()
                 ?.takeIf { it.startsWith("v") && it.length > 1 }
                 ?.removePrefix("v")
-            ?: "1.2.0"
+            ?: "1.2.1"
         versionName = resolvedVersion
 
         buildConfigField("String", "BUILD_SHA", "\"${System.getenv("GITHUB_SHA")?.take(7) ?: "dev"}\"")

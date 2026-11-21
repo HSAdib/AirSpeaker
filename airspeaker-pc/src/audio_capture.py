@@ -362,6 +362,12 @@ class AudioCapture:
         frame_ms: int = 5,
     ):
         self._device_index = device_index
+        self._auto_default: bool = (device_index is None)
+        self._silent_stream = None
+        self._watchdog_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._last_callback_time: float = 0.0
+        self._last_reopen_time: float = 0.0
         self._output_queue = output_queue
         self._on_error = on_error
         self._frame_ms = frame_ms
@@ -435,6 +441,9 @@ class AudioCapture:
             )
             self.active_device_name = source_name
             self._running = True
+            now = time.monotonic()
+            self._last_callback_time = now
+            self._last_reopen_time = now
             self._thread = threading.Thread(
                 target=self._linux_parec_loop, name="LinuxParecCapture", daemon=True
             )
@@ -454,6 +463,7 @@ class AudioCapture:
                 raw = self._parec_proc.stdout.read(chunk_bytes)
                 if not raw:
                     break
+                self._last_callback_time = time.monotonic()
                 frames_to_send = []
                 with self._dsp_lock:
                     self._remainder.extend(raw)
@@ -476,43 +486,123 @@ class AudioCapture:
         with self._lock:
             if self._running:
                 return True
+            self._stop_event.clear()
 
             if _IS_LINUX and shutil.which("parec"):
-                if self._device_index is None or isinstance(self._device_index, str):
-                    src = "@DEFAULT_MONITOR@"
-                    if isinstance(self._device_index, str) and self._device_index.startswith("pulse:"):
-                        src = self._device_index.split("pulse:", 1)[1]
-                    else:
-                        mons = _list_linux_pulse_monitors()
-                        if mons:
-                            src = str(mons[0]["index"]).replace("pulse:", "")
-                    return self._start_linux_parec(src)
+                src = "@DEFAULT_MONITOR@"
+                if isinstance(self._device_index, str) and self._device_index.startswith("pulse:"):
+                    src = self._device_index.split("pulse:", 1)[1]
+                success = self._start_linux_parec(src)
+            else:
+                success = self._open_pyaudio_capture_locked()
 
-            if not _PYAUDIO_AVAILABLE:
-                self._report_error("PyAudioWPatch is not installed — cannot capture audio.")
-                return False
+            if success:
+                self._running = True
+                self._watchdog_thread = threading.Thread(
+                    target=self._watchdog_loop, name="AudioCaptureWatchdog", daemon=True
+                )
+                self._watchdog_thread.start()
+            return success
 
+    def _start_windows_silent_keepalive_locked(self) -> None:
+        """Open a silent shared-mode render stream on the target output so WASAPI loopback stays clocked when idle."""
+        if not sys.platform.startswith("win") or not _PYAUDIO_AVAILABLE or self._pa is None:
+            return
+        self._stop_windows_silent_keepalive_locked()
+        try:
+            render_idx = None
+            target_norm = (self.active_device_name or "").lower().replace("[loopback]", "").strip()
+            for i in range(self._pa.get_device_count()):
+                try:
+                    info = self._pa.get_device_info_by_index(i)
+                    if int(info.get("maxOutputChannels", 0)) > 0 and not info.get("isLoopbackDevice", False):
+                        if target_norm and info.get("name", "").lower().strip() == target_norm:
+                            render_idx = i
+                            break
+                except Exception:
+                    continue
+            if render_idx is None:
+                try:
+                    render_idx = self._pa.get_default_output_device_info().get("index")
+                except Exception:
+                    render_idx = None
+
+            out_info = self._pa.get_device_info_by_index(render_idx) if render_idx is not None else self._pa.get_default_output_device_info()
+            out_rate = int(out_info.get("defaultSampleRate", TARGET_RATE))
+            out_ch = min(2, max(1, int(out_info.get("maxOutputChannels", 2))))
+            out_frames = max(240, (out_rate * 20) // 1000)
+            zero_bytes = b"\x00" * (out_frames * out_ch * 4)
+
+            def _silent_cb(in_data, frame_count, time_info, status):
+                n_bytes = frame_count * out_ch * 4
+                buf = zero_bytes if len(zero_bytes) == n_bytes else (b"\x00" * n_bytes)
+                return (buf, pyaudio.paContinue)
+
+            self._silent_stream = self._pa.open(
+                format=pyaudio.paFloat32,
+                channels=out_ch,
+                rate=out_rate,
+                output=True,
+                output_device_index=render_idx,
+                frames_per_buffer=out_frames,
+                stream_callback=_silent_cb,
+            )
+            self._silent_stream.start_stream()
+            logger.info("Windows WASAPI silent keep-alive active on render device=%s (%dHz %dch)", render_idx, out_rate, out_ch)
+        except Exception as exc:
+            logger.debug("Windows silent keep-alive skipped: %s", exc)
+            self._silent_stream = None
+
+    def _stop_windows_silent_keepalive_locked(self) -> None:
+        if self._silent_stream is not None:
             try:
+                self._silent_stream.stop_stream()
+                self._silent_stream.close()
+            except Exception:
+                pass
+            self._silent_stream = None
+
+    def _open_pyaudio_capture_locked(self) -> bool:
+        """Open the PyAudio capture stream and keep-alive render stream."""
+        self._stop_windows_silent_keepalive_locked()
+        if self._stream is not None:
+            try:
+                self._stream.stop_stream()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+
+        if not _PYAUDIO_AVAILABLE:
+            self._report_error("PyAudioWPatch is not installed — cannot capture audio.")
+            return False
+
+        try:
+            if self._pa is None:
                 self._pa = pyaudio.PyAudio()
-                # Determine device info
-                if self._device_index is None:
-                    # Try to find first loopback device
-                    devices = list_loopback_devices()
-                    if not devices:
-                        self._report_error("No WASAPI loopback devices found.")
-                        self._pa.terminate()
-                        self._pa = None
-                        return False
-                    self._device_index = devices[0]["index"]
 
-                info = self._pa.get_device_info_by_index(self._device_index)
-                self.active_device_name = info.get("name", f"Device {self._device_index}")
-                self._in_rate = int(info.get("defaultSampleRate", TARGET_RATE))
-                if _IS_MAC:
-                    self._in_channels = min(2, max(1, int(info.get("maxInputChannels", 2))))
-                else:
-                    self._in_channels = max(1, int(info.get("maxInputChannels", 2)))
+            if self._auto_default:
+                devices = list_loopback_devices()
+                if not devices:
+                    self._report_error("No WASAPI loopback devices found.")
+                    return False
+                self._device_index = devices[0]["index"]
+            elif self._device_index is None:
+                devices = list_loopback_devices()
+                if not devices:
+                    self._report_error("No WASAPI loopback devices found.")
+                    return False
+                self._device_index = devices[0]["index"]
 
+            info = self._pa.get_device_info_by_index(self._device_index)
+            self.active_device_name = info.get("name", f"Device {self._device_index}")
+            self._in_rate = int(info.get("defaultSampleRate", TARGET_RATE))
+            if _IS_MAC:
+                self._in_channels = min(2, max(1, int(info.get("maxInputChannels", 2))))
+            else:
+                self._in_channels = max(1, int(info.get("maxInputChannels", 2)))
+
+            with self._dsp_lock:
                 if _SOXR_AVAILABLE and self._in_rate != TARGET_RATE:
                     try:
                         self._resampler = soxr.ResampleStream(self._in_rate, TARGET_RATE, TARGET_CHANNELS, dtype="float32", quality="HQ")
@@ -521,55 +611,151 @@ class AudioCapture:
                 else:
                     self._resampler = None
 
-                # Chunk size in input frames
-                chunk = max(64, (self._in_rate * self._frame_ms) // 1000)
-                self._stream = None
-                for fmt in (pyaudio.paFloat32, pyaudio.paInt16):
-                    open_kwargs = dict(
-                        format=fmt,
-                        channels=self._in_channels,
-                        rate=self._in_rate,
-                        input=True,
-                        input_device_index=self._device_index,
-                        frames_per_buffer=chunk,
-                        stream_callback=self._callback,
-                    )
-                    try:
-                        self._stream = self._pa.open(**open_kwargs)
-                        self._in_format = fmt
-                        break
-                    except Exception:
-                        if hasattr(self._pa, "get_default_wasapi_loopback"):
-                            try:
-                                open_kwargs["as_loopback"] = True
-                                self._stream = self._pa.open(**open_kwargs)
-                                self._in_format = fmt
-                                break
-                            except Exception:
-                                continue
-                if self._stream is None:
-                    raise RuntimeError(f"Could not open audio capture device {self._device_index}")
-
-                self._stream.start_stream()
-                self._running = True
-                logger.info(
-                    "Audio capture started: device=%s rate=%d channels=%d format=%s(%s)",
-                    self._device_index,
-                    self._in_rate,
-                    self._in_channels,
-                    sample_format_name(self._in_format),
-                    self._in_format,
+            chunk = max(64, (self._in_rate * self._frame_ms) // 1000)
+            self._stream = None
+            for fmt in (pyaudio.paFloat32, pyaudio.paInt16):
+                open_kwargs = dict(
+                    format=fmt,
+                    channels=self._in_channels,
+                    rate=self._in_rate,
+                    input=True,
+                    input_device_index=self._device_index,
+                    frames_per_buffer=chunk,
+                    stream_callback=self._callback,
                 )
-                return True
-            except Exception as exc:
-                self._report_error(f"Failed to start audio capture: {exc}")
-                if self._pa:
+                try:
+                    self._stream = self._pa.open(**open_kwargs)
+                    self._in_format = fmt
+                    break
+                except Exception:
+                    if hasattr(self._pa, "get_default_wasapi_loopback"):
+                        try:
+                            open_kwargs["as_loopback"] = True
+                            self._stream = self._pa.open(**open_kwargs)
+                            self._in_format = fmt
+                            break
+                        except Exception:
+                            continue
+
+            if self._stream is None:
+                raise RuntimeError(f"Could not open audio capture device {self._device_index}")
+
+            self._stream.start_stream()
+            self._start_windows_silent_keepalive_locked()
+            now = time.monotonic()
+            self._last_callback_time = now
+            self._last_reopen_time = now
+            logger.info(
+                "Audio capture started: device=%s rate=%d channels=%d format=%s(%s)",
+                self._device_index,
+                self._in_rate,
+                self._in_channels,
+                sample_format_name(self._in_format),
+                self._in_format,
+            )
+            return True
+        except Exception as exc:
+            self._report_error(f"Failed to start audio capture: {exc}")
+            if self._pa:
+                try:
+                    self._pa.terminate()
+                except Exception:
+                    pass
+                self._pa = None
+            return False
+
+    def _watchdog_loop(self) -> None:
+        while self._running and not self._stop_event.is_set():
+            if self._stop_event.wait(1.0):
+                break
+            if not self._running:
+                break
+
+            if _IS_LINUX and shutil.which("parec"):
+                if self._parec_proc is None or self._parec_proc.poll() is not None:
+                    with self._lock:
+                        if self._running:
+                            logger.info("Watchdog restarting Linux parec capture")
+                            src = "@DEFAULT_MONITOR@"
+                            if isinstance(self._device_index, str) and self._device_index.startswith("pulse:"):
+                                src = self._device_index.split("pulse:", 1)[1]
+                            self._start_linux_parec(src)
+            else:
+                now = time.monotonic()
+                stream_dead = (self._stream is None or not self._stream.is_active())
+                stream_stalled = (now - self._last_callback_time) > 2.5 and (now - self._last_reopen_time) >= 4.0
+                endpoint_changed = False
+                if sys.platform.startswith("win") and self._auto_default:
                     try:
-                        self._pa.terminate()
+                        default_lb = list_loopback_devices()
+                        if default_lb and default_lb[0].get("name") != self.active_device_name:
+                            endpoint_changed = True
                     except Exception:
                         pass
-                    self._pa = None
-                return False
+
+                if stream_dead or stream_stalled or endpoint_changed:
+                    with self._lock:
+                        if self._running:
+                            reason = "dead" if stream_dead else ("stalled" if stream_stalled else "endpoint_changed")
+                            logger.info("Watchdog reopening PyAudio capture (reason=%s)", reason)
+                            self._stop_windows_silent_keepalive_locked()
+                            if self._stream is not None:
+                                try:
+                                    self._stream.stop_stream()
+                                    self._stream.close()
+                                except Exception:
+                                    pass
+                                self._stream = None
+                            if self._pa is not None:
+                                try:
+                                    self._pa.terminate()
+                                except Exception:
+                                    pass
+                                self._pa = None
+                            self._open_pyaudio_capture_locked()
+
+    def ensure_alive(self) -> None:
+        """Immediately trigger a reopen if running and stream is inactive or stalled (> 1.5s since last callback, respecting a 2.0s cooldown)."""
+        now = time.monotonic()
+        if not self._running:
+            return
+        if (now - self._last_reopen_time) < 2.0:
+            return
+        stalled = False
+        if _IS_LINUX and shutil.which("parec"):
+            if self._parec_proc is None or self._parec_proc.poll() is not None:
+                stalled = True
+        else:
+            if self._stream is None or not self._stream.is_active():
+                stalled = True
+            elif (now - self._last_callback_time) > 1.5:
+                stalled = True
+
+        if stalled:
+            with self._lock:
+                if self._running and (time.monotonic() - self._last_reopen_time) >= 2.0:
+                    logger.info("ensure_alive triggered reopen of audio capture")
+                    if _IS_LINUX and shutil.which("parec"):
+                        src = "@DEFAULT_MONITOR@"
+                        if isinstance(self._device_index, str) and self._device_index.startswith("pulse:"):
+                            src = self._device_index.split("pulse:", 1)[1]
+                        self._start_linux_parec(src)
+                    else:
+                        self._stop_windows_silent_keepalive_locked()
+                        if self._stream is not None:
+                            try:
+                                self._stream.stop_stream()
+                                self._stream.close()
+                            except Exception:
+                                pass
+                            self._stream = None
+                        if self._pa is not None:
+                            try:
+                                self._pa.terminate()
+                            except Exception:
+                                pass
+                            self._pa = None
+                        self._open_pyaudio_capture_locked()
 
     def _callback(
         self,
@@ -579,6 +765,7 @@ class AudioCapture:
         status: int,
     ) -> Tuple[None, int]:
         """PyAudio stream callback — called from audio thread."""
+        self._last_callback_time = time.monotonic()
         try:
             chunks_to_send = []
             with self._dsp_lock:
@@ -648,8 +835,14 @@ class AudioCapture:
 
     def stop(self) -> None:
         """Stop the capture stream and clean up."""
+        self._running = False
+        self._stop_event.set()
+        if self._watchdog_thread and self._watchdog_thread is not threading.current_thread():
+            self._watchdog_thread.join(timeout=1.5)
+            self._watchdog_thread = None
+
         with self._lock:
-            self._running = False
+            self._stop_windows_silent_keepalive_locked()
             if getattr(self, "_parec_proc", None) is not None:
                 proc = self._parec_proc
                 self._parec_proc = None

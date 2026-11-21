@@ -9,6 +9,7 @@ import math
 import queue
 import re
 import socket
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -32,6 +33,15 @@ from protocol import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _disable_win_udp_connreset(sock: socket.socket) -> None:
+    """Prevent Windows Winsock WSAECONNRESET (10054) when sending UDP to a peer before it opens ports 5004/5005."""
+    if sys.platform.startswith("win"):
+        try:
+            sock.ioctl(0x9800000C, False)  # SIO_UDP_CONNRESET
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # Windows timer resolution
@@ -329,6 +339,7 @@ class UDPSender:
         self._tx_eq_dsp.reset()
         self._running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _disable_win_udp_connreset(self._sock)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         try:
@@ -359,6 +370,8 @@ class UDPSender:
             old_ip = self._target_ip
             self._target_ip = target_ip
             self._target_port = target_port
+            if target_ip != old_ip:
+                self._seq = 0
             if self._sock:
                 try:
                     self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -519,6 +532,8 @@ class UDPSender:
             last_audio_time = time.monotonic()
             pps_window_start = time.monotonic()
             pps_count = 0
+            cached_bcast_targets: List[tuple] = []
+            last_bcast_calc = 0.0
 
             while self._running:
                 with self._lock:
@@ -535,7 +550,11 @@ class UDPSender:
                             targets_snapshot.insert(0, (target_ip, target_port))
                     elif target_ip:
                         if target_ip == "255.255.255.255":
-                            targets_snapshot = get_active_broadcast_targets(target_port)
+                            now_bcast = time.monotonic()
+                            if (now_bcast - last_bcast_calc) >= 2.0 or not cached_bcast_targets:
+                                cached_bcast_targets = get_active_broadcast_targets(target_port)
+                                last_bcast_calc = now_bcast
+                            targets_snapshot = cached_bcast_targets
                         else:
                             targets_snapshot = [(target_ip, target_port)]
                     else:
@@ -592,6 +611,7 @@ class UDPSender:
                                             except Exception:
                                                 pass
                                         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                                        _disable_win_udp_connreset(self._sock)
                                         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
                                         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                                         try:
@@ -741,6 +761,7 @@ class ControlListener:
             return
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            _disable_win_udp_connreset(self._sock)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self._sock.bind(("", self._bind_port))
@@ -894,6 +915,7 @@ def send_control_message(target_ip: str, msg: dict, port: int = CONTROL_PORT) ->
         with _ctrl_sock_lock:
             if _ctrl_sock is None:
                 _ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                _disable_win_udp_connreset(_ctrl_sock)
                 _ctrl_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             try:
                 _ctrl_sock.sendto(data, (target_ip, port))
@@ -903,6 +925,7 @@ def send_control_message(target_ip: str, msg: dict, port: int = CONTROL_PORT) ->
                 except Exception:
                     pass
                 _ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                _disable_win_udp_connreset(_ctrl_sock)
                 _ctrl_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 _ctrl_sock.sendto(data, (target_ip, port))
         return True
