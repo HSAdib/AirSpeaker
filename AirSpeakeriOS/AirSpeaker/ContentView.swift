@@ -1193,7 +1193,7 @@ struct SettingsStudioTab: View {
     @State private var showInstallShareSheet: Bool = false
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
     }
 
     var body: some View {
