@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  AirSpeaker
 //
-//  Air Speaker v1 Studio Monospace UI for iOS.
+//  AirSpeaker Studio Monospace UI for iOS.
 //  100% unified with Android (activity_main.xml & MainActivity.kt) and PC Studio.
 //
 
@@ -66,7 +66,7 @@ public struct ContentView: View {
                 // Top Studio Header
                 VStack(spacing: 4) {
                     HStack(alignment: .center) {
-                        Text("AIR SPEAKER v1")
+                        Text("AirSpeaker")
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
 
@@ -93,11 +93,11 @@ public struct ContentView: View {
                     HStack {
                         let statusText: String = {
                             if engine.isAudioPlaying && engine.isInternalAudioServing {
-                                return "ACTIVE: PLAYER: ON (5004) | SERVE: ON (5004)"
+                                return "ACTIVE: PLAYER: ON (\(engine.localListenPort)) | SERVE: ON (\(engine.targetServerPort))"
                             } else if engine.isAudioPlaying {
-                                return "ACTIVE: SPEAKER PLAYER (PORT 5004)"
+                                return "ACTIVE: SPEAKER PLAYER (PORT \(engine.localListenPort))"
                             } else if engine.isInternalAudioServing {
-                                return "ACTIVE: AUDIO SERVER (PORT 5004)"
+                                return "ACTIVE: AUDIO SERVER (PORT \(engine.targetServerPort))"
                             } else {
                                 return "STATUS: STOPPED"
                             }
@@ -150,7 +150,7 @@ public struct ContentView: View {
                             }
                         } else if let fileUrl = engine.downloadedUpdateFileUrl {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("✔ Saved to Files → Air Speaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
+                                Text("✔ Saved to Files → AirSpeaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
                                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                                     .foregroundColor(M3.tertiary)
                                 HStack(spacing: 8) {
@@ -273,23 +273,38 @@ struct StudioEQCornerButton: View {
 struct PlayerStudioTab: View {
     @ObservedObject var engine: AirSpeakerEngine
     @State private var pcIpInput: String = ""
+    @State private var pcPortInput: String = ""
+    @State private var phoneListenPortInput: String = ""
     @State private var showEQSheet: Bool = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 // Connections Card (#1A2630)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            let hostDisplay = engine.connectedServerIp.isEmpty ? "Waiting for PC connection..." : "\(engine.connectedServerName) (\(engine.connectedServerIp))"
+                            let hostDisplay = engine.connectedServerIp.isEmpty ? "Waiting for PC connection..." : "\(engine.connectedServerName) (\(engine.connectedServerIp):\(engine.targetServerPort))"
                             Text("💻 Connected to: \(hostDisplay)")
                                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                                 .foregroundColor(M3.primary)
 
-                            Text("📱 This Phone: \(engine.deviceName)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
+                            HStack(spacing: 6) {
+                                Text("📱 This Phone: \(engine.currentLocalIp):\(engine.localListenPort)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
+
+                                Button(action: {
+                                    UIPasteboard.general.string = "\(engine.currentLocalIp):\(engine.localListenPort)"
+                                }) {
+                                    Text("COPY")
+                                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                        .foregroundColor(M3.primary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(M3.primary, lineWidth: 1))
+                                }
+                            }
                         }
                         Spacer()
                         StudioEQCornerButton(enabled: engine.playEQ.enabled) {
@@ -300,6 +315,38 @@ struct PlayerStudioTab: View {
                         }
                     }
 
+                    // Editable Phone Listen Port Row
+                    HStack(spacing: 6) {
+                        Text("LISTEN PORT:")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
+
+                        TextField("\(engine.localListenPort)", text: $phoneListenPortInput)
+                            .font(.system(size: 11, design: .monospaced))
+                            .keyboardType(.numberPad)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .frame(width: 70)
+                            .background(M3.surfaceHigh)
+                            .foregroundColor(.white)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(white: 0.2), lineWidth: 1))
+
+                        Button(action: {
+                            if let p = UInt16(phoneListenPortInput.trimmingCharacters(in: .whitespacesAndNewlines)), p >= 1024 {
+                                engine.applyLocalListenPort(p)
+                            }
+                        }) {
+                            Text("APPLY")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(M3.primary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(M3.primary, lineWidth: 1))
+                        }
+                    }
+                    .padding(.top, 2)
+
+                    // Target PC IP and Port Row
                     HStack(spacing: 6) {
                         Text("PC IP:")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -313,8 +360,21 @@ struct PlayerStudioTab: View {
                             .foregroundColor(.white)
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
+                        TextField("\(engine.targetServerPort)", text: $pcPortInput)
+                            .font(.system(size: 11, design: .monospaced))
+                            .keyboardType(.numberPad)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 6)
+                            .frame(width: 60)
+                            .background(M3.surfaceHigh)
+                            .foregroundColor(.white)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
+
                         Button(action: {
                             let trimmed = pcIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if let portVal = UInt16(pcPortInput.trimmingCharacters(in: .whitespacesAndNewlines)), portVal >= 1024 {
+                                engine.applyTargetServerPort(portVal)
+                            }
                             if !trimmed.isEmpty {
                                 engine.connectedServerIp = trimmed
                                 engine.broadcastBeacon()
@@ -344,7 +404,7 @@ struct PlayerStudioTab: View {
                         engine.startSpeakerPlayer(manualHost: manual)
                     }
                 }) {
-                    Text(engine.isAudioPlaying ? "[ ■ STOP SPEAKER PLAYER (PORT 5004) ]" : "[ ▶ START SPEAKER PLAYER (PORT 5004) ]")
+                    Text(engine.isAudioPlaying ? "[ ■ STOP SPEAKER PLAYER (PORT \(engine.localListenPort)) ]" : "[ ▶ START SPEAKER PLAYER (PORT \(engine.localListenPort)) ]")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(engine.isAudioPlaying ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary)
                         .frame(maxWidth: .infinity, minHeight: 46)
@@ -498,6 +558,7 @@ struct PlayerStudioTab: View {
 struct ServeStudioTab: View {
     @ObservedObject var engine: AirSpeakerEngine
     @State private var targetIpInput: String = ""
+    @State private var targetPortInput: String = ""
     @State private var showEQSheet: Bool = false
 
     var body: some View {
@@ -507,13 +568,17 @@ struct ServeStudioTab: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("📡 IN-APP AUDIO CAPTURE (REPLAYKIT — PORT 5004)")
+                            Text("📡 IN-APP AUDIO CAPTURE (REPLAYKIT — PORT \(engine.targetServerPort))")
                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                                 .foregroundColor(M3.primary)
 
                             Text("Captures audio from this device using ReplayKit in real-time and streams to PC, Mac, Linux, or another phone.")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(Color(white: 0.6))
+
+                            Text("📱 This Phone: \(engine.currentLocalIp):\(engine.localListenPort)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(red: 0.60, green: 0.73, blue: 0.80))
                         }
                         Spacer()
                         StudioEQCornerButton(enabled: engine.serveEQ.enabled) {
@@ -537,8 +602,21 @@ struct ServeStudioTab: View {
                             .foregroundColor(.white)
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
 
+                        TextField("\(engine.targetServerPort)", text: $targetPortInput)
+                            .font(.system(size: 11, design: .monospaced))
+                            .keyboardType(.numberPad)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 6)
+                            .frame(width: 60)
+                            .background(M3.surfaceHigh)
+                            .foregroundColor(.white)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.2), lineWidth: 1))
+
                         Button(action: {
                             let trimmed = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if let portVal = UInt16(targetPortInput.trimmingCharacters(in: .whitespacesAndNewlines)), portVal >= 1024 {
+                                engine.applyTargetServerPort(portVal)
+                            }
                             if !trimmed.isEmpty {
                                 engine.updateServeTargetIp(trimmed)
                             }
@@ -562,7 +640,7 @@ struct ServeStudioTab: View {
                     let target = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
                     engine.toggleServingInternalAudio(targetIp: target)
                 }) {
-                    Text(engine.isInternalAudioServing ? "[ ■ STOP IN-APP AUDIO CAPTURE ]" : "[ 📡 START IN-APP AUDIO CAPTURE (PORT 5004) ]")
+                    Text(engine.isInternalAudioServing ? "[ ■ STOP IN-APP AUDIO CAPTURE ]" : "[ 📡 START IN-APP AUDIO CAPTURE (PORT \(engine.targetServerPort)) ]")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(engine.isInternalAudioServing ? Color(red: 1.0, green: 0.27, blue: 0.27) : M3.tertiary)
                         .frame(maxWidth: .infinity, minHeight: 46)
@@ -660,7 +738,7 @@ struct ServeStudioTab: View {
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(Color(white: 0.6))
                         Spacer()
-                        Text(engine.connectedServerIp.isEmpty ? "255.255.255.255:5004" : "\(engine.connectedServerIp):5004")
+                        Text(engine.connectedServerIp.isEmpty ? "255.255.255.255:\(engine.targetServerPort)" : "\(engine.connectedServerIp):\(engine.targetServerPort)")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(M3.primary)
                     }
@@ -1193,7 +1271,7 @@ struct SettingsStudioTab: View {
     @State private var showInstallShareSheet: Bool = false
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.1"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.2"
     }
 
     var body: some View {
@@ -1377,7 +1455,7 @@ struct SettingsStudioTab: View {
                         }
                     } else if let fileUrl = engine.downloadedUpdateFileUrl {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("✔ Saved to Files → Air Speaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
+                            Text("✔ Saved to Files → AirSpeaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundColor(M3.tertiary)
                             HStack(spacing: 8) {
@@ -1460,14 +1538,15 @@ struct LiveDelayGraphView: View {
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
-                let maxMs: Double = 160.0
+                let maxMs: Double = max(160.0, targetMs + 40.0)
 
                 ZStack {
                     M3.surfaceLow
 
                     // Grid lines at 40, 80, 120 ms
                     Path { path in
-                        for ms in [40.0, 80.0, 120.0] {
+                        let gridSteps = maxMs > 160.0 ? [40.0, 80.0, 120.0, 160.0, 200.0] : [40.0, 80.0, 120.0]
+                        for ms in gridSteps where ms < maxMs {
                             let y = CGFloat(h - (ms / maxMs) * h)
                             path.move(to: CGPoint(x: 0, y: y))
                             path.addLine(to: CGPoint(x: w, y: y))
@@ -1842,7 +1921,7 @@ struct StudioHelpModal: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("AIR SPEAKER v1 STUDIO GUIDE")
+                    Text("AIRSPEAKER STUDIO GUIDE")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(M3.tertiary)
                     Spacer()
@@ -1857,7 +1936,7 @@ struct StudioHelpModal: View {
                 ScrollView {
                     Text("""
 ============================================================
-AIR SPEAKER v1 STUDIO — CROSS-PLATFORM GUIDE
+AIRSPEAKER STUDIO — CROSS-PLATFORM GUIDE
 ============================================================
 
 PLATFORMS:
@@ -1877,7 +1956,7 @@ PLATFORMS:
 ------------------------------------------------------------
 * Tap [ 📡 START SERVING AUDIO (PORT 5004) ] in SERVE tab.
 * Captures device audio (music, videos, games) via ReplayKit.
-* Streams to any PC, Mac, Linux, or Phone running Air Speaker.
+* Streams to any PC, Mac, Linux, or Phone running AirSpeaker.
 
 3. MULTI-DEVICE PARTY MODE:
 ------------------------------------------------------------

@@ -44,6 +44,7 @@ class AudioStreamService : Service() {
         const val EXTRA_SERVING = "serving"
         const val EXTRA_CONFIG_JSON = "config_json"
         const val EXTRA_TARGET_IP = "target_ip"
+        const val EXTRA_TARGET_PORT = "target_port"
         const val EXTRA_AUDIO_ENGINE = "extra_audio_engine"
         const val EXTRA_AUDIO_FX = "extra_audio_fx"
         const val EXTRA_AUDIO_PORT = "extra_audio_port"
@@ -495,7 +496,8 @@ class AudioStreamService : Service() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
-                startServingInternalAudio(resultCode, resultData, targetIp)
+                val targetPort = intent.getIntExtra(EXTRA_TARGET_PORT, 5004).coerceIn(1024, 65535)
+                startServingInternalAudio(resultCode, resultData, targetIp, targetPort)
             }
             ACTION_STOP_SERVE -> {
                 stopServingInternalAudio()
@@ -620,7 +622,7 @@ class AudioStreamService : Service() {
         notifyStateChanged()
     }
 
-    private fun startServingInternalAudio(resultCode: Int, resultData: Intent?, targetIp: String?) {
+    private fun startServingInternalAudio(resultCode: Int, resultData: Intent?, targetIp: String?, targetPort: Int = 5004) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Log.e(TAG, "Internal system audio capture requires Android 10+")
             return
@@ -687,7 +689,7 @@ class AudioStreamService : Service() {
             internalAudioStreamerInstance = internalStreamer
         }
 
-        val ok = internalStreamer!!.start(projection, ip, this)
+        val ok = internalStreamer!!.start(projection, ip, targetPort, this)
         if (!ok) {
             Log.e(TAG, "InternalAudioStreamer failed to start")
             serviceHandler.post {
@@ -991,7 +993,7 @@ class AudioStreamService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Air Speaker Studio Service",
+                "AirSpeaker Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Ultra-low-latency audio streaming & settings sync"
@@ -1007,14 +1009,14 @@ class AudioStreamService : Service() {
         )
 
         val modeText = when {
-            isStreaming && isServing -> "ACTIVE: DUAL (PLAY 5004 + SERVE 5004)"
-            isStreaming -> "PLAYER: Receiving on Port 5004"
-            isServing -> "AUDIO SENDER: Streaming on Port 5004"
+            isStreaming && isServing -> "ACTIVE: DUAL (PLAY + SERVE)"
+            isStreaming -> "PLAYER: Receiving Audio"
+            isServing -> "AUDIO SENDER: Streaming System Audio"
             else -> "IDLE"
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Air Speaker v1 Studio")
+            .setContentTitle("AirSpeaker")
             .setContentText(modeText)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setContentIntent(pendingIntent)

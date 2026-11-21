@@ -25,6 +25,7 @@ airspeaker-pc/_build_info.py
 *.ipa
 *.run
 *.command
+AirSpeaker-Linux-x86_64.tar.gz
 AirSpeaker-v1-Linux-x86_64.tar.gz
 
 # Android & Gradle

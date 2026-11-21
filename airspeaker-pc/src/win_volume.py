@@ -337,3 +337,55 @@ def _linux_set_pc_mute(mute: bool) -> bool:
     except Exception:
         logger.warning("_linux_set_pc_mute(%s) failed", mute, exc_info=True)
         return False
+
+
+def get_default_output_device_id() -> Optional[str]:
+    """Return the Windows default render endpoint ID string without touching PortAudio (thread-safe)."""
+    if not _IS_WIN:
+        return None
+    enumerator = c_void_p()
+    device = c_void_p()
+    pwsz_id = c_void_p()
+    try:
+        ole32 = ctypes.windll.ole32
+        ole32.CoInitializeEx.argtypes = [c_void_p, c_uint]
+        ole32.CoInitializeEx.restype = HRESULT
+        ole32.CoInitializeEx(None, 0)  # COINIT_MULTITHREADED
+
+        ole32.CoCreateInstance.argtypes = [
+            POINTER(GUID), c_void_p, c_uint, POINTER(GUID), POINTER(c_void_p)
+        ]
+        ole32.CoCreateInstance.restype = HRESULT
+        hr = ole32.CoCreateInstance(
+            byref(CLSID_MMDeviceEnumerator),
+            None,
+            7,
+            byref(IID_IMMDeviceEnumerator),
+            byref(enumerator),
+        )
+        if hr != 0 or not enumerator.value:
+            return None
+
+        enum_vt = ctypes.cast(enumerator, POINTER(POINTER(c_void_p))).contents
+        get_default_fn = ctypes.WINFUNCTYPE(HRESULT, c_void_p, c_int, c_int, POINTER(c_void_p))(enum_vt[4])
+        hr = get_default_fn(enumerator, 0, 0, byref(device))
+        if hr != 0 or not device.value:
+            return None
+
+        dev_vt = ctypes.cast(device, POINTER(POINTER(c_void_p))).contents
+        get_id_fn = ctypes.WINFUNCTYPE(HRESULT, c_void_p, POINTER(c_void_p))(dev_vt[5])
+        hr = get_id_fn(device, byref(pwsz_id))
+        if hr != 0 or not pwsz_id.value:
+            return None
+
+        return ctypes.wstring_at(pwsz_id.value)
+    except Exception:
+        return None
+    finally:
+        if pwsz_id and pwsz_id.value:
+            try:
+                ctypes.windll.ole32.CoTaskMemFree.argtypes = [c_void_p]
+                ctypes.windll.ole32.CoTaskMemFree(pwsz_id)
+            except Exception:
+                pass
+        _release_com_ptrs(device, enumerator)

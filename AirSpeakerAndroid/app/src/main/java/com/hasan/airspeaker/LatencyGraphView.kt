@@ -62,7 +62,7 @@ class LatencyGraphView @JvmOverloads constructor(
 
     fun pushSample(bufferMs: Float, targetMs: Float, totalEstimatedMs: Float) {
         if (bufferHistory.size >= maxPoints) bufferHistory.pollFirst()
-        bufferHistory.addLast(bufferMs.coerceIn(0f, 200f))
+        bufferHistory.addLast(bufferMs.coerceIn(0f, 500f))
         currentBufferMs = bufferMs
         currentTargetMs = targetMs
         estTotalMs = totalEstimatedMs
@@ -86,11 +86,13 @@ class LatencyGraphView @JvmOverloads constructor(
         canvas.clipPath(clipPath)
 
         canvas.drawRect(0f, 0f, w, h, bgPaint)
-        val maxScaleMs = 160f
+        val maxScaleMs = maxOf(160f, currentTargetMs + 40f)
 
         for (ms in listOf(40f, 80f, 120f)) {
-            val y = h - (ms / maxScaleMs) * plotH
-            canvas.drawLine(0f, y, w, y, gridPaint)
+            if (ms < maxScaleMs) {
+                val y = h - (ms / maxScaleMs) * plotH
+                canvas.drawLine(0f, y, w, y, gridPaint)
+            }
         }
 
         val targetY = (h - (currentTargetMs.coerceIn(0f, maxScaleMs) / maxScaleMs) * plotH).coerceIn(headerH + 3f, h - 3f)

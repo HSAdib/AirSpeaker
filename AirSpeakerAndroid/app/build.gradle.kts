@@ -23,7 +23,7 @@ android {
                 ?.trim()
                 ?.takeIf { it.startsWith("v") && it.length > 1 }
                 ?.removePrefix("v")
-            ?: "1.2.1"
+            ?: "1.2.2"
         versionName = resolvedVersion
 
         buildConfigField("String", "BUILD_SHA", "\"${System.getenv("GITHUB_SHA")?.take(7) ?: "dev"}\"")
@@ -153,11 +153,11 @@ tasks.register("copyDebugApkToRoot") {
         val apkDir = File(buildDir, "outputs/apk/debug")
         val rootDir = rootProject.projectDir.parentFile
         val mapping = mapOf(
-            "app-arm64-v8a-debug.apk" to "AirSpeaker-v1-arm64-v8a.apk",
-            "app-armeabi-v7a-debug.apk" to "AirSpeaker-v1-armeabi-v7a.apk",
-            "app-x86_64-debug.apk" to "AirSpeaker-v1-x86_64.apk",
-            "app-x86-debug.apk" to "AirSpeaker-v1-x86.apk",
-            "app-universal-debug.apk" to "AirSpeaker-v1-universal.apk"
+            "app-arm64-v8a-debug.apk" to "AirSpeaker-arm64-v8a.apk",
+            "app-armeabi-v7a-debug.apk" to "AirSpeaker-armeabi-v7a.apk",
+            "app-x86_64-debug.apk" to "AirSpeaker-x86_64.apk",
+            "app-x86-debug.apk" to "AirSpeaker-x86.apk",
+            "app-universal-debug.apk" to "AirSpeaker-universal.apk"
         )
         mapping.forEach { (srcName, dstName) ->
             val src = File(apkDir, srcName)
@@ -169,7 +169,7 @@ tasks.register("copyDebugApkToRoot") {
         val universal = File(apkDir, "app-universal-debug.apk").takeIf { it.exists() }
             ?: File(apkDir, "app-debug.apk")
         if (universal.exists()) {
-            universal.copyTo(rootDir.resolve("AirSpeaker-v1.apk"), overwrite = true)
+            universal.copyTo(rootDir.resolve("AirSpeaker.apk"), overwrite = true)
         }
     }
 }

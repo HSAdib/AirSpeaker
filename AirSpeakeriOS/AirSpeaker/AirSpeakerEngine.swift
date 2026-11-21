@@ -382,7 +382,29 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     ]
 
     // MARK: - Published UI States
+    @Published public var currentLocalIp: String = "Detecting..."
+    @Published public var localListenPort: UInt16 = 5004
+    @Published public var targetServerPort: UInt16 = 5004
     @Published public var isAudioPlaying: Bool = false
+
+    public func applyLocalListenPort(_ newPort: UInt16) {
+        let validPort = (newPort >= 1024) ? newPort : 5004
+        localListenPort = validPort
+        UserDefaults.standard.set(Int(validPort), forKey: "AirSpeakerLocalListenPort")
+        if isAudioPlaying {
+            stopSpeakerPlayer()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self = self else { return }
+                self.startSpeakerPlayer(port: Int(validPort))
+            }
+        }
+    }
+
+    public func applyTargetServerPort(_ newPort: UInt16) {
+        let validPort = (newPort >= 1024) ? newPort : 5004
+        targetServerPort = validPort
+        UserDefaults.standard.set(Int(validPort), forKey: "AirSpeakerTargetServerPort")
+    }
     @Published public var isInternalAudioServing: Bool = false
     @Published public var connectedServerIp: String = "" {
         didSet {
@@ -606,6 +628,12 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     override private init() {
         super.init()
+        if let savedPort = UserDefaults.standard.value(forKey: "AirSpeakerLocalListenPort") as? Int, savedPort >= 1024 {
+            localListenPort = UInt16(savedPort)
+        }
+        if let savedTargetPort = UserDefaults.standard.value(forKey: "AirSpeakerTargetServerPort") as? Int, savedTargetPort >= 1024 {
+            targetServerPort = UInt16(savedTargetPort)
+        }
         setupAudioSession()
         setupAudioEngine()
         refreshAdapterIps()
@@ -875,9 +903,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Start / Stop Speaker Player (UDP 5004)
+    // MARK: - Start / Stop Speaker Player (UDP Listen Port)
     public func startSpeakerPlayer(port: Int = 5004, manualHost: String = "") {
         guard !isAudioPlaying else { return }
+        let actualPort = (port >= 1024 && port != 5004) ? port : Int(localListenPort)
         setupAudioSession()
         if !manualHost.isEmpty {
             updateServerIp(manualHost)
@@ -919,7 +948,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         isRunningAudio = true
         rxStateLock.unlock()
 
-        guard startAudioRxSocket(port: port) else {
+        guard startAudioRxSocket(port: actualPort) else {
             rxStateLock.lock()
             isRunningAudio = false
             rxStateLock.unlock()
@@ -928,7 +957,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
             DispatchQueue.main.async {
                 self.isAudioPlaying = false
-                self.statusMessage = "Failed to bind UDP port \(port)"
+                self.statusMessage = "Failed to bind UDP port \(actualPort)"
             }
             return
         }
@@ -936,7 +965,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         startStatsTimer()
         DispatchQueue.main.async {
             self.isAudioPlaying = true
-            self.statusMessage = "Speaker active (UDP \(port))"
+            self.statusMessage = "Speaker active (UDP \(actualPort))"
         }
     }
 
@@ -1615,7 +1644,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     }
                 } else {
                     self?.isInternalAudioServing = true
-                    self?.statusMessage = "Serving Internal Audio (Port 5004)"
+                    self?.statusMessage = "Serving Internal Audio"
                     self?.startStatsTimer()
                 }
             }
@@ -1624,6 +1653,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     private func sendServePacket(_ packet: [UInt8], toIp: String) {
         let subnetBcast = (toIp == "255.255.255.255") ? getCachedSubnetBroadcastIp() : nil
+        let sPort = in_port_t(targetServerPort).bigEndian
 
         stateLock.lock()
         let relayOn = self.atomicRelayActive
@@ -1645,7 +1675,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         if toIp != "0.0.0.0" {
             var destAddr = sockaddr_in()
             destAddr.sin_family = sa_family_t(AF_INET)
-            destAddr.sin_port = in_port_t(5004).bigEndian
+            destAddr.sin_port = sPort
             if inet_pton(AF_INET, toIp, &destAddr.sin_addr) == 1 {
                 withUnsafePointer(to: &destAddr) { addrPtr in
                     _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -1658,7 +1688,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         if let bcast = subnetBcast {
             var bcastAddr = sockaddr_in()
             bcastAddr.sin_family = sa_family_t(AF_INET)
-            bcastAddr.sin_port = in_port_t(5004).bigEndian
+            bcastAddr.sin_port = sPort
             if inet_pton(AF_INET, bcast, &bcastAddr.sin_addr) == 1 {
                 withUnsafePointer(to: &bcastAddr) { addrPtr in
                     _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -1671,7 +1701,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         for peer in peers where peer != toIp {
             var peerAddr = sockaddr_in()
             peerAddr.sin_family = sa_family_t(AF_INET)
-            peerAddr.sin_port = in_port_t(5004).bigEndian
+            peerAddr.sin_port = sPort
             if inet_pton(AF_INET, peer, &peerAddr.sin_addr) == 1 {
                 withUnsafePointer(to: &peerAddr) { addrPtr in
                     _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -1774,7 +1804,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private func handleControlMessage(type: String, payload: [String: Any], senderIp: String) {
         switch type {
         case "PC_ANNOUNCE":
-            updateServerIp(senderIp)
+            let isReceivingAudio = (rxPps > 0)
+            if !isReceivingAudio && !isPartyJoined {
+                updateServerIp(senderIp)
+            }
             if let pcName = payload["pc_name"] as? String {
                 connectedServerName = pcName
             }
@@ -2232,12 +2265,20 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func broadcastBeacon(explicitLeave: Bool = false) {
         let isHostActive = self.isPartyHost && self.isPartyHostBroadcasting && !self.isPartyExtending
         let isExtActive = self.isPartyExtending && self.isPartyJoined
+        let localIps = AirSpeakerEngine.getLocalIpv4Addresses()
+        if let primary = localIps.first {
+            DispatchQueue.main.async {
+                if self.currentLocalIp != primary {
+                    self.currentLocalIp = primary
+                }
+            }
+        }
         var beacon: [String: Any] = [
             "type": "BEACON",
             "app": "AirSpeaker",
             "version": 1,
-            "ips": AirSpeakerEngine.getLocalIpv4Addresses(),
-            "audio_port": 5004,
+            "ips": localIps,
+            "audio_port": Int(self.localListenPort),
             "device": self.deviceName,
             "party_join": self.isPartyJoined && !explicitLeave,
             "is_party_host": isHostActive,
@@ -2266,7 +2307,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             "party_host_ip": hostIp,
             "is_party_host": false,
             "is_extended_host": self.isPartyExtending,
-            "audio_port": 5004
+            "audio_port": Int(self.localListenPort)
         ]
         sendControlMessage(joinBeacon, toIp: hostIp)
     }

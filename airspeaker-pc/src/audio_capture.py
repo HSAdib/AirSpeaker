@@ -368,6 +368,8 @@ class AudioCapture:
         self._stop_event = threading.Event()
         self._last_callback_time: float = 0.0
         self._last_reopen_time: float = 0.0
+        self._last_win_endpoint_id: Optional[str] = None
+        self._last_endpoint_check_time: float = 0.0
         self._output_queue = output_queue
         self._on_error = on_error
         self._frame_ms = frame_ms
@@ -510,12 +512,20 @@ class AudioCapture:
             return
         self._stop_windows_silent_keepalive_locked()
         try:
+            target_host_api = None
+            try:
+                if self._device_index is not None:
+                    target_host_api = self._pa.get_device_info_by_index(self._device_index).get("hostApi")
+            except Exception:
+                target_host_api = None
             render_idx = None
             target_norm = (self.active_device_name or "").lower().replace("[loopback]", "").strip()
             for i in range(self._pa.get_device_count()):
                 try:
                     info = self._pa.get_device_info_by_index(i)
                     if int(info.get("maxOutputChannels", 0)) > 0 and not info.get("isLoopbackDevice", False):
+                        if target_host_api is not None and info.get("hostApi") != target_host_api:
+                            continue
                         if target_norm and info.get("name", "").lower().strip() == target_norm:
                             render_idx = i
                             break
@@ -530,7 +540,7 @@ class AudioCapture:
             out_info = self._pa.get_device_info_by_index(render_idx) if render_idx is not None else self._pa.get_default_output_device_info()
             out_rate = int(out_info.get("defaultSampleRate", TARGET_RATE))
             out_ch = min(2, max(1, int(out_info.get("maxOutputChannels", 2))))
-            out_frames = max(240, (out_rate * 20) // 1000)
+            out_frames = max(480, (out_rate * 100) // 1000)
             zero_bytes = b"\x00" * (out_frames * out_ch * 4)
 
             def _silent_cb(in_data, frame_count, time_info, status):
@@ -645,6 +655,13 @@ class AudioCapture:
             now = time.monotonic()
             self._last_callback_time = now
             self._last_reopen_time = now
+            if sys.platform.startswith("win"):
+                try:
+                    from win_volume import get_default_output_device_id
+                    self._last_win_endpoint_id = get_default_output_device_id()
+                    self._last_endpoint_check_time = now
+                except Exception:
+                    pass
             logger.info(
                 "Audio capture started: device=%s rate=%d channels=%d format=%s(%s)",
                 self._device_index,
@@ -683,12 +700,14 @@ class AudioCapture:
             else:
                 now = time.monotonic()
                 stream_dead = (self._stream is None or not self._stream.is_active())
-                stream_stalled = (now - self._last_callback_time) > 2.5 and (now - self._last_reopen_time) >= 4.0
+                stream_stalled = (now - self._last_callback_time) > 3.5 and (now - self._last_reopen_time) >= 5.0
                 endpoint_changed = False
-                if sys.platform.startswith("win") and self._auto_default:
+                if sys.platform.startswith("win") and self._auto_default and (now - self._last_endpoint_check_time) >= 3.0:
+                    self._last_endpoint_check_time = now
                     try:
-                        default_lb = list_loopback_devices()
-                        if default_lb and default_lb[0].get("name") != self.active_device_name:
+                        from win_volume import get_default_output_device_id
+                        new_id = get_default_output_device_id()
+                        if new_id is not None and self._last_win_endpoint_id is not None and new_id != self._last_win_endpoint_id:
                             endpoint_changed = True
                     except Exception:
                         pass

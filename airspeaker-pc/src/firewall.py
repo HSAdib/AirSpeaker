@@ -35,7 +35,7 @@ def _netsh_delete_cmd(port: int) -> list:
 
 def get_firewall_commands() -> list:
     if sys.platform == "darwin":
-        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/Air\\ Speaker.app/Contents/MacOS/Air\\ Speaker"]
+        return ["sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/AirSpeaker.app/Contents/MacOS/AirSpeaker"]
     if sys.platform.startswith("linux"):
         if shutil.which("ufw"):
             return [f"sudo ufw allow {p}/udp" for p in PORTS]
@@ -47,7 +47,7 @@ def get_firewall_commands() -> list:
 
 def apply_firewall_rules() -> tuple:
     if sys.platform == "darwin":
-        return True, "macOS Application Firewall automatically permits UDP 5004 and 5005 when Air Speaker is launched."
+        return True, "macOS Application Firewall automatically permits UDP 5004 and 5005 when AirSpeaker is launched."
 
     if sys.platform.startswith("linux"):
         cmds = []

@@ -367,11 +367,11 @@ class UDPSender:
 
     def update_target(self, target_ip: str, target_port: int = AUDIO_PORT) -> None:
         with self._lock:
+            if target_ip == self._target_ip and target_port == self._target_port:
+                return
             old_ip = self._target_ip
             self._target_ip = target_ip
             self._target_port = target_port
-            if target_ip != old_ip:
-                self._seq = 0
             if self._sock:
                 try:
                     self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

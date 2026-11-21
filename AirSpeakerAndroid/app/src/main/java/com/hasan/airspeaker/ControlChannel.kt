@@ -12,7 +12,7 @@ import java.net.NetworkInterface
 import kotlin.concurrent.thread
 
 class ControlChannel(
-    private val audioPort: Int = 5004,
+    @Volatile var audioPort: Int = configuredAudioPort,
     private val controlPort: Int = 5005,
     @Volatile var onConfigSyncReceived: ((JSONObject) -> Unit)? = null,
     @Volatile var onPartyKicked: ((String) -> Unit)? = null
@@ -264,7 +264,9 @@ class ControlChannel(
                         }
 
                         if (msgType == "PC_ANNOUNCE") {
-                            if (!isPartyJoinerActive && !Companion.isPartyJoinerActive) {
+                            val rxStats = AudioNative.getStats()
+                            val isReceivingAudio = rxStats.rxPps > 0
+                            if (!isReceivingAudio && !isPartyJoinerActive && !Companion.isPartyJoinerActive) {
                                 activePcIp = senderIp
                                 lastKnownPcIp = senderIp
                                 if (!isHostingOrExtendingParty) {
@@ -287,7 +289,9 @@ class ControlChannel(
                             }
                             Log.i(TAG, "Discovered active PC IP via PC_ANNOUNCE: $senderIp ($activePcName)")
                         } else if (msgType == "CONFIG_SYNC") {
-                            val allowOverwrite = (activePcIp == null || activePcIp == senderIp || !AudioStreamService.isStreaming)
+                            val rxStats = AudioNative.getStats()
+                            val isReceivingAudio = rxStats.rxPps > 0
+                            val allowOverwrite = !isReceivingAudio && (activePcIp == null || activePcIp == senderIp || !AudioStreamService.isStreaming)
                             if (allowOverwrite) {
                                 activePcIp = senderIp
                                 lastKnownPcIp = senderIp
@@ -469,6 +473,7 @@ class ControlChannel(
 
     companion object {
         private const val TAG = "ControlChannel"
+        @Volatile var configuredAudioPort: Int = 5004
         @Volatile var isPartyJoinerActive: Boolean = false
         @Volatile var isHostingOrExtendingParty: Boolean = false
         @Volatile var isExtendingParty: Boolean = false
@@ -563,7 +568,7 @@ class ControlChannel(
                         put("party_host_ip", hostIp.trim())
                         put("is_party_host", false)
                         put("is_extended_host", isExtendingParty)
-                        put("audio_port", 5004)
+                        put("audio_port", configuredAudioPort)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     val addr = InetAddress.getByName(hostIp)
@@ -595,7 +600,7 @@ class ControlChannel(
                         put("party_host_ip", cleanIp)
                         put("is_party_host", false)
                         put("is_extended_host", false)
-                        put("audio_port", 5004)
+                        put("audio_port", configuredAudioPort)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     val addr = InetAddress.getByName(cleanIp)
@@ -606,7 +611,7 @@ class ControlChannel(
             }
         }
 
-        fun sendPartyLeaveBeacon(hostIp: String, deviceName: String = getPhoneModelName(), audioPort: Int = 5004) {
+        fun sendPartyLeaveBeacon(hostIp: String, deviceName: String = getPhoneModelName(), audioPort: Int = configuredAudioPort) {
             isPartyJoinerActive = false
             sendPartyLeaveAnnouncement(hostIp)
         }
@@ -645,7 +650,7 @@ class ControlChannel(
                         put("is_extended_host", false)
                         put("party_mode", false)
                         put("party_leave", true)
-                        put("audio_port", 5004)
+                        put("audio_port", configuredAudioPort)
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     val targets = mutableSetOf("255.255.255.255")
@@ -683,7 +688,7 @@ class ControlChannel(
                         put("app", "AirSpeaker")
                         put("version", 1)
                         put("ips", org.json.JSONArray(ips))
-                        put("audio_port", 5004)
+                        put("audio_port", configuredAudioPort)
                         put("device", getPhoneModelName())
                         put("party_join", isPartyJoinerActive)
                         if (isPartyJoinerActive) {
@@ -742,9 +747,14 @@ class ControlChannel(
         private var cachedLocalIps: List<String> = emptyList()
         private var lastIpCacheTimeMs: Long = 0L
 
+        fun invalidateLocalIpCache() {
+            cachedLocalIps = emptyList()
+            lastIpCacheTimeMs = 0L
+        }
+
         fun getLocalIpv4Addresses(): List<String> {
             val now = android.os.SystemClock.elapsedRealtime()
-            if (cachedLocalIps.isNotEmpty() && (now - lastIpCacheTimeMs) < 3000L) {
+            if (cachedLocalIps.isNotEmpty() && (now - lastIpCacheTimeMs) < 1500L) {
                 return cachedLocalIps
             }
             val prioritized = mutableListOf<String>()

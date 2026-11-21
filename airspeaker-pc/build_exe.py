@@ -2,8 +2,8 @@
 build_exe.py — Build Windows Portable EXE and Native Inno Setup Installer.
 
 Produces:
-  1. AirSpeaker-v1-Portable.exe (Standalone zero-install single-file executable)
-  2. AirSpeaker-v1-Setup.exe (Native Inno Setup 6 installer for Start Menu / Windows Apps)
+  1. AirSpeaker-Portable.exe (Standalone zero-install single-file executable)
+  2. AirSpeaker-Setup.exe (Native Inno Setup 6 installer for Start Menu / Windows Apps)
 """
 
 import os
@@ -52,7 +52,7 @@ def resolve_app_version() -> str:
             return tag[1:]
     except Exception:
         pass
-    return "1.2.1"
+    return "1.2.2"
 
 
 def write_build_info() -> str:
@@ -124,13 +124,13 @@ def main() -> None:
     # =========================================================================
     # BUILD 1: Portable Standalone Single-File Executable
     # =========================================================================
-    print("\n--- [1/2] Building Windows Portable EXE (AirSpeaker-v1-Portable.exe) ---", flush=True)
+    print("\n--- [1/2] Building Windows Portable EXE (AirSpeaker-Portable.exe) ---", flush=True)
     portable_args = [
         str(python), "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
         "-y",
-        "--name", "AirSpeaker-v1-Portable",
+        "--name", "AirSpeaker-Portable",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build-portable"),
         "--specpath", str(ROOT),
@@ -143,9 +143,9 @@ def main() -> None:
     portable_args.append(str(SRC_MAIN))
     run(portable_args)
 
-    portable_exe = ROOT / "dist" / "AirSpeaker-v1-Portable.exe"
+    portable_exe = ROOT / "dist" / "AirSpeaker-Portable.exe"
     if portable_exe.exists():
-        target = OUT_DIR / "AirSpeaker-v1-Portable.exe"
+        target = OUT_DIR / "AirSpeaker-Portable.exe"
         try:
             shutil.copy2(portable_exe, target)
             size_mb = target.stat().st_size / (1024 * 1024)
@@ -187,12 +187,12 @@ def main() -> None:
         print(f"\nCompiling Inno Setup installer using: {iscc_bin}", flush=True)
         iss_file = ROOT / "installer_windows.iss"
         run([iscc_bin, str(iss_file)])
-        setup_exe = ROOT.parent / "AirSpeaker-v1-Setup.exe"
+        setup_exe = ROOT.parent / "AirSpeaker-Setup.exe"
         if setup_exe.exists():
             if OUT_DIR != ROOT.parent:
                 try:
-                    shutil.copy2(setup_exe, OUT_DIR / "AirSpeaker-v1-Setup.exe")
-                    setup_exe = OUT_DIR / "AirSpeaker-v1-Setup.exe"
+                    shutil.copy2(setup_exe, OUT_DIR / "AirSpeaker-Setup.exe")
+                    setup_exe = OUT_DIR / "AirSpeaker-Setup.exe"
                 except Exception as exc:
                     print(f"Warning: Could not copy setup installer to {OUT_DIR}: {exc}", flush=True)
             size_mb = setup_exe.stat().st_size / (1024 * 1024)
@@ -205,7 +205,7 @@ def main() -> None:
         )
 
     # Clean up specs
-    for s in [ROOT / "AirSpeaker-v1-Portable.spec", ROOT / "AirSpeaker.spec"]:
+    for s in [ROOT / "AirSpeaker-Portable.spec", ROOT / "AirSpeaker-v1-Portable.spec", ROOT / "AirSpeaker.spec"]:
         if s.exists():
             try:
                 s.unlink()

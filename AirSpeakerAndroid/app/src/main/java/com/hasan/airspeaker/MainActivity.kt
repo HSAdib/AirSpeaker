@@ -83,12 +83,14 @@ class MainActivity : AppCompatActivity() {
                     binding.etPcIp.text.toString().trim().ifBlank { "255.255.255.255" }
                 }
             }
+            val targetPort = binding.etServeTargetPort.text.toString().trim().toIntOrNull() ?: 5004
             stopPreStreamDiscovery()
             val intent = Intent(this, AudioStreamService::class.java).apply {
                 action = AudioStreamService.ACTION_START_SERVE
                 putExtra(AudioStreamService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(AudioStreamService.EXTRA_RESULT_DATA, result.data)
                 putExtra(AudioStreamService.EXTRA_TARGET_IP, targetIp)
+                putExtra(AudioStreamService.EXTRA_TARGET_PORT, targetPort)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
@@ -362,12 +364,12 @@ class MainActivity : AppCompatActivity() {
     private fun showHelpDialog() {
         val guideText = """
         ============================================================
-        AIR SPEAKER v1 STUDIO — USER GUIDE & HELP
+        AIRSPEAKER STUDIO — USER GUIDE & HELP
         ============================================================
 
         ✓ STUDIO ARCHITECTURE: 4 DEDICATED TABS
         ------------------------------------------------------------
-        Air Speaker v1 features a unified monospace layout across
+        AirSpeaker features a unified monospace layout across
         Android, iOS, Windows, macOS, and Linux:
 
         1. [ PLAY ] TAB (PC -> PHONE AUDIO PLAYER)
@@ -416,7 +418,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Air Speaker v1 Studio Guide")
+            .setTitle("AirSpeaker Studio Guide")
             .setView(scroll)
             .setPositiveButton("Close", null)
             .show()
@@ -968,7 +970,7 @@ class MainActivity : AppCompatActivity() {
                     setTextColor(0xFFFFB4AB.toInt())
                     textSize = 12f
                     typeface = android.graphics.Typeface.MONOSPACE
-                    text = "⚠️ Air Speaker Studio Startup Error\n\n$errorDetails"
+                    text = "⚠️ AirSpeaker Startup Error\n\n$errorDetails"
                     setTextIsSelectable(true)
                 }
                 addView(tv)
@@ -1149,7 +1151,7 @@ class MainActivity : AppCompatActivity() {
             }
             binding.ivPartyHostQr.setImageBitmap(bmp)
             binding.ivPartyHostQr.setOnClickListener {
-                copyToClipboard("Air Speaker Party Join Link", uri)
+                copyToClipboard("AirSpeaker Party Join Link", uri)
                 Toast.makeText(this, "Copied Party Join link to clipboard!", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
@@ -2163,11 +2165,12 @@ class MainActivity : AppCompatActivity() {
                 lastServiceStartTimeMs = SystemClock.elapsedRealtime()
                 stopPreStreamDiscovery()
                 applyEffectiveEqualizerState()
+                val listenPort = binding.etPhoneListenPort.text.toString().trim().toIntOrNull() ?: 5004
                 val intent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_START
                     putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
                     putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
-                    putExtra(AudioStreamService.EXTRA_AUDIO_PORT, 5004)
+                    putExtra(AudioStreamService.EXTRA_AUDIO_PORT, listenPort)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(intent)
@@ -2178,9 +2181,76 @@ class MainActivity : AppCompatActivity() {
             handler.postDelayed({ refreshServiceButtonState() }, 200L)
         }
 
+        // Load and persist port preferences
+        val portPrefs = getSharedPreferences("airspeaker_prefs", MODE_PRIVATE)
+        val savedListenPort = portPrefs.getInt("phone_listen_port", 5004)
+        val savedPcPort = portPrefs.getInt("pc_port", 5004)
+        val savedServeTargetPort = portPrefs.getInt("serve_target_port", 5004)
+
+        binding.etPhoneListenPort.setText(savedListenPort.toString())
+        binding.etPcPort.setText(savedPcPort.toString())
+        binding.etServeTargetPort.setText(savedServeTargetPort.toString())
+        ControlChannel.configuredAudioPort = savedListenPort
+
+        binding.btnApplyPhonePort.setOnClickListener {
+            val p = binding.etPhoneListenPort.text.toString().trim().toIntOrNull() ?: 5004
+            val validPort = p.coerceIn(1024, 65535)
+            binding.etPhoneListenPort.setText(validPort.toString())
+            ControlChannel.configuredAudioPort = validPort
+            getSharedPreferences("airspeaker_prefs", MODE_PRIVATE).edit()
+                .putInt("phone_listen_port", validPort)
+                .apply()
+            Toast.makeText(this, "Phone listen port set to $validPort", Toast.LENGTH_SHORT).show()
+            if (AudioStreamService.isStreaming) {
+                val stopIntent = Intent(this, AudioStreamService::class.java).apply {
+                    action = AudioStreamService.ACTION_STOP
+                }
+                startService(stopIntent)
+                handler.postDelayed({
+                    val startIntent = Intent(this, AudioStreamService::class.java).apply {
+                        action = AudioStreamService.ACTION_START
+                        putExtra(AudioStreamService.EXTRA_AUDIO_ENGINE, if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
+                        putExtra(AudioStreamService.EXTRA_AUDIO_FX, binding.switchAudioFx.isChecked)
+                        putExtra(AudioStreamService.EXTRA_AUDIO_PORT, validPort)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(startIntent)
+                    } else {
+                        startService(startIntent)
+                    }
+                }, 300L)
+            }
+        }
+
+        binding.btnCopyPhoneIpPort.setOnClickListener {
+            val primaryIp = ControlChannel.getLocalIpv4Addresses().firstOrNull() ?: "127.0.0.1"
+            val port = binding.etPhoneListenPort.text.toString().trim().toIntOrNull() ?: 5004
+            val textToCopy = "$primaryIp:$port"
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("AirSpeaker IP:Port", textToCopy))
+            Toast.makeText(this, "Copied $textToCopy", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnSetServeTargetIp.setOnClickListener {
+            val targetIp = binding.etServeTargetIp.text.toString().trim()
+            val targetPort = binding.etServeTargetPort.text.toString().trim().toIntOrNull() ?: 5004
+            getSharedPreferences("airspeaker_prefs", MODE_PRIVATE).edit()
+                .putInt("serve_target_port", targetPort)
+                .apply()
+            if (targetIp.isNotBlank()) {
+                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(targetIp)
+            }
+            AudioStreamService.internalAudioStreamerInstance?.updateTargetPort(targetPort)
+            Toast.makeText(this, "Target set: $targetIp:$targetPort", Toast.LENGTH_SHORT).show()
+        }
+
         // Connect manual PC IP
         val applyManualPcIp = {
             var manualIp = binding.etPcIp.text.toString().trim()
+            val pcPort = binding.etPcPort.text.toString().trim().toIntOrNull() ?: 5004
+            getSharedPreferences("airspeaker_prefs", MODE_PRIVATE).edit()
+                .putInt("pc_port", pcPort)
+                .apply()
             for (prefix in listOf("http://", "https://", "udp://")) {
                 if (manualIp.startsWith(prefix, ignoreCase = true)) {
                     manualIp = manualIp.substring(prefix.length).trim()
@@ -2194,6 +2264,7 @@ class MainActivity : AppCompatActivity() {
                 userEditedPcIp = manualIp
                 ch?.setActivePcIp(manualIp)
                 AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(manualIp)
+                AudioStreamService.internalAudioStreamerInstance?.updateTargetPort(pcPort)
                 binding.etPcIp.clearFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
                 imm?.hideSoftInputFromWindow(binding.etPcIp.windowToken, 0)
@@ -2213,7 +2284,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnRefreshIps.setOnClickListener { refreshLocalIps() }
 
         val shaStr = if (BuildConfig.BUILD_SHA != "dev") " (${BuildConfig.BUILD_SHA})" else ""
-        binding.tvAppVersion.text = "Air Speaker v${BuildConfig.VERSION_NAME}$shaStr"
+        binding.tvAppVersion.text = "AirSpeaker v${BuildConfig.VERSION_NAME}$shaStr"
         binding.btnCheckForUpdates.setOnClickListener {
             performUpdateCheck(isManual = true)
         }
@@ -2258,10 +2329,10 @@ class MainActivity : AppCompatActivity() {
             } else if (isManual) {
                 binding.btnDownloadUpdate.visibility = View.GONE
                 binding.tvUpdateStatus.visibility = View.VISIBLE
-                binding.tvUpdateStatus.text = "Air Speaker is up to date."
+                binding.tvUpdateStatus.text = "AirSpeaker is up to date."
                 MaterialAlertDialogBuilder(this)
                     .setTitle("Up to Date")
-                    .setMessage("Air Speaker v${BuildConfig.VERSION_NAME} is currently up to date.")
+                    .setMessage("AirSpeaker v${BuildConfig.VERSION_NAME} is currently up to date.")
                     .setPositiveButton("OK", null)
                     .show()
             }
@@ -2272,7 +2343,7 @@ class MainActivity : AppCompatActivity() {
         if (isFinishing || isDestroyed) return
         val builder = MaterialAlertDialogBuilder(this)
         builder.setTitle("⬆ Update Available")
-        builder.setMessage("Air Speaker ${info.displayVersion} is now available!\n\nDownload directly into Downloads/AirSpeaker?")
+        builder.setMessage("AirSpeaker ${info.displayVersion} is now available!\n\nDownload directly into Downloads/AirSpeaker?")
         builder.setPositiveButton("Download Update") { _, _ ->
             selectTab(3)
             startInAppUpdateDownload(info)
@@ -2836,11 +2907,14 @@ class MainActivity : AppCompatActivity() {
                 else "💻 PC ($displayIp) — Idle / Waiting..."
             } else "💻 Waiting for PC connection..."
             val partyPeers = ControlChannel.partyPeerIps.size
+            val primaryIp = ControlChannel.getLocalIpv4Addresses().firstOrNull() ?: "127.0.0.1"
+            val listenPort = binding.etPhoneListenPort.text.toString().trim().ifBlank { "5004" }
             binding.tvConnectedDeviceSub.text = if (partyPeers > 0) {
-                "📱 ${ControlChannel.getPhoneModelName()}  •  🎉 Party Mode: $partyPeers peer(s)"
+                "📱 $primaryIp:$listenPort (${ControlChannel.getPhoneModelName()}) • 🎉 Party: $partyPeers peer(s)"
             } else {
-                "📱 This Phone: ${ControlChannel.getPhoneModelName()}"
+                "📱 This Phone: $primaryIp:$listenPort (${ControlChannel.getPhoneModelName()})"
             }
+            binding.tvServeThisPhoneIp.text = "📱 This Phone: $primaryIp:$listenPort (${ControlChannel.getPhoneModelName()})"
 
             // Party Tab UI Status & Peers List
             val isRelay = AudioNative.safeIsPartyRelay()

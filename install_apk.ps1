@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Air Speaker v1 - Android Rebuild and Install Script" -ForegroundColor Cyan
+Write-Host "AirSpeaker - Android Rebuild and Install Script" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # 1. Locate / Detect JAVA_HOME (prefer standard LTS JDK 17/21)
@@ -44,7 +44,7 @@ if (-not $env:JAVA_HOME) {
 
 # 2. Compile fresh APK with gradlew.bat assembleDebug
 $androidDir = Join-Path $PSScriptRoot "AirSpeakerAndroid"
-Write-Host "`n[1/3] Building fresh Air Speaker v1 APK..." -ForegroundColor Cyan
+Write-Host "`n[1/3] Building fresh AirSpeaker APK..." -ForegroundColor Cyan
 Push-Location $androidDir
 try {
     & .\gradlew.bat assembleDebug
@@ -89,7 +89,7 @@ if ($deviceAbi -and (Test-Path (Join-Path $apkDir "app-$deviceAbi-debug.apk"))) 
     $selectedApk = Join-Path $apkDir "app-debug.apk"
 }
 
-$apkPath = Join-Path $PSScriptRoot "AirSpeaker-v1.apk"
+$apkPath = Join-Path $PSScriptRoot "AirSpeaker.apk"
 if ($selectedApk -and (Test-Path $selectedApk)) {
     Copy-Item -Path $selectedApk -Destination $apkPath -Force
     Write-Host "Fresh APK copied to: $apkPath" -ForegroundColor Green
@@ -131,7 +131,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "adb install failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "`nLaunching Air Speaker MainActivity on device..." -ForegroundColor Green
+Write-Host "`nLaunching AirSpeaker MainActivity on device..." -ForegroundColor Green
 & $adb shell am start -n com.hasan.airspeaker/.MainActivity
 
-Write-Host "`nSuccess! Air Speaker v1 is compiled and running on your phone." -ForegroundColor Cyan
+Write-Host "`nSuccess! AirSpeaker is compiled and running on your phone." -ForegroundColor Cyan

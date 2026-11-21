@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Air Speaker — Real Persistent Linux Application Installer
+# AirSpeaker — Real Persistent Linux Application Installer
 # Supports Arch Linux, Ubuntu, Debian, Linux Mint, Fedora, and openSUSE
 # ==============================================================================
 set -e
@@ -14,7 +14,7 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 
 do_uninstall() {
     echo "=========================================================="
-    echo "  Air Speaker — Uninstalling Persistent Desktop App..."
+    echo "  AirSpeaker — Uninstalling Persistent Desktop App..."
     echo "=========================================================="
     pkill -f "AirSpeaker" 2>/dev/null || true
     pkill -f "airspeaker-pc/src/main.py" 2>/dev/null || true
@@ -39,7 +39,7 @@ do_uninstall() {
         gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
     fi
 
-    echo "Air Speaker has been completely and cleanly uninstalled."
+    echo "AirSpeaker has been completely and cleanly uninstalled."
     exit 0
 }
 
@@ -48,7 +48,7 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
 fi
 
 echo "=========================================================="
-echo "  Air Speaker — Linux Desktop Application Installer"
+echo "  AirSpeaker — Linux Desktop Application Installer"
 echo "=========================================================="
 
 mkdir -p "$BIN_DIR" "$INSTALL_BASE" "$ICON_DIR" "$DESKTOP_DIR"
@@ -75,9 +75,9 @@ INSTALL_SUCCESS=0
 
 # 2. Try Binary Release Package for x86_64
 if [ "$ARCH" = "x86_64" ]; then
-    echo "Downloading pre-compiled Air Speaker Linux x86_64 bundle..."
-    TAR_URL="https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Linux-x86_64.tar.gz"
-    TEMP_TAR="/tmp/AirSpeaker-v1-Linux-x86_64.tar.gz"
+    echo "Downloading pre-compiled AirSpeaker Linux x86_64 bundle..."
+    TAR_URL="https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-Linux-x86_64.tar.gz"
+    TEMP_TAR="/tmp/AirSpeaker-Linux-x86_64.tar.gz"
     rm -f "$TEMP_TAR"
 
     if command -v curl >/dev/null 2>&1; then
@@ -172,7 +172,7 @@ if [ -x "$HOME/.local/share/AirSpeaker/app/AirSpeaker" ]; then
 elif [ -x "$HOME/.local/share/AirSpeaker/src/airspeaker-pc/.venv/bin/python" ]; then
     exec "$HOME/.local/share/AirSpeaker/src/airspeaker-pc/.venv/bin/python" "$HOME/.local/share/AirSpeaker/src/airspeaker-pc/src/main.py" "$@"
 else
-    echo "Air Speaker installation not found or damaged. Please re-run install_linux.sh" >&2
+    echo "AirSpeaker installation not found or damaged. Please re-run install_linux.sh" >&2
     exit 1
 fi
 EOF
@@ -196,7 +196,7 @@ chmod +x "$BIN_DIR/airspeaker-uninstall"
 cat << EOF > "$DESKTOP_DIR/airspeaker.desktop"
 [Desktop Entry]
 Type=Application
-Name=Air Speaker
+Name=AirSpeaker
 Comment=Low-latency wireless audio streaming studio
 Exec=$BIN_DIR/airspeaker
 Icon=airspeaker
@@ -212,9 +212,9 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 echo "=========================================================="
-echo " SUCCESS! Air Speaker is permanently installed on your system!"
+echo " SUCCESS! AirSpeaker is permanently installed on your system!"
 echo " Location:      $INSTALL_BASE"
 echo " CLI Command:   airspeaker"
-echo " Desktop App:   Air Speaker (Available in Application Menu)"
+echo " Desktop App:   AirSpeaker (Available in Application Menu)"
 echo " Uninstall:     airspeaker-uninstall"
 echo "=========================================================="

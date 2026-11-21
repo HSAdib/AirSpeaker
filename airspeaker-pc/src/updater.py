@@ -76,7 +76,7 @@ def is_windows_installed() -> bool:
     if os.path.exists(os.path.join(exe_dir, "unins000.exe")):
         return True
     exe_lower = exe.lower()
-    if "programs\\air speaker" in exe_lower or "programs/air speaker" in exe_lower:
+    if "programs\\airspeaker" in exe_lower or "programs/airspeaker" in exe_lower or "programs\\air speaker" in exe_lower or "programs/air speaker" in exe_lower:
         return True
     return False
 
@@ -129,23 +129,23 @@ def select_download_asset(release_data: Dict[str, Any]) -> Tuple[str, str]:
     html_url = release_data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases/latest")
 
     if plat == "windows":
-        target_name = "AirSpeaker-v1-Setup.exe" if is_windows_installed() else "AirSpeaker-v1-Portable.exe"
-        fallback_name = "AirSpeaker-v1-Portable.exe" if is_windows_installed() else "AirSpeaker-v1-Setup.exe"
+        target_name = "AirSpeaker-Setup.exe" if is_windows_installed() else "AirSpeaker-Portable.exe"
+        fallback_name = "AirSpeaker-Portable.exe" if is_windows_installed() else "AirSpeaker-Setup.exe"
         for a in assets:
             if a.get("name") == target_name:
                 return a.get("browser_download_url", html_url), target_name
         for a in assets:
-            if a.get("name") == fallback_name or a.get("name") == "AirSpeaker.v1.exe":
+            if a.get("name") == fallback_name or a.get("name") == "AirSpeaker-v1-Portable.exe" or a.get("name") == "AirSpeaker-v1-Setup.exe" or a.get("name") == "AirSpeaker.v1.exe":
                 return a.get("browser_download_url", html_url), a.get("name", target_name)
         return html_url, target_name
     elif plat == "macos":
-        target_name = "AirSpeaker-v1-macOS.dmg"
+        target_name = "AirSpeaker-macOS.dmg"
         for a in assets:
             if a.get("name") == target_name or str(a.get("name", "")).endswith(".dmg"):
                 return a.get("browser_download_url", html_url), a.get("name", target_name)
         return html_url, target_name
     else:
-        target_name = "AirSpeaker-v1-Linux-x86_64.tar.gz"
+        target_name = "AirSpeaker-Linux-x86_64.tar.gz"
         for a in assets:
             if a.get("name") == target_name or str(a.get("name", "")).endswith(".tar.gz"):
                 return a.get("browser_download_url", html_url), a.get("name", target_name)
@@ -340,7 +340,7 @@ def install_downloaded_update(saved_path: str, is_win_installed: bool = False) -
 
         if plat == "macos":
             subprocess.Popen(["open", saved_path])
-            return True, "Opened macOS installer DMG. Drag Air Speaker into Applications.", False
+            return True, "Opened macOS installer DMG. Drag AirSpeaker into Applications.", False
 
         # Linux: install directly from downloaded tarball into ~/.local/share/AirSpeaker/app
         app_dir = Path.home() / ".local" / "share" / "AirSpeaker" / "app"
@@ -367,7 +367,7 @@ def install_downloaded_update(saved_path: str, is_win_installed: bool = False) -
                 new_bin = app_dir / "AirSpeaker"
                 new_bin.chmod(new_bin.stat().st_mode | 0o755)
                 subprocess.Popen([str(new_bin)], start_new_session=True)
-                return True, "Update installed! Restarting Air Speaker...", True
+                return True, "Update installed! Restarting AirSpeaker...", True
             except Exception as exc:
                 shutil.rmtree(staging, ignore_errors=True)
                 logger.warning("Direct Linux tarball install failed (%s); falling back to terminal updater", exc)

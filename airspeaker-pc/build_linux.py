@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-build_linux.py — Build persistent standalone Linux application bundle and tarball for Air Speaker.
+build_linux.py — Build persistent standalone Linux application bundle and tarball for AirSpeaker.
 
 Output:
   - dist/AirSpeaker/ (Self-contained --onedir Linux application bundle)
-  - ../AirSpeaker-v1-Linux-x86_64.tar.gz (Gzip tarball of the bundle for release)
+  - ../AirSpeaker-Linux-x86_64.tar.gz (Gzip tarball of the bundle for release)
 """
 
 import ctypes.util
@@ -48,7 +48,7 @@ def resolve_app_version() -> str:
             return tag[1:]
     except Exception:
         pass
-    return "1.2.1"
+    return "1.2.2"
 
 
 def write_build_info() -> str:
@@ -174,8 +174,8 @@ def main() -> None:
     if binary.exists():
         binary.chmod(binary.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
 
-    # 6. Package dist/AirSpeaker into ../AirSpeaker-v1-Linux-x86_64.tar.gz
-    tar_out = OUT_DIR / "AirSpeaker-v1-Linux-x86_64.tar.gz"
+    # 6. Package dist/AirSpeaker into ../AirSpeaker-Linux-x86_64.tar.gz
+    tar_out = OUT_DIR / "AirSpeaker-Linux-x86_64.tar.gz"
     print(f"\nPackaging application bundle into {tar_out}...", flush=True)
     if tar_out.exists():
         tar_out.unlink()

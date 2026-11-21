@@ -23,7 +23,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Air Speaker"
+                android:text="AirSpeaker"
                 android:textColor="@color/m3_on_surface"
                 android:textSize="18sp"
                 android:textStyle="bold"
@@ -183,6 +183,72 @@
                             android:textColor="@color/m3_on_surface_variant"
                             android:textSize="12sp"
                             android:fontFamily="sans-serif" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginTop="4dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Port: "
+                                android:textColor="@color/m3_on_surface_variant"
+                                android:textSize="12sp"
+                                android:fontFamily="sans-serif" />
+
+                            <EditText
+                                android:id="@+id/etPhoneListenPort"
+                                android:layout_width="70dp"
+                                android:layout_height="36dp"
+                                android:background="@drawable/bg_m3_input"
+                                android:textColor="@color/m3_on_surface"
+                                android:paddingStart="6dp"
+                                android:paddingEnd="6dp"
+                                android:text="5004"
+                                android:textSize="12sp"
+                                android:fontFamily="sans-serif"
+                                android:singleLine="true"
+                                android:inputType="number" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnApplyPhonePort"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="34dp"
+                                android:layout_marginStart="6dp"
+                                android:minWidth="0dp"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:text="APPLY"
+                                android:textColor="@color/m3_primary"
+                                app:strokeColor="@color/m3_outline"
+                                app:strokeWidth="1dp"
+                                android:fontFamily="sans-serif"
+                                android:textSize="11sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnCopyPhoneIpPort"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="34dp"
+                                android:layout_marginStart="6dp"
+                                android:minWidth="0dp"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:text="📋 COPY"
+                                android:textColor="@color/m3_primary"
+                                app:strokeColor="@color/m3_outline"
+                                app:strokeWidth="1dp"
+                                android:fontFamily="sans-serif"
+                                android:textSize="11sp" />
+                        </LinearLayout>
                     </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
@@ -238,6 +304,21 @@
                         android:singleLine="true"
                         android:imeOptions="actionDone"
                         android:inputType="textUri" />
+
+                    <EditText
+                        android:id="@+id/etPcPort"
+                        android:layout_width="65dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="4dp"
+                        android:background="@drawable/bg_m3_input"
+                        android:textColor="@color/m3_on_surface"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:text="5004"
+                        android:textSize="13sp"
+                        android:fontFamily="sans-serif"
+                        android:singleLine="true"
+                        android:inputType="number" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnConnectPcIp"
@@ -641,7 +722,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="INTERNAL SYSTEM AUDIO SENDER (PORT 5004):"
+                    android:text="INTERNAL SYSTEM AUDIO SENDER:"
                     android:textColor="@color/m3_on_surface"
                     android:textSize="12sp"
                     android:textStyle="bold"
@@ -667,6 +748,16 @@
                     android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvServeThisPhoneIp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="📱 This Phone: Detecting..."
+                android:textColor="@color/m3_on_surface_variant"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif" />
 
             <!-- Target Receiver IP Card -->
             <LinearLayout
@@ -701,6 +792,21 @@
                     android:textSize="12sp"
                     android:fontFamily="sans-serif"
                     android:singleLine="true" />
+
+                <EditText
+                    android:id="@+id/etServeTargetPort"
+                    android:layout_width="60dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@color/m3_surface_container"
+                    android:textColor="@color/m3_on_surface"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:text="5004"
+                    android:textSize="12sp"
+                    android:fontFamily="sans-serif"
+                    android:singleLine="true"
+                    android:inputType="number" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSetServeTargetIp"
@@ -2117,7 +2223,7 @@
                     android:id="@+id/tvAppVersion"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Air Speaker v1.0.0"
+                    android:text="AirSpeaker v1.2.2"
                     android:textColor="@color/m3_primary"
                     android:textSize="12sp"
                     android:textStyle="bold"

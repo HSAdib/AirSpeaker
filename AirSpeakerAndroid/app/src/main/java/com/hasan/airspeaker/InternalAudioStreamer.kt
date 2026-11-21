@@ -117,10 +117,16 @@ class InternalAudioStreamer {
             null
         }
     }
-    private val targetPort = 5004
+    private val targetPortRef = AtomicInteger(5004)
 
     @Volatile
     private var workerTerminatedLatch: CountDownLatch? = null
+
+    fun updateTargetPort(newPort: Int) {
+        if (newPort in 1024..65535) {
+            targetPortRef.set(newPort)
+        }
+    }
 
     fun updateTargetIp(newIp: String) {
         if (newIp.isNotBlank()) {
@@ -128,7 +134,7 @@ class InternalAudioStreamer {
         }
     }
 
-    fun start(projection: MediaProjection, targetIp: String = "255.255.255.255", context: android.content.Context? = null): Boolean {
+    fun start(projection: MediaProjection, targetIp: String = "255.255.255.255", targetPort: Int = 5004, context: android.content.Context? = null): Boolean {
         if (isRunning.get()) return true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Log.e(TAG, "AudioPlaybackCapture requires Android 10 (API 29) or higher")
@@ -143,6 +149,7 @@ class InternalAudioStreamer {
 
         this.mediaProjection = projection
         updateTargetIp(targetIp)
+        updateTargetPort(targetPort)
 
         try {
             // 1. Configure AudioPlaybackCapture
@@ -341,11 +348,12 @@ class InternalAudioStreamer {
 
                 val packetBytes = packetBuf.array()
                 val targetIpStr = targetIpRef.get()
+                val curTargetPort = targetPortRef.get()
                 if (targetIpStr.isNotBlank() && targetIpStr != "0.0.0.0") {
                     val targetAddr = resolveAddress(targetIpStr)
                     if (targetAddr != null) {
                         try {
-                            val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, targetPort)
+                            val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, curTargetPort)
                             sock.send(dgram)
                         } catch (e: Exception) {
                             // Ignore transient network errors
@@ -361,7 +369,7 @@ class InternalAudioStreamer {
                             val bcastAddr = resolveAddress(bcastIp)
                             if (bcastAddr != null) {
                                 try {
-                                    sock.send(DatagramPacket(packetBytes, packetSize, bcastAddr, targetPort))
+                                    sock.send(DatagramPacket(packetBytes, packetSize, bcastAddr, curTargetPort))
                                 } catch (_: Exception) {}
                             }
                         }
@@ -374,7 +382,7 @@ class InternalAudioStreamer {
                             val peerAddr = resolveAddress(peerIp)
                             if (peerAddr != null) {
                                 try {
-                                    val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, targetPort)
+                                    val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, curTargetPort)
                                     sock.send(peerDgram)
                                 } catch (_: Exception) {}
                             }

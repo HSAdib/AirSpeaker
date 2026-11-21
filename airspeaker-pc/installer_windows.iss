@@ -1,9 +1,9 @@
 ; ====================================================================
-; Air Speaker - Inno Setup 6 Script (Native Windows Installed App)
+; AirSpeaker - Inno Setup 6 Script (Native Windows Installed App)
 ; ====================================================================
 
-#define MyAppName "Air Speaker"
-#define MyAppVersion "1.2.1"
+#define MyAppName "AirSpeaker"
+#define MyAppVersion "1.2.2"
 #define MyAppPublisher "Hasan Shahriar Adib"
 #define MyAppURL "https://github.com/HSAdib/AirSpeaker"
 #define MyAppExeName "AirSpeaker.exe"
@@ -16,15 +16,15 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={localappdata}\Programs\Air Speaker
-DefaultGroupName=Air Speaker
+DefaultDirName={localappdata}\Programs\AirSpeaker
+DefaultGroupName=AirSpeaker
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..
-OutputBaseFilename=AirSpeaker-v1-Setup
+OutputBaseFilename=AirSpeaker-Setup
 SetupIconFile=vendor\app_icon.ico
 UninstallDisplayIcon={app}\AirSpeaker.exe
-UninstallDisplayName=Air Speaker
+UninstallDisplayName=AirSpeaker
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -40,9 +40,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\AirSpeaker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Air Speaker"; Filename: "{app}\AirSpeaker.exe"
-Name: "{group}\{cm:UninstallProgram,Air Speaker}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Air Speaker"; Filename: "{app}\AirSpeaker.exe"; Tasks: desktopicon
+Name: "{group}\AirSpeaker"; Filename: "{app}\AirSpeaker.exe"
+Name: "{group}\{cm:UninstallProgram,AirSpeaker}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\AirSpeaker"; Filename: "{app}\AirSpeaker.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\AirSpeaker.exe"; Description: "{cm:LaunchProgram,Air Speaker}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\AirSpeaker.exe"; Description: "{cm:LaunchProgram,AirSpeaker}"; Flags: nowait postinstall skipifsilent

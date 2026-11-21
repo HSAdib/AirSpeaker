@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-build_macos.py — Build persistent standalone macOS Application bundle (.app) and DMG for Air Speaker.
+build_macos.py — Build persistent standalone macOS Application bundle (.app) and DMG for AirSpeaker.
 
 Output:
-  - dist/Air Speaker.app (macOS Application bundle)
-  - ../AirSpeaker-v1-macOS.dmg (Drag-and-Drop Disk Image with /Applications symlink)
+  - dist/AirSpeaker.app (macOS Application bundle)
+  - ../AirSpeaker-macOS.dmg (Drag-and-Drop Disk Image with /Applications symlink)
 """
 
 import ctypes.util
@@ -47,7 +47,7 @@ def resolve_app_version() -> str:
             return tag[1:]
     except Exception:
         pass
-    return "1.2.1"
+    return "1.2.2"
 
 
 def write_build_info() -> str:
@@ -179,9 +179,9 @@ def main() -> None:
     if icon_png.exists():
         generate_icns(icon_png, icns_path)
 
-    # 5. Build clean self-contained --onedir --windowed bundle named "Air Speaker.app"
-    print("\n--- Building macOS Application Bundle (dist/Air Speaker.app) ---", flush=True)
-    app_path = ROOT / "dist" / "Air Speaker.app"
+    # 5. Build clean self-contained --onedir --windowed bundle named "AirSpeaker.app"
+    print("\n--- Building macOS Application Bundle (dist/AirSpeaker.app) ---", flush=True)
+    app_path = ROOT / "dist" / "AirSpeaker.app"
     if app_path.exists():
         shutil.rmtree(app_path)
 
@@ -190,7 +190,7 @@ def main() -> None:
         "--windowed",
         "--noconsole",
         "--onedir",
-        "--name", "Air Speaker",
+        "--name", "AirSpeaker",
         "--osx-bundle-identifier", "com.hasan.airspeaker",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build-macos"),
@@ -212,25 +212,25 @@ def main() -> None:
         print(f"ERROR: Application bundle was not created at {app_path}")
         sys.exit(1)
 
-    # 6. Patch Air Speaker.app/Contents/Info.plist
+    # 6. Patch AirSpeaker.app/Contents/Info.plist
     plist_path = app_path / "Contents" / "Info.plist"
     if plist_path.exists():
         try:
             with open(plist_path, "rb") as fp:
                 pl = plistlib.load(fp)
-            pl["CFBundleDisplayName"] = "Air Speaker"
-            pl["CFBundleName"] = "Air Speaker"
+            pl["CFBundleDisplayName"] = "AirSpeaker"
+            pl["CFBundleName"] = "AirSpeaker"
             pl["CFBundleShortVersionString"] = resolve_app_version()
             pl["NSHighResolutionCapable"] = True
             pl["NSLocalNetworkUsageDescription"] = (
-                "Air Speaker uses your local network (UDP 5004, 5005) for ultra-low-latency audio streaming."
+                "AirSpeaker uses your local network (UDP 5004, 5005) for ultra-low-latency audio streaming."
             )
             pl["NSMicrophoneUsageDescription"] = (
-                "Air Speaker accesses audio devices to stream system or microphone audio."
+                "AirSpeaker accesses audio devices to stream system or microphone audio."
             )
             with open(plist_path, "wb") as fp:
                 plistlib.dump(pl, fp)
-            print("Patched Air Speaker.app/Contents/Info.plist successfully.", flush=True)
+            print("Patched AirSpeaker.app/Contents/Info.plist successfully.", flush=True)
         except Exception as exc:
             print(f"Warning: Could not patch Info.plist: {exc}", flush=True)
 
@@ -241,7 +241,7 @@ def main() -> None:
 
     # 8. Build DMG with /Applications drag-and-drop symlink
     hdiutil = shutil.which("hdiutil")
-    dmg_out = OUT_DIR / "AirSpeaker-v1-macOS.dmg"
+    dmg_out = OUT_DIR / "AirSpeaker-macOS.dmg"
     if hdiutil:
         print("\nCreating Drag-and-Drop DMG with /Applications symlink...", flush=True)
         staging_dir = ROOT / "dist" / "dmg_staging"
@@ -249,7 +249,7 @@ def main() -> None:
             shutil.rmtree(staging_dir)
         staging_dir.mkdir(parents=True, exist_ok=True)
 
-        shutil.copytree(app_path, staging_dir / "Air Speaker.app", symlinks=True)
+        shutil.copytree(app_path, staging_dir / "AirSpeaker.app", symlinks=True)
         try:
             os.symlink("/Applications", staging_dir / "Applications")
         except Exception as exc:
@@ -260,7 +260,7 @@ def main() -> None:
 
         run([
             "hdiutil", "create",
-            "-volname", "Air Speaker",
+            "-volname", "AirSpeaker",
             "-srcfolder", str(staging_dir),
             "-ov",
             "-format", "UDZO",
@@ -272,7 +272,7 @@ def main() -> None:
             size_mb = dmg_out.stat().st_size / (1024 * 1024)
             print(f"SUCCESS: Persistent macOS DMG installer ready at {dmg_out} ({size_mb:.1f} MB)", flush=True)
     else:
-        print("Notice: 'hdiutil' is not available on this platform. Application bundle is at dist/Air Speaker.app")
+        print("Notice: 'hdiutil' is not available on this platform. Application bundle is at dist/AirSpeaker.app")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Air Speaker
+# AirSpeaker
 
 Ultra-low-latency wireless audio streaming studio across **Windows**, **macOS**, **Linux**, **Android**, and **iOS**.
 
@@ -13,38 +13,38 @@ Ultra-low-latency wireless audio streaming studio across **Windows**, **macOS**,
 ## Download
 
 ### Windows
-- **Installer (Recommended — Start Menu & Windows Apps):** [Download AirSpeaker-v1-Setup.exe](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Setup.exe)
-- **Portable (Standalone — No Install):** [Download AirSpeaker-v1-Portable.exe](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Portable.exe)
+- **Installer (Recommended — Start Menu & Windows Apps):** [Download AirSpeaker-Setup.exe](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-Setup.exe)
+- **Portable (Standalone — No Install):** [Download AirSpeaker-Portable.exe](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-Portable.exe)
 
 ### Android
 Select the APK that matches your device architecture:
 - **64-bit ARM (Recommended for modern phones):**  
-  [Download AirSpeaker-v1-arm64-v8a.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-arm64-v8a.apk) *(Optimal performance & compact download)*
+  [Download AirSpeaker-arm64-v8a.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-arm64-v8a.apk) *(Optimal performance & compact download)*
 - **Universal (All Architectures Combined):**  
-  [Download AirSpeaker-v1-universal.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-universal.apk) *(Guaranteed compatibility across any phone or tablet)*  
-  *(Universal alias: [AirSpeaker-v1.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1.apk))*
+  [Download AirSpeaker-universal.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-universal.apk) *(Guaranteed compatibility across any phone or tablet)*  
+  *(Universal alias: [AirSpeaker.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker.apk))*
 - **32-bit ARM (Older Android phones):**  
-  [Download AirSpeaker-v1-armeabi-v7a.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-armeabi-v7a.apk)
+  [Download AirSpeaker-armeabi-v7a.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-armeabi-v7a.apk)
 - **64-bit x86 (Tablets, ChromeOS & Android Emulators):**  
-  [Download AirSpeaker-v1-x86_64.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-x86_64.apk)
+  [Download AirSpeaker-x86_64.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-x86_64.apk)
 - **32-bit x86 (Legacy Emulators):**  
-  [Download AirSpeaker-v1-x86.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-x86.apk)
+  [Download AirSpeaker-x86.apk](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-x86.apk)
 
 > [!TIP]
-> **Android Installation Tip:** When installing a downloaded APK, Android may prompt to allow installs from Air Speaker or your file manager. Tap **Settings** and enable **"Allow from this source"**. Air Speaker supports **Android 7.0+ (API 24+)** for low-latency playback and **Android 10+ (API 29+)** for internal system audio capture.
+> **Android Installation Tip:** When installing a downloaded APK, Android may prompt to allow installs from AirSpeaker or your file manager. Tap **Settings** and enable **"Allow from this source"**. AirSpeaker supports **Android 7.0+ (API 24+)** for low-latency playback and **Android 10+ (API 29+)** for internal system audio capture.
 
 ### iOS
-- **Sideloadable IPA (iOS 16.0+):** [Download AirSpeaker-v1-iOS.ipa](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-iOS.ipa)
+- **Sideloadable IPA (iOS 16.0+):** [Download AirSpeaker-iOS.ipa](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-iOS.ipa)
 
 ### macOS
-- **Universal Disk Image:** [Download AirSpeaker-v1-macOS.dmg](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-macOS.dmg) *(Open the DMG and drag **Air Speaker** into **Applications**)*
+- **Universal Disk Image:** [Download AirSpeaker-macOS.dmg](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-macOS.dmg) *(Open the DMG and drag **AirSpeaker** into **Applications**)*
 
 ### Linux
 Install (Arch, Ubuntu, Debian, Mint, Fedora, openSUSE):
 ```bash
 curl -sSL https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/install_linux.sh | bash
 ```
-Direct x86_64 tarball: [Download AirSpeaker-v1-Linux-x86_64.tar.gz](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-v1-Linux-x86_64.tar.gz)
+Direct x86_64 tarball: [Download AirSpeaker-Linux-x86_64.tar.gz](https://github.com/HSAdib/AirSpeaker/releases/latest/download/AirSpeaker-Linux-x86_64.tar.gz)
 
 Uninstall:
 ```bash
@@ -55,7 +55,7 @@ curl -sSL https://raw.githubusercontent.com/HSAdib/AirSpeaker/main/install_linux
 Open the **Settings** tab on Windows, macOS, Linux, Android, or iOS:
 1. Tap **Check for Updates**.
 2. Tap **Download Update** to download the latest build at full speed with live progress and download speed.
-3. Once complete, the file is saved in `Downloads/AirSpeaker` (on iOS: `Files → On My iPhone → Air Speaker → Downloads/AirSpeaker`) with two buttons:
+3. Once complete, the file is saved in `Downloads/AirSpeaker` (on iOS: `Files → On My iPhone → AirSpeaker → Downloads/AirSpeaker`) with two buttons:
    - **Install Now** — launches the installer or sideload share sheet immediately.
    - **See in Files** — opens the `Downloads/AirSpeaker` folder directly to the downloaded package.
 

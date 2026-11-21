@@ -1,4 +1,4 @@
-name: Air Speaker CI & Release Pipeline
+name: AirSpeaker CI & Release Pipeline
 
 on:
   push:
@@ -72,7 +72,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
-          APP_VER="1.2.1"
+          APP_VER="1.2.2"
           if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             APP_VER="${GITHUB_REF_NAME#v}"
           fi
@@ -122,14 +122,14 @@ jobs:
             echo "Packaged: android-deliverables/$dest (from $src)"
           }
 
-          copy_and_verify "arm64-v8a" "AirSpeaker-v1-arm64-v8a.apk"
-          copy_and_verify "armeabi-v7a" "AirSpeaker-v1-armeabi-v7a.apk"
-          copy_and_verify "x86_64" "AirSpeaker-v1-x86_64.apk"
-          copy_and_verify "x86" "AirSpeaker-v1-x86.apk"
-          copy_and_verify "universal" "AirSpeaker-v1-universal.apk"
+          copy_and_verify "arm64-v8a" "AirSpeaker-arm64-v8a.apk"
+          copy_and_verify "armeabi-v7a" "AirSpeaker-armeabi-v7a.apk"
+          copy_and_verify "x86_64" "AirSpeaker-x86_64.apk"
+          copy_and_verify "x86" "AirSpeaker-x86.apk"
+          copy_and_verify "universal" "AirSpeaker-universal.apk"
 
           # Universal alias for backward compatibility
-          cp -f "android-deliverables/AirSpeaker-v1-universal.apk" "android-deliverables/AirSpeaker-v1.apk"
+          cp -f "android-deliverables/AirSpeaker-universal.apk" "android-deliverables/AirSpeaker.apk"
 
           cd android-deliverables
           sha256sum *.apk | tee SHA256SUMS-android.txt
@@ -138,7 +138,7 @@ jobs:
       - name: Upload Android APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AirSpeaker-v1-APK
+          name: AirSpeaker-APK
           path: |
             android-deliverables/*.apk
             android-deliverables/SHA256SUMS-android.txt
@@ -187,26 +187,26 @@ jobs:
       - name: Verify Windows Artifacts & Generate Checksums
         shell: pwsh
         run: |
-          if (!(Test-Path "AirSpeaker-v1-Portable.exe")) {
-            Write-Error "Missing AirSpeaker-v1-Portable.exe"
+          if (!(Test-Path "AirSpeaker-Portable.exe")) {
+            Write-Error "Missing AirSpeaker-Portable.exe"
             exit 1
           }
-          if (!(Test-Path "AirSpeaker-v1-Setup.exe")) {
-            Write-Error "Missing AirSpeaker-v1-Setup.exe"
+          if (!(Test-Path "AirSpeaker-Setup.exe")) {
+            Write-Error "Missing AirSpeaker-Setup.exe"
             exit 1
           }
-          Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Portable.exe" | Out-File "AirSpeaker-v1-Portable.exe.sha256"
-          Get-FileHash -Algorithm SHA256 "AirSpeaker-v1-Setup.exe" | Out-File "AirSpeaker-v1-Setup.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-Portable.exe" | Out-File "AirSpeaker-Portable.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-Setup.exe" | Out-File "AirSpeaker-Setup.exe.sha256"
           Write-Host "Windows Deliverables:"
-          Get-ChildItem -Filter "AirSpeaker-v1-*"
+          Get-ChildItem -Filter "AirSpeaker-*"
 
       - name: Upload Windows Executable Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AirSpeaker-v1-Windows
+          name: AirSpeaker-Windows
           path: |
-            AirSpeaker-v1-Setup.exe
-            AirSpeaker-v1-Portable.exe
+            AirSpeaker-Setup.exe
+            AirSpeaker-Portable.exe
 
   # ====================================================
   # 3. LINUX BUILD JOB (Persistent Bundle & Tarball)
@@ -249,9 +249,9 @@ jobs:
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AirSpeaker-v1-Linux
+          name: AirSpeaker-Linux
           path: |
-            AirSpeaker-v1-Linux-x86_64.tar.gz
+            AirSpeaker-Linux-x86_64.tar.gz
 
   # ====================================================
   # 4. MACOS & IOS BUILD JOB (Xcode & DMG / IPA Packaging)
@@ -288,7 +288,7 @@ jobs:
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
           if [ -z "$SHORT_SHA" ]; then SHORT_SHA="dev"; fi
-          APP_VER="1.2.1"
+          APP_VER="1.2.2"
           if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             APP_VER="${GITHUB_REF_NAME#v}"
           fi
@@ -316,16 +316,16 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R "build/AirSpeaker.xcarchive/Products/Applications/AirSpeaker.app" Payload/
-          zip -r -q ../AirSpeaker-v1-iOS.ipa Payload
+          zip -r -q ../AirSpeaker-iOS.ipa Payload
           cd ..
 
       - name: Upload Apple Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AirSpeaker-v1-Apple-Deliverables
+          name: AirSpeaker-Apple-Deliverables
           path: |
-            AirSpeaker-v1-macOS.dmg
-            AirSpeaker-v1-iOS.ipa
+            AirSpeaker-macOS.dmg
+            AirSpeaker-iOS.ipa
 
   # ====================================================
   # 5. OFFICIAL RELEASE PUBLICATION (All 5 Operating Systems)
@@ -345,25 +345,25 @@ jobs:
       - name: Download Android Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: AirSpeaker-v1-APK
+          name: AirSpeaker-APK
           path: release-artifacts/
 
       - name: Download Windows Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: AirSpeaker-v1-Windows
+          name: AirSpeaker-Windows
           path: release-artifacts/
 
       - name: Download Linux Artifact
         uses: actions/download-artifact@v4
         with:
-          name: AirSpeaker-v1-Linux
+          name: AirSpeaker-Linux
           path: release-artifacts/
 
       - name: Download Apple Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: AirSpeaker-v1-Apple-Deliverables
+          name: AirSpeaker-Apple-Deliverables
           path: release-artifacts/
 
       - name: Copy Linux Installer Script
@@ -383,7 +383,7 @@ jobs:
         run: |
           TAG_NAME="${GITHUB_REF_NAME}"
           if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
-            TAG_NAME="v1.2.1"
+            TAG_NAME="v1.2.2"
           fi
           APP_VER="${TAG_NAME#v}"
           SHORT_SHA="${GITHUB_SHA::7}"
@@ -391,7 +391,7 @@ jobs:
 
           cat << EOF > RELEASE_NOTES.md
           <!-- build: ${SHORT_SHA} -->
-          ### Air Speaker ${TAG_NAME} Studio — Cross-Platform Release
+          ### AirSpeaker ${TAG_NAME} Studio — Cross-Platform Release
 
           Low-latency wireless audio streaming & internal system audio studio for Windows 11, macOS, Linux, Android, and iOS.
 
@@ -406,24 +406,24 @@ jobs:
           - **In-App Settings Updater (All 5 OSes):** Check for updates, download at full speed with live speed/progress directly into \`Downloads/AirSpeaker\`, and tap **Install Now** or **See in Files**.
 
           #### Deliverables for All 5 Operating Systems:
-          - **Windows (Installed App):** \`AirSpeaker-v1-Setup.exe\` (Native Start Menu & Windows Settings setup)
-          - **Windows (Portable):** \`AirSpeaker-v1-Portable.exe\` (Standalone zero-install single-file executable)
+          - **Windows (Installed App):** \`AirSpeaker-Setup.exe\` (Native Start Menu & Windows Settings setup)
+          - **Windows (Portable):** \`AirSpeaker-Portable.exe\` (Standalone zero-install single-file executable)
           - **Android (Architecture Splits + Universal APK):**
-            - \`AirSpeaker-v1-arm64-v8a.apk\` — **Recommended for modern phones** (64-bit ARM, smaller download & optimal performance)
-            - \`AirSpeaker-v1-universal.apk\` — **Universal APK** (All architectures bundled, fallback if unsure of your CPU)
-            - \`AirSpeaker-v1.apk\` — *(Universal compatibility alias)*
-            - \`AirSpeaker-v1-armeabi-v7a.apk\` — Older 32-bit ARM phones
-            - \`AirSpeaker-v1-x86_64.apk\` — 64-bit x86 tablets, emulators & ChromeOS
-            - \`AirSpeaker-v1-x86.apk\` — 32-bit x86 emulators & devices
-          - **macOS:** \`AirSpeaker-v1-macOS.dmg\` (Drag-and-Drop installer with Applications symlink)
-          - **Linux:** \`AirSpeaker-v1-Linux-x86_64.tar.gz\` & One-Click Installer (\`install_linux.sh\`)
-          - **iOS:** \`AirSpeaker-v1-iOS.ipa\` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
+            - \`AirSpeaker-arm64-v8a.apk\` — **Recommended for modern phones** (64-bit ARM, smaller download & optimal performance)
+            - \`AirSpeaker-universal.apk\` — **Universal APK** (All architectures bundled, fallback if unsure of your CPU)
+            - \`AirSpeaker.apk\` — *(Universal compatibility alias)*
+            - \`AirSpeaker-armeabi-v7a.apk\` — Older 32-bit ARM phones
+            - \`AirSpeaker-x86_64.apk\` — 64-bit x86 tablets, emulators & ChromeOS
+            - \`AirSpeaker-x86.apk\` — 32-bit x86 emulators & devices
+          - **macOS:** \`AirSpeaker-macOS.dmg\` (Drag-and-Drop installer with Applications symlink)
+          - **Linux:** \`AirSpeaker-Linux-x86_64.tar.gz\` & One-Click Installer (\`install_linux.sh\`)
+          - **iOS:** \`AirSpeaker-iOS.ipa\` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
           EOF
 
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
-            gh release create "$TAG_NAME" --title "Air Speaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md
+            gh release create "$TAG_NAME" --title "AirSpeaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md
 
-          gh release edit "$TAG_NAME" --title "Air Speaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md || true
+          gh release edit "$TAG_NAME" --title "AirSpeaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md || true
 
           for f in release-artifacts/*; do
             if [ -f "$f" ]; then
@@ -446,7 +446,7 @@ jobs:
         run: |
           TAG_NAME="${GITHUB_REF_NAME}"
           if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
-            TAG_NAME="v1.2.1"
+            TAG_NAME="v1.2.2"
           fi
           APP_VER="${TAG_NAME#v}"
 
@@ -464,7 +464,7 @@ jobs:
             echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF (version ${APP_VER})..."
             oras push --disable-path-validation "${PKG_REF}:latest" \
               --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-              --annotation "org.opencontainers.image.description=Air Speaker v1.0 Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
+              --annotation "org.opencontainers.image.description=AirSpeaker Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
               --annotation "org.opencontainers.image.version=${APP_VER}" \
               "${ORAS_FILES[@]}"
 

@@ -1,5 +1,5 @@
 """
-main.py — Entry point for Air Speaker PC.
+main.py — Entry point for AirSpeaker PC.
 
 Sets high process priority and 1ms timer resolution on Windows, then starts the UI.
 Handles graceful shutdown on exit.
@@ -19,9 +19,9 @@ if "--version" in sys.argv or "-V" in sys.argv:
     try:
         from version import APP_VERSION, BUILD_SHA
         sha_str = f" ({BUILD_SHA})" if BUILD_SHA and BUILD_SHA != "dev" else ""
-        print(f"Air Speaker PC v{APP_VERSION}{sha_str}")
+        print(f"AirSpeaker v{APP_VERSION}{sha_str}")
     except Exception:
-        print("Air Speaker PC v1.0.0")
+        print("AirSpeaker v1.2.2")
     sys.exit(0)
 
 import config as cfg_module
