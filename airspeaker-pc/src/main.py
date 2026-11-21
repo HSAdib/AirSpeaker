@@ -21,7 +21,7 @@ if "--version" in sys.argv or "-V" in sys.argv:
         sha_str = f" ({BUILD_SHA})" if BUILD_SHA and BUILD_SHA != "dev" else ""
         print(f"AirSpeaker v{APP_VERSION}{sha_str}")
     except Exception:
-        print("AirSpeaker v1.2.2")
+        print("AirSpeaker v1.3.0")
     sys.exit(0)
 
 import config as cfg_module

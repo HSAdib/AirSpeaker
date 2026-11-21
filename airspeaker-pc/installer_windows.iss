@@ -3,7 +3,7 @@
 ; ====================================================================
 
 #define MyAppName "AirSpeaker"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Hasan Shahriar Adib"
 #define MyAppURL "https://github.com/HSAdib/AirSpeaker"
 #define MyAppExeName "AirSpeaker.exe"

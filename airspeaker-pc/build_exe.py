@@ -52,7 +52,7 @@ def resolve_app_version() -> str:
             return tag[1:]
     except Exception:
         pass
-    return "1.2.2"
+    return "1.3.0"
 
 
 def write_build_info() -> str:

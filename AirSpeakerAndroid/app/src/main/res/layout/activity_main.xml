@@ -2223,7 +2223,7 @@
                     android:id="@+id/tvAppVersion"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="AirSpeaker v1.2.2"
+                    android:text="AirSpeaker v1.3.0"
                     android:textColor="@color/m3_primary"
                     android:textSize="12sp"
                     android:textStyle="bold"
