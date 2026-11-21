@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
             isPartyHostBroadcastActive = false
             ControlChannel.isHostingOrExtendingParty = false
             ControlChannel.isExtendingParty = false
-            AudioNative.nativeSetPartyRelay(false)
+            AudioNative.safeSetPartyRelay(false)
             ControlChannel.sendPartyHostStopAnnouncement()
             applyEffectiveEqualizerState()
         }
@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity() {
         ControlChannel.lastKnownPcIp = cleanIp
         ControlChannel.partyPeerIps.clear()
         ControlChannel.partyPeerLastSeen.clear()
-        AudioNative.nativeSetPartyPeers(emptyArray())
+        AudioNative.safeSetPartyPeers(emptyArray())
         ControlChannel.isPartyJoinerActive = true
         ControlChannel.sendPartyJoinAnnouncement(cleanIp)
         lastJoinKeepAliveMs = SystemClock.elapsedRealtime()
@@ -186,9 +186,9 @@ class MainActivity : AppCompatActivity() {
         val isExtend = isPartyExtendedActive || binding.switchExtendParty.isChecked
         ControlChannel.isExtendingParty = isExtend
         ControlChannel.isHostingOrExtendingParty = isExtend
-        AudioNative.nativeSetPartyRelay(isExtend)
+        AudioNative.safeSetPartyRelay(isExtend)
         if (isExtend) {
-            AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+            AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
         }
 
         binding.layoutPartyExtendCard.visibility = View.VISIBLE
@@ -257,7 +257,7 @@ class MainActivity : AppCompatActivity() {
         val isOpus = binding.rbCodecOpus.isChecked || binding.rbPlayerCodecOpus.isChecked
         val bitrate = bitrateValues.getOrElse(binding.spinnerBitrate.selectedItemPosition) { "128" }.toIntOrNull() ?: 128
         val frameMs = if (!isOpus) 5 else currentFrameMs
-        val bufMs = quantizeTarget(AudioNative.nativeGetTargetBufferMs()).toInt()
+        val bufMs = quantizeTarget(AudioNative.safeGetTargetBufferMs()).toInt()
         val captureMs = 10
         val hwMs = 10
         val (codecNetMs, qualityNote) = if (!isOpus) {
@@ -481,7 +481,7 @@ class MainActivity : AppCompatActivity() {
             sum.coerceIn(-12.0f, 12.0f)
         }
 
-        AudioNative.nativeSetEqBands(rxEffectiveEnabled, rxEffectiveBands)
+        AudioNative.safeSetEqBands(rxEffectiveEnabled, rxEffectiveBands)
         InternalAudioStreamer.setOutboundEq(txEffectiveEnabled, txEffectiveBands)
         updateEqButtonLabels()
     }
@@ -864,8 +864,52 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         localRev = maxOf(localRev, AudioStreamService.getLatestConfigRev())
         volumeControlStream = AudioManager.STREAM_MUSIC
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+
+        // Check for previous crash log
+        try {
+            val crashFile = java.io.File(filesDir, "last_crash.txt")
+            if (crashFile.exists()) {
+                val crashText = crashFile.readText()
+                Log.e(TAG, "Previous crash report detected:\n$crashText")
+                // Keep the file logged and remove or offer diagnostics
+                crashFile.delete()
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to read last_crash.txt: ${e.message}")
+        }
+
+        try {
+            binding = ActivityMainBinding.inflate(layoutInflater)
+            setContentView(binding.root)
+            setupTabs()
+            setupUI()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Fatal error inflating or initializing main UI", t)
+            val sw = java.io.StringWriter()
+            t.printStackTrace(java.io.PrintWriter(sw))
+            val errorDetails = sw.toString()
+
+            val errorView = ScrollView(this).apply {
+                setBackgroundColor(0xFF101318.toInt())
+                setPadding(32, 48, 32, 48)
+                val tv = TextView(this@MainActivity).apply {
+                    setTextColor(0xFFFFB4AB.toInt())
+                    textSize = 12f
+                    typeface = android.graphics.Typeface.MONOSPACE
+                    text = "⚠️ Air Speaker Studio Startup Error\n\n$errorDetails"
+                    setTextIsSelectable(true)
+                }
+                addView(tv)
+            }
+            setContentView(errorView)
+            return
+        }
+
+        if (!AudioNative.isNativeLoaded) {
+            val errMsg = AudioNative.nativeLoadError ?: "Native audio library not loaded"
+            Toast.makeText(this, "⚠️ Native Audio Warning: $errMsg", Toast.LENGTH_LONG).show()
+            Log.w(TAG, "AudioNative failed to load: $errMsg")
+        }
 
         ControlChannel.onPartyHostDiscovered = {
             runOnUiThread {
@@ -885,7 +929,7 @@ class MainActivity : AppCompatActivity() {
                     isPartyExtendedActive = false
                     ControlChannel.isHostingOrExtendingParty = false
                     ControlChannel.isExtendingParty = false
-                    AudioNative.nativeSetPartyRelay(false)
+                    AudioNative.safeSetPartyRelay(false)
                     binding.switchExtendParty.isChecked = false
                     binding.layoutPartyExtendCard.visibility = View.GONE
                     binding.layoutExtendDetails.visibility = View.GONE
@@ -904,8 +948,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        setupTabs()
-        setupUI()
         checkPermissions()
         refreshLocalIps()
 
@@ -1324,13 +1366,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Buffer target sliders (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
-        val initialTarget = quantizeTarget(AudioNative.nativeGetTargetBufferMs())
+        val initialTarget = quantizeTarget(AudioNative.safeGetTargetBufferMs())
         syncAllTargetBufferSliders(initialTarget)
 
         val onBufferSliderChanged: (com.google.android.material.slider.Slider, Float, Boolean) -> Unit = { s, value, fromUser ->
             if (fromUser) {
                 val qVal = quantizeTarget(value)
-                AudioNative.nativeSetTargetBufferMs(qVal)
+                AudioNative.safeSetTargetBufferMs(qVal)
                 syncAllTargetBufferSliders(qVal, fromSlider = s)
                 syncAllBufferModeRadioGroups("CUSTOM")
                 if (!suppressSync) binding.rbProfileCustom.isChecked = true
@@ -1360,22 +1402,22 @@ class MainActivity : AppCompatActivity() {
                     if (!suppressSync) {
                         when (mode) {
                             "LOW" -> {
-                                AudioNative.nativeSetTargetBufferMs(20f)
-                                AudioNative.nativeSetAutoMode(false)
+                                AudioNative.safeSetTargetBufferMs(20f)
+                                AudioNative.safeSetAutoMode(false)
                                 syncAllTargetBufferSliders(20f)
                             }
                             "MEDIUM" -> {
-                                AudioNative.nativeSetTargetBufferMs(40f)
-                                AudioNative.nativeSetAutoMode(false)
+                                AudioNative.safeSetTargetBufferMs(40f)
+                                AudioNative.safeSetAutoMode(false)
                                 syncAllTargetBufferSliders(40f)
                             }
                             "HIGH" -> {
-                                AudioNative.nativeSetTargetBufferMs(80f)
-                                AudioNative.nativeSetAutoMode(false)
+                                AudioNative.safeSetTargetBufferMs(80f)
+                                AudioNative.safeSetAutoMode(false)
                                 syncAllTargetBufferSliders(80f)
                             }
-                            "AUTO" -> AudioNative.nativeSetAutoMode(true)
-                            "CUSTOM" -> AudioNative.nativeSetAutoMode(false)
+                            "AUTO" -> AudioNative.safeSetAutoMode(true)
+                            "CUSTOM" -> AudioNative.safeSetAutoMode(false)
                         }
                         binding.rbProfileCustom.isChecked = true
                         onLocalSettingChanged()
@@ -1408,8 +1450,8 @@ class MainActivity : AppCompatActivity() {
                         }
                         syncAllBufferModeRadioGroups("HIGH")
                         syncAllTargetBufferSliders(80f)
-                        AudioNative.nativeSetTargetBufferMs(80f)
-                        AudioNative.nativeSetAutoMode(false)
+                        AudioNative.safeSetTargetBufferMs(80f)
+                        AudioNative.safeSetAutoMode(false)
                     } finally {
                         suppressSync = false
                     }
@@ -1427,8 +1469,8 @@ class MainActivity : AppCompatActivity() {
                         }
                         syncAllBufferModeRadioGroups("LOW")
                         syncAllTargetBufferSliders(20f)
-                        AudioNative.nativeSetTargetBufferMs(20f)
-                        AudioNative.nativeSetAutoMode(false)
+                        AudioNative.safeSetTargetBufferMs(20f)
+                        AudioNative.safeSetAutoMode(false)
                     } finally {
                         suppressSync = false
                     }
@@ -1446,8 +1488,8 @@ class MainActivity : AppCompatActivity() {
                         }
                         syncAllBufferModeRadioGroups("AUTO")
                         syncAllTargetBufferSliders(30f)
-                        AudioNative.nativeSetTargetBufferMs(30f)
-                        AudioNative.nativeSetAutoMode(true)
+                        AudioNative.safeSetTargetBufferMs(30f)
+                        AudioNative.safeSetAutoMode(true)
                     } finally {
                         suppressSync = false
                     }
@@ -1488,7 +1530,7 @@ class MainActivity : AppCompatActivity() {
 
         // Gain slider & Mute
         try {
-            binding.sliderGain.value = quantizeGain(AudioNative.nativeGetVolumeGain())
+            binding.sliderGain.value = quantizeGain(AudioNative.safeGetVolumeGain())
             binding.tvGainValue.text = "${(binding.sliderGain.value * 100).toInt()}%"
         } catch (_: Exception) {}
         binding.sliderGain.addOnChangeListener { _, value, fromUser ->
@@ -1500,8 +1542,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnMuteToggle.setOnClickListener {
-            val muted = !AudioNative.nativeIsMuted()
-            AudioNative.nativeSetMuted(muted)
+            val muted = !AudioNative.safeIsMuted()
+            AudioNative.safeSetMuted(muted)
             binding.btnMuteToggle.text = if (muted) "MUTED" else "MUTE"
             onLocalSettingChanged()
         }
@@ -1559,7 +1601,7 @@ class MainActivity : AppCompatActivity() {
                 .putInt("serve_frame_ms", frameMs)
                 .putInt("target_buffer_ms", targetBufferMs)
                 .apply()
-            AudioNative.nativeSetTargetBufferMs(targetBufferMs.toFloat())
+            AudioNative.safeSetTargetBufferMs(targetBufferMs.toFloat())
             syncAllTargetBufferSliders(targetBufferMs.toFloat())
             syncAllBufferModeRadioGroups(bufMode)
             if (!suppressSync) {
@@ -1612,7 +1654,7 @@ class MainActivity : AppCompatActivity() {
                 isPartyHostBroadcastActive = false
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
-                AudioNative.nativeSetPartyRelay(false)
+                AudioNative.safeSetPartyRelay(false)
                 ControlChannel.sendPartyHostStopAnnouncement()
             }
             if (AudioStreamService.isStreaming && (partyModeScreen == "HOST" || binding.rbPartyHost.isChecked)) {
@@ -1646,7 +1688,7 @@ class MainActivity : AppCompatActivity() {
             isPartyJoinedActive = false
             isPartyExtendedActive = false
             binding.switchExtendParty.isChecked = false
-            AudioNative.nativeSetPartyRelay(false)
+            AudioNative.safeSetPartyRelay(false)
             ControlChannel.isHostingOrExtendingParty = false
             ControlChannel.isExtendingParty = false
             binding.layoutPartyExtendCard.visibility = View.GONE
@@ -1668,9 +1710,9 @@ class MainActivity : AppCompatActivity() {
             binding.switchExtendParty.isChecked = isPartyExtendedActive
             ControlChannel.isExtendingParty = isPartyExtendedActive
             ControlChannel.isHostingOrExtendingParty = isPartyExtendedActive
-            AudioNative.nativeSetPartyRelay(isPartyExtendedActive)
+            AudioNative.safeSetPartyRelay(isPartyExtendedActive)
             if (isPartyExtendedActive) {
-                AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+                AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 updateExtendedQrCode()
                 binding.layoutExtendDetails.visibility = View.VISIBLE
                 binding.btnToggleExtendParty.text = "Stop Extending Party"
@@ -1712,7 +1754,7 @@ class MainActivity : AppCompatActivity() {
                 isPartyHostBroadcastActive = false
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
-                AudioNative.nativeSetPartyRelay(false)
+                AudioNative.safeSetPartyRelay(false)
                 ControlChannel.sendPartyHostStopAnnouncement()
                 if (AudioStreamService.isStreaming) {
                     val intent = Intent(this, AudioStreamService::class.java).apply {
@@ -1730,8 +1772,8 @@ class MainActivity : AppCompatActivity() {
                 isPartyHostBroadcastActive = true
                 ControlChannel.isHostingOrExtendingParty = true
                 ControlChannel.isExtendingParty = false
-                AudioNative.nativeSetPartyRelay(true)
-                AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+                AudioNative.safeSetPartyRelay(true)
+                AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 ControlChannel.sendPreStreamBeacon()
                 if (binding.cbPartyBroadcastInternal.isChecked) {
                     if (!AudioStreamService.isServing) {
@@ -1765,7 +1807,7 @@ class MainActivity : AppCompatActivity() {
                 isPartyExtendedActive = false
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
-                AudioNative.nativeSetPartyRelay(false)
+                AudioNative.safeSetPartyRelay(false)
                 binding.switchExtendParty.isChecked = false
                 binding.layoutPartyExtendCard.visibility = View.GONE
                 binding.layoutExtendDetails.visibility = View.GONE
@@ -1792,7 +1834,7 @@ class MainActivity : AppCompatActivity() {
                 binding.etPcIp.setText(joinedHostIp)
                 ControlChannel.lastKnownPcIp = joinedHostIp
                 ControlChannel.partyPeerIps.clear()
-                AudioNative.nativeSetPartyPeers(emptyArray())
+                AudioNative.safeSetPartyPeers(emptyArray())
                 ControlChannel.isPartyJoinerActive = true
                 ControlChannel.sendPartyJoinAnnouncement(joinedHostIp)
                 lastJoinKeepAliveMs = SystemClock.elapsedRealtime()
@@ -1801,9 +1843,9 @@ class MainActivity : AppCompatActivity() {
                 val isExtend = isPartyExtendedActive || binding.switchExtendParty.isChecked
                 ControlChannel.isExtendingParty = isExtend
                 ControlChannel.isHostingOrExtendingParty = isExtend
-                AudioNative.nativeSetPartyRelay(isExtend)
+                AudioNative.safeSetPartyRelay(isExtend)
                 if (isExtend) {
-                    AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+                    AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 }
 
                 binding.layoutPartyExtendCard.visibility = View.VISIBLE
@@ -1834,11 +1876,11 @@ class MainActivity : AppCompatActivity() {
             isPartyExtendedActive = isChecked
             ControlChannel.isExtendingParty = isChecked
             ControlChannel.isHostingOrExtendingParty = isChecked || (partyModeScreen == "HOST")
-            AudioNative.nativeSetPartyRelay(isChecked)
+            AudioNative.safeSetPartyRelay(isChecked)
             binding.layoutExtendDetails.visibility = if (isChecked) View.VISIBLE else View.GONE
             if (isChecked) {
                 updateExtendedQrCode()
-                AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+                AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
             }
             updateStatsUI()
         }
@@ -1938,7 +1980,7 @@ class MainActivity : AppCompatActivity() {
             val (ip, _) = parseHostIpFromUri(raw)
             if (ip.isNotEmpty() && !ControlChannel.partyPeerIps.contains(ip)) {
                 ControlChannel.partyPeerIps.add(ip)
-                AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
+                AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 binding.etPartyPeerIp.text?.clear()
                 updateStatsUI()
             }
@@ -1947,7 +1989,7 @@ class MainActivity : AppCompatActivity() {
             val toKick = ControlChannel.partyPeerIps.toList()
             ControlChannel.partyPeerIps.clear()
             ControlChannel.partyPeerLastSeen.clear()
-            AudioNative.nativeSetPartyPeers(emptyArray())
+            AudioNative.safeSetPartyPeers(emptyArray())
             for (peerIp in toKick) {
                 ControlChannel.sendPartyKick(peerIp, "Removed by party host")
             }
@@ -1966,7 +2008,7 @@ class MainActivity : AppCompatActivity() {
                     isPartyHostBroadcastActive = false
                     ControlChannel.isHostingOrExtendingParty = false
                     ControlChannel.isExtendingParty = false
-                    AudioNative.nativeSetPartyRelay(false)
+                    AudioNative.safeSetPartyRelay(false)
                     ControlChannel.sendPartyHostStopAnnouncement()
                     applyEffectiveEqualizerState()
                 }
@@ -1982,7 +2024,7 @@ class MainActivity : AppCompatActivity() {
                 }, 500L)
             } else {
                 userManuallyStoppedPlayer = false
-                AudioNative.nativeSetPartyRelay(false)
+                AudioNative.safeSetPartyRelay(false)
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
                 lastServiceStartTimeMs = SystemClock.elapsedRealtime()
@@ -2110,7 +2152,7 @@ class MainActivity : AppCompatActivity() {
         updateExpectedDelayUI()
 
         val userMuted = (binding.btnMuteToggle.text == "MUTED")
-        AudioNative.nativeSetMuted(userMuted)
+        AudioNative.safeSetMuted(userMuted)
 
         val json = JSONObject().apply {
             put("type", "CONFIG_SYNC")
@@ -2152,7 +2194,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val lowLatency = binding.rbEngineOboe.isChecked && !binding.switchAudioFx.isChecked
-        AudioNative.nativeSetLowLatencyMode(lowLatency)
+        AudioNative.safeSetLowLatencyMode(lowLatency)
 
         val destIp = userEditedPcIp ?: binding.etPcIp.text.toString().trim().ifEmpty { null }
         val ch = AudioStreamService.activeControlChannel ?: preStreamDiscoveryChannel
@@ -2204,7 +2246,7 @@ class MainActivity : AppCompatActivity() {
                 if (!binding.sliderTargetBuffer.isPressed) {
                     syncAllTargetBufferSliders(buf)
                 }
-                AudioNative.nativeSetTargetBufferMs(buf)
+                AudioNative.safeSetTargetBufferMs(buf)
             }
             if (json.has("buffer_mode")) {
                 val mode = when (json.getString("buffer_mode")) {
@@ -2217,7 +2259,7 @@ class MainActivity : AppCompatActivity() {
                 syncAllBufferModeRadioGroups(mode)
             }
             if (json.has("auto_buffer")) {
-                AudioNative.nativeSetAutoMode(json.getBoolean("auto_buffer"))
+                AudioNative.safeSetAutoMode(json.getBoolean("auto_buffer"))
             }
             if (json.has("volume_gain")) {
                 val g = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
@@ -2231,7 +2273,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (json.has("muted")) {
                 val m = json.getBoolean("muted")
-                AudioNative.nativeSetMuted(m)
+                AudioNative.safeSetMuted(m)
                 binding.btnMuteToggle.text = if (m) "MUTED" else "MUTE"
             }
             if (json.has("audio_profile")) {
@@ -2291,7 +2333,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val lowLatency = binding.rbEngineOboe.isChecked && !binding.switchAudioFx.isChecked
-            AudioNative.nativeSetLowLatencyMode(lowLatency)
+            AudioNative.safeSetLowLatencyMode(lowLatency)
 
             if (json.has("pc_streaming")) {
                 pcStreamingHintActive = json.optBoolean("pc_streaming", false)
@@ -2337,7 +2379,7 @@ class MainActivity : AppCompatActivity() {
             isPartyHostBroadcastActive = false
             ControlChannel.isHostingOrExtendingParty = isPartyExtendedActive
             ControlChannel.isExtendingParty = isPartyExtendedActive
-            AudioNative.nativeSetPartyRelay(isPartyExtendedActive)
+            AudioNative.safeSetPartyRelay(isPartyExtendedActive)
             ControlChannel.sendPartyHostStopAnnouncement()
             applyEffectiveEqualizerState()
         }
@@ -2483,7 +2525,7 @@ class MainActivity : AppCompatActivity() {
             // Auto-update connected PC IP if empty / network changed
             val rawPcIp = AudioStreamService.activeControlChannel?.getActivePcIp()
                 ?: preStreamDiscoveryChannel?.getActivePcIp()
-                ?: AudioNative.nativeGetSenderIp()
+                ?: AudioNative.safeGetSenderIp()
             val isOwn = (AudioStreamService.activeControlChannel ?: preStreamDiscoveryChannel)?.isOwnLocalIp(rawPcIp) == true
             val discoveredPcIp = if (!isOwn && !rawPcIp.isNullOrBlank()) rawPcIp else null
 
@@ -2520,7 +2562,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Party Tab UI Status & Peers List
-            val isRelay = AudioNative.nativeIsPartyRelay()
+            val isRelay = AudioNative.safeIsPartyRelay()
             val isExtend = isPartyExtendedActive || binding.switchExtendParty.isChecked
             if (AudioStreamService.isStreaming || (isPartyHostBroadcastActive && AudioStreamService.isServing)) {
                 if (isPartyHostBroadcastActive || (partyModeScreen == "HOST") || binding.rbPartyHost.isChecked || (isRelay && !isExtend)) {
@@ -2600,7 +2642,7 @@ class MainActivity : AppCompatActivity() {
                     ControlChannel.isPartyJoinerActive = false
                     ControlChannel.isExtendingParty = false
                     ControlChannel.isHostingOrExtendingParty = isPartyHostBroadcastActive
-                    AudioNative.nativeSetPartyRelay(isPartyHostBroadcastActive)
+                    AudioNative.safeSetPartyRelay(isPartyHostBroadcastActive)
                     if (joinedHostIp.isNotEmpty()) {
                         ControlChannel.sendPartyLeaveAnnouncement(joinedHostIp)
                     }
@@ -2619,7 +2661,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvServePps.text = "TX PPS: $servePps pps"
 
             // Keep mute button text synced with native engine mute state
-            binding.btnMuteToggle.text = if (AudioNative.nativeIsMuted()) "MUTED" else "MUTE"
+            binding.btnMuteToggle.text = if (AudioNative.safeIsMuted()) "MUTED" else "MUTE"
 
         } catch (e: Exception) {
             Log.e("AirSpeaker", "updateStatsUI error", e)

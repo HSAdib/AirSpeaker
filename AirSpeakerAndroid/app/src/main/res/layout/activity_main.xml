@@ -506,7 +506,7 @@
                 app:thumbColor="@color/m3_primary"
                 app:trackColorActive="@color/m3_primary"
                 app:trackColorInactive="@color/m3_surface_highest"
-                app:haloColor="#33A8C7FA" />
+                app:haloColor="@color/m3_primary_halo" />
 
             <!-- Volume / Gain Boost Slider -->
             <LinearLayout
@@ -549,7 +549,7 @@
                     app:thumbColor="@color/m3_primary"
                     app:trackColorActive="@color/m3_primary"
                     app:trackColorInactive="@color/m3_surface_highest"
-                    app:haloColor="#33A8C7FA" />
+                    app:haloColor="@color/m3_primary_halo" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnMuteToggle"
@@ -912,7 +912,7 @@
                 app:thumbColor="@color/m3_primary"
                 app:trackColorActive="@color/m3_primary"
                 app:trackColorInactive="@color/m3_surface_highest"
-                app:haloColor="#33A8C7FA" />
+                app:haloColor="@color/m3_primary_halo" />
 
             <!-- Audio Level Meter -->
             <TextView
@@ -1382,7 +1382,7 @@
                     app:thumbColor="@color/m3_primary"
                     app:trackColorActive="@color/m3_primary"
                     app:trackColorInactive="@color/m3_surface_highest"
-                    app:haloColor="#33A8C7FA" />
+                    app:haloColor="@color/m3_primary_halo" />
 
                 <!-- Connected Party Members -->
                 <TextView
@@ -1720,7 +1720,7 @@
                     app:thumbColor="@color/m3_primary"
                     app:trackColorActive="@color/m3_primary"
                     app:trackColorInactive="@color/m3_surface_highest"
-                    app:haloColor="#33A8C7FA" />
+                    app:haloColor="@color/m3_primary_halo" />
 
                 <com.hasan.airspeaker.LatencyGraphView
                     android:id="@+id/latencyGraphPartyJoin"

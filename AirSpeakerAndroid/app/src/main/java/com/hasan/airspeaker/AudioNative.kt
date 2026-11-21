@@ -1,5 +1,7 @@
 package com.hasan.airspeaker
 
+import android.util.Log
+
 data class AudioStats(
     val bufferMs: Float = 0f,
     val targetMs: Float = 30f,
@@ -32,8 +34,26 @@ data class NativeAudioStats(
 )
 
 object AudioNative {
+    private const val TAG = "AudioNative"
+
+    @Volatile var isNativeLoaded: Boolean = false
+    @Volatile var nativeLoadError: String? = null
+
     init {
-        System.loadLibrary("airspeaker_native")
+        try {
+            try {
+                System.loadLibrary("c++_shared")
+            } catch (t: Throwable) {
+                Log.w(TAG, "c++_shared explicit load skipped or not required: ${t.message}")
+            }
+            System.loadLibrary("airspeaker_native")
+            isNativeLoaded = true
+            Log.i(TAG, "airspeaker_native loaded successfully")
+        } catch (t: Throwable) {
+            isNativeLoaded = false
+            nativeLoadError = "${t.javaClass.simpleName}: ${t.message}"
+            Log.e(TAG, "Failed to load airspeaker_native: $nativeLoadError", t)
+        }
     }
 
     external fun nativeStart(port: Int): Boolean
@@ -61,8 +81,138 @@ object AudioNative {
     external fun nativeGetAdvancedStats(): DoubleArray?
     external fun nativeGetSenderIp(): String?
 
+    // Safe wrappers guarded against UnsatisfiedLinkError or failed native loading
+    fun safeSetEqBands(enabled: Boolean, gainsDb: FloatArray) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetEqBands(enabled, gainsDb)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetEqBands failed: ${t.message}")
+        }
+    }
+
+    fun safeGetTargetBufferMs(defaultMs: Float = 30f): Float {
+        if (!isNativeLoaded) return defaultMs
+        return try {
+            nativeGetTargetBufferMs()
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeGetTargetBufferMs failed: ${t.message}")
+            defaultMs
+        }
+    }
+
+    fun safeSetTargetBufferMs(targetMs: Float) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetTargetBufferMs(targetMs)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetTargetBufferMs failed: ${t.message}")
+        }
+    }
+
+    fun safeGetVolumeGain(defaultGain: Float = 1.0f): Float {
+        if (!isNativeLoaded) return defaultGain
+        return try {
+            nativeGetVolumeGain()
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeGetVolumeGain failed: ${t.message}")
+            defaultGain
+        }
+    }
+
+    fun safeSetVolumeGain(gain: Float) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetVolumeGain(gain)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetVolumeGain failed: ${t.message}")
+        }
+    }
+
+    fun safeIsMuted(): Boolean {
+        if (!isNativeLoaded) return false
+        return try {
+            nativeIsMuted()
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeIsMuted failed: ${t.message}")
+            false
+        }
+    }
+
+    fun safeSetMuted(muted: Boolean) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetMuted(muted)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetMuted failed: ${t.message}")
+        }
+    }
+
+    fun safeSetAutoMode(enabled: Boolean) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetAutoMode(enabled)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetAutoMode failed: ${t.message}")
+        }
+    }
+
+    fun safeSetPartyRelay(enabled: Boolean) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetPartyRelay(enabled)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetPartyRelay failed: ${t.message}")
+        }
+    }
+
+    fun safeIsPartyRelay(): Boolean {
+        if (!isNativeLoaded) return false
+        return try {
+            nativeIsPartyRelay()
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeIsPartyRelay failed: ${t.message}")
+            false
+        }
+    }
+
+    fun safeSetPartyPeers(peers: Array<String>) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetPartyPeers(peers)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetPartyPeers failed: ${t.message}")
+        }
+    }
+
+    fun safeSetLowLatencyMode(lowLatency: Boolean) {
+        if (!isNativeLoaded) return
+        try {
+            nativeSetLowLatencyMode(lowLatency)
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeSetLowLatencyMode failed: ${t.message}")
+        }
+    }
+
+    fun safeGetSenderIp(): String? {
+        if (!isNativeLoaded) return null
+        return try {
+            nativeGetSenderIp()
+        } catch (t: Throwable) {
+            Log.w(TAG, "safeGetSenderIp failed: ${t.message}")
+            null
+        }
+    }
+
     fun getStats(): AudioStats {
-        val arr = nativeGetStats() ?: return AudioStats()
+        if (!isNativeLoaded) return AudioStats()
+        val arr = try {
+            nativeGetStats()
+        } catch (t: Throwable) {
+            Log.w(TAG, "nativeGetStats failed: ${t.message}")
+            null
+        } ?: return AudioStats()
+
         if (arr.size < 8) return AudioStats()
         val rxPackets = if (arr.size >= 9) arr[8].toLong() else 0L
         return AudioStats(
@@ -79,7 +229,14 @@ object AudioNative {
     }
 
     fun getAdvancedStats(): NativeAudioStats {
-        val arr = nativeGetAdvancedStats() ?: return NativeAudioStats()
+        if (!isNativeLoaded) return NativeAudioStats()
+        val arr = try {
+            nativeGetAdvancedStats()
+        } catch (t: Throwable) {
+            Log.w(TAG, "nativeGetAdvancedStats failed: ${t.message}")
+            null
+        } ?: return NativeAudioStats()
+
         if (arr.size < 16) return NativeAudioStats()
         return NativeAudioStats(
             bufferMs = arr[0].toFloat(),
