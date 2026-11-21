@@ -252,10 +252,12 @@ class ControlChannel(
                         }
 
                         if (msgType == "PC_ANNOUNCE") {
-                            activePcIp = senderIp
-                            lastKnownPcIp = senderIp
-                            if (!isHostingOrExtendingParty) {
-                                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                            if (!isPartyJoinerActive && !Companion.isPartyJoinerActive) {
+                                activePcIp = senderIp
+                                lastKnownPcIp = senderIp
+                                if (!isHostingOrExtendingParty) {
+                                    AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                                }
                             }
                             val pcName = json.optString("pc_name", "")
                             if (pcName.isNotBlank()) {
@@ -339,6 +341,12 @@ class ControlChannel(
                     activePcIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
                     lastKnownPcIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
                     AudioNative.nativeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+                    if (isPartyJoinerActive || Companion.isPartyJoinerActive) {
+                        joinedPartyHostIp?.takeIf { !isOwnLocalIp(it) }?.let { unicastTargets.add(it) }
+                    }
+                    if (isHostingOrExtendingParty) {
+                        partyPeerIps.forEach { if (!isOwnLocalIp(it)) unicastTargets.add(it) }
+                    }
 
                     for (target in unicastTargets) {
                         try {
@@ -454,6 +462,7 @@ class ControlChannel(
         @Volatile var lastKnownPcIp: String? = null
         @Volatile var lastKnownPcName: String = "PC"
         val partyPeerIps = java.util.concurrent.CopyOnWriteArraySet<String>()
+        val manualPartyPeerIps = java.util.concurrent.CopyOnWriteArraySet<String>()
         @Volatile var joinedPartyHostIp: String? = null
         val partyPeerLastSeen = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val discoveredPartyHosts = java.util.concurrent.ConcurrentHashMap<String, DiscoveredPartyHost>()
@@ -474,10 +483,11 @@ class ControlChannel(
                 }
             }
 
-            // Prune joiners older than 10.0 seconds
+            // Prune joiners older than 10.0 seconds (never prune manually added peers)
             val peerIt = partyPeerLastSeen.entries.iterator()
             while (peerIt.hasNext()) {
                 val entry = peerIt.next()
+                if (manualPartyPeerIps.contains(entry.key)) continue
                 if (now - entry.value > 10000L) {
                     peerIt.remove()
                     partyPeerIps.remove(entry.key)
@@ -507,7 +517,8 @@ class ControlChannel(
                         val addr = addrs.nextElement()
                         if (!addr.isLoopbackAddress && addr is Inet4Address) {
                             val ip = addr.hostAddress ?: continue
-                            if (name.startsWith("ap") || name.startsWith("swlan") || name.startsWith("wlan1") || name.startsWith("SoftAp", ignoreCase = true) || ip.startsWith("192.168.43.")) {
+                            val isHotspotIface = name.startsWith("ap") || name.startsWith("swlan") || name.startsWith("wlan1") || name.startsWith("wlan2") || name.contains("softap") || name.contains("tether") || ((name.startsWith("wlan") || name.startsWith("ap")) && ip.endsWith(".1"))
+                            if (isHotspotIface || ip.startsWith("192.168.43.")) {
                                 hotspotIp = ip
                             } else if (name.startsWith("wlan") || name.startsWith("rndis") || name.startsWith("usb")) {
                                 if (wlanIp == null) wlanIp = ip

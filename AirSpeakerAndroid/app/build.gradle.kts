@@ -15,7 +15,16 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "1.0.0"
+                val resolvedVersion = System.getenv("AIRSPEAKER_VERSION")
+            ?.trim()
+            ?.removePrefix("v")
+            ?.takeIf { it.isNotBlank() }
+            ?: System.getenv("GITHUB_REF_NAME")
+                ?.trim()
+                ?.takeIf { it.startsWith("v") && it.length > 1 }
+                ?.removePrefix("v")
+            ?: "1.0.2"
+        versionName = resolvedVersion
 
         buildConfigField("String", "BUILD_SHA", "\"${System.getenv("GITHUB_SHA")?.take(7) ?: "dev"}\"")
 

@@ -352,6 +352,8 @@ class AirSpeakerApp:
         self._schedule_ui_update()
 
         self._latest_update_info: Optional[Dict[str, Any]] = None
+        self._update_downloading: bool = False
+        self._update_cancel_event = threading.Event()
         self.root.after(2500, self._check_updates_background)
 
     def _build_target_buffer_card(self, parent: tk.Misc, title: str = " Target Buffer & Stability Presets ") -> tk.LabelFrame:
@@ -557,6 +559,7 @@ class AirSpeakerApp:
             self.update_bar_frame, text="", bg=PANEL_BG, fg=PRIMARY, font=FONT_MONO_BOLD
         )
         self.update_bar_label.pack(side="left", padx=8, pady=3)
+        self.update_bar_progress = ttk.Progressbar(self.update_bar_frame, length=120, mode="determinate")
         self.update_now_btn = StudioButton(
             self.update_bar_frame, text="Update Now", bg="#004D25", fg="#00FF99",
             font=FONT_MONO_BOLD, padx=6, pady=2, command=self._on_click_update_now
@@ -1085,12 +1088,12 @@ class AirSpeakerApp:
         )
         self.party_join_discovered_listbox.pack(side="left", fill="both", expand=True)
         disc_scrollbar.config(command=self.party_join_discovered_listbox.yview)
-        self.party_join_discovered_listbox.bind("<Double-Button-1>", self._on_select_discovered_host)
+        self.party_join_discovered_listbox.bind("<Double-Button-1>", lambda e: self._on_join_selected_host())
         self.party_join_discovered_listbox.bind("<<ListboxSelect>>", self._on_select_discovered_host)
 
         disc_btn_row = tk.Frame(jf_disc, bg=BG)
         disc_btn_row.pack(fill="x", pady=(4, 0))
-        ttk.Button(disc_btn_row, text="🎯 Connect / Use Selected Host", command=self._on_select_discovered_host).pack(side="left")
+        ttk.Button(disc_btn_row, text="🎯 Connect / Use Selected Host", command=self._on_join_selected_host).pack(side="left")
         ttk.Button(disc_btn_row, text="↻ Rescan Hosts", command=self._refresh_discovered_hosts_ui).pack(side="left", padx=6)
 
         # Host Address & QR Link / Paste Section
@@ -1266,6 +1269,50 @@ class AirSpeakerApp:
         ttk.Button(sync_row, text="↻ Refresh Network Adapters", command=self._refresh_adapters).pack(side="left", padx=(0, 6))
         ttk.Button(sync_row, text="📤 Sync Config to Remote", command=self._on_local_setting_changed).pack(side="left")
 
+        # Application Version & Updates Frame
+        up_f = tk.LabelFrame(f, text=" Application Version & Updates ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
+        up_f.pack(fill="x", **pad)
+
+        ver_row = tk.Frame(up_f, bg=BG)
+        ver_row.pack(fill="x", padx=4, pady=2)
+        build_str = f" (Build: {BUILD_SHA})" if BUILD_SHA != "dev" else ""
+        tk.Label(
+            ver_row, text=f"Version: v{APP_VERSION}{build_str}",
+            bg=BG, fg=ACCENT, font=FONT_MONO_BOLD
+        ).pack(side="left", padx=4)
+
+        self.btn_check_updates = StudioButton(
+            ver_row, text="🔄 Check for Updates", bg="#15222E", fg=PRIMARY,
+            font=FONT_MONO_BOLD, padx=8, pady=2, command=self._on_check_updates_manual
+        )
+        self.btn_check_updates.pack(side="right", padx=4)
+
+        self.update_status_label = tk.Label(up_f, text="", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, anchor="w")
+        self.update_status_label.pack(fill="x", padx=4, pady=(1, 2))
+
+        # Progress frame for active update downloads
+        self.update_progress_frame = tk.Frame(up_f, bg=BG)
+        self.update_progress_bar = ttk.Progressbar(self.update_progress_frame, mode="determinate")
+        self.update_progress_bar.pack(fill="x", padx=4, pady=2)
+
+        prog_detail_row = tk.Frame(self.update_progress_frame, bg=BG)
+        prog_detail_row.pack(fill="x", padx=4, pady=2)
+
+        self.update_progress_label = tk.Label(prog_detail_row, text="", bg=BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w")
+        self.update_progress_label.pack(side="left", fill="x", expand=True)
+
+        self.btn_cancel_update = StudioButton(
+            prog_detail_row, text="Cancel", bg=ERROR_BG, fg=ERROR_COLOR,
+            font=FONT_MONO_SM, padx=6, pady=1, command=self._on_cancel_update_download, state="disabled"
+        )
+        self.btn_cancel_update.pack(side="right", padx=2)
+
+        self.btn_open_downloads = StudioButton(
+            prog_detail_row, text="Open Downloads", bg="#15222E", fg=FG_MUTED,
+            font=FONT_MONO_SM, padx=6, pady=1, command=lambda: updater.open_downloads_folder(str(updater.get_downloads_dir()))
+        )
+        self.btn_open_downloads.pack(side="right", padx=2)
+
     # ------------------------------------------------------------------
     # TAB 3: Windows Virtual Device & Tools
     # ------------------------------------------------------------------
@@ -1349,26 +1396,7 @@ class AirSpeakerApp:
             bg=BG, fg=FG, selectcolor="#333333", font=FONT_MONO_SM
         ).pack(side="right", padx=6, pady=4)
 
-        # Application Version & Updates Frame
-        up_f = tk.LabelFrame(f, text=" Application Version & Updates ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=4)
-        up_f.pack(fill="x", **pad)
 
-        ver_row = tk.Frame(up_f, bg=BG)
-        ver_row.pack(fill="x", padx=4, pady=2)
-        build_str = f" (Build: {BUILD_SHA})" if BUILD_SHA != "dev" else ""
-        tk.Label(
-            ver_row, text=f"Version: v{APP_VERSION}{build_str}",
-            bg=BG, fg=ACCENT, font=FONT_MONO_BOLD
-        ).pack(side="left", padx=4)
-
-        self.btn_check_updates = StudioButton(
-            ver_row, text="🔄 Check for Updates", bg="#15222E", fg=PRIMARY,
-            font=FONT_MONO_BOLD, padx=8, pady=2, command=self._on_check_updates_manual
-        )
-        self.btn_check_updates.pack(side="right", padx=4)
-
-        self.update_status_label = tk.Label(up_f, text="", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, anchor="w")
-        self.update_status_label.pack(fill="x", padx=4, pady=(1, 2))
 
         self._check_virtual_device_status()
 
@@ -1721,6 +1749,10 @@ class AirSpeakerApp:
         self._party_view_state = "JOIN"
         self.party_mode_var.set(False)
         self.party_role_var.set("JOIN")
+        with self._party_lock:
+            self._party_devices.clear()
+        if self._udp_sender:
+            self._udp_sender.set_party_targets([])
         if self._control_listener:
             self._control_listener.set_party_mode(False)
         if hasattr(self, "party_chooser_frame"):
@@ -1761,7 +1793,7 @@ class AirSpeakerApp:
         active = not self.party_extend_var.get()
         self.party_extend_var.set(active)
         if self._control_listener:
-            self._control_listener.set_party_mode(active)
+            self._control_listener.set_party_mode(active, is_extended=active)
         if active:
             if hasattr(self, "party_extend_details_frame"):
                 self.party_extend_details_frame.pack(fill="x", expand=True)
@@ -2085,6 +2117,7 @@ class AirSpeakerApp:
                     "app": "AirSpeaker",
                     "version": 1,
                     "party_join": True,
+                    "party_host_ip": host_ip,
                     "is_party_host": False,
                     "is_extended_host": bool(self.party_extend_var.get()),
                     "device": socket.gethostname(),
@@ -2117,6 +2150,7 @@ class AirSpeakerApp:
                         "version": 1,
                         "party_join": False,
                         "party_leave": True,
+                        "party_host_ip": host_ip,
                         "is_party_host": False,
                         "is_extended_host": False,
                         "device": socket.gethostname(),
@@ -3136,6 +3170,7 @@ class AirSpeakerApp:
                                     "app": "AirSpeaker",
                                     "version": 1,
                                     "party_join": True,
+                                    "party_host_ip": host_ip,
                                     "is_party_host": False,
                                     "is_extended_host": bool(self.party_extend_var.get()),
                                     "device": socket.gethostname(),
@@ -3210,13 +3245,15 @@ class AirSpeakerApp:
                                 if self._normal_streaming and self._udp_sender:
                                     self._udp_sender.update_target(sender_ip, int(self.ip_port_var.get() or AUDIO_PORT))
                             if data.get("party_join") is True:
-                                self._register_party_device(sender_ip, data.get("device", "Phone Joiner"), data.get("audio_port", AUDIO_PORT), force=True)
+                                if self._is_addressed_to_this_pc(data) and (self._party_view_state == "HOST" or self._party_streaming or self.party_extend_var.get()):
+                                    self._register_party_device(sender_ip, data.get("device", "Phone Joiner"), data.get("audio_port", AUDIO_PORT), force=False)
                             elif data.get("party_leave") is True:
-                                with self._party_lock:
-                                    self._party_devices.pop(sender_ip, None)
-                                if self._udp_sender:
-                                    self._udp_sender.remove_party_target(sender_ip)
-                                self._refresh_party_ui()
+                                if self._is_addressed_to_this_pc(data):
+                                    with self._party_lock:
+                                        self._party_devices.pop(sender_ip, None)
+                                    if self._udp_sender:
+                                        self._udp_sender.remove_party_target(sender_ip)
+                                    self._refresh_party_ui()
 
                             is_host = bool(data.get("is_party_host") or data.get("is_extended_host"))
                             if is_host:
@@ -3233,14 +3270,15 @@ class AirSpeakerApp:
                         host_ip = data.get("_sender_ip")
                         if host_ip and host_ip not in ("127.0.0.1", "0.0.0.0"):
                             dev_name = data.get("device") or data.get("pc_name") or "PC Host"
-                            if data.get("is_party_host"):
+                            is_host = bool(data.get("is_party_host") or data.get("is_extended_host"))
+                            if is_host:
                                 self._discovered_party_hosts[host_ip] = {
                                     "name": dev_name,
                                     "last_seen": time.monotonic(),
                                     "port": data.get("audio_port", AUDIO_PORT),
                                 }
                                 self._refresh_discovered_hosts_ui()
-                            elif data.get("party_leave") is True or data.get("is_party_host") is False:
+                            elif data.get("party_leave") is True or not is_host:
                                 self._discovered_party_hosts.pop(host_ip, None)
                                 self._refresh_discovered_hosts_ui()
                     elif kind == "beacon":
@@ -3313,13 +3351,15 @@ class AirSpeakerApp:
                             self._update_codec_ui_state()
                             self._on_local_setting_changed()
                         if msg.get("party_join") is True:
-                            self._register_party_device(best_ip, dev_name or "Phone Joiner", msg.get("audio_port", AUDIO_PORT), force=True)
+                            if self._is_addressed_to_this_pc(msg) and (self._party_view_state == "HOST" or self._party_streaming or self.party_extend_var.get()):
+                                self._register_party_device(best_ip, dev_name or "Phone Joiner", msg.get("audio_port", AUDIO_PORT), force=False)
                         elif msg.get("party_leave") is True:
-                            with self._party_lock:
-                                self._party_devices.pop(best_ip, None)
-                            if self._udp_sender:
-                                self._udp_sender.remove_party_target(best_ip)
-                            self._refresh_party_ui()
+                            if self._is_addressed_to_this_pc(msg):
+                                with self._party_lock:
+                                    self._party_devices.pop(best_ip, None)
+                                if self._udp_sender:
+                                    self._udp_sender.remove_party_target(best_ip)
+                                self._refresh_party_ui()
 
                         is_host = bool(msg.get("is_party_host") or msg.get("is_extended_host"))
                         if is_host:
@@ -3344,12 +3384,12 @@ class AirSpeakerApp:
                         except Exception:
                             pass
 
-                        if not is_ip_focused and self._manual_ip_override is None:
+                        if not is_ip_focused and self._manual_ip_override is None and not msg.get("party_join"):
                             current_ip = self.ip_var.get().strip()
                             should_update_ip = (
                                 not current_ip
                                 or current_ip in ("127.0.0.1", "0.0.0.0", "255.255.255.255")
-                                or (current_ip not in candidates)
+                                or (not self._streaming and current_ip not in candidates)
                             )
                             if not should_update_ip and active_adapter_ip:
                                 act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
@@ -3400,13 +3440,15 @@ class AirSpeakerApp:
                             else:
                                 self.conn_device_ip_var.set(f"{cur_ip}  •  DETECTED (PLAYER OFF — Tap Start on Phone)")
                         if sender_ip and s.get("party_join") is True:
-                            self._register_party_device(sender_ip, dev_name or "Phone Joiner", s.get("audio_port", AUDIO_PORT))
+                            if self._is_addressed_to_this_pc(s) and (self._party_view_state == "HOST" or self._party_streaming or self.party_extend_var.get()):
+                                self._register_party_device(sender_ip, dev_name or "Phone Joiner", s.get("audio_port", AUDIO_PORT), force=False)
                         elif sender_ip and s.get("party_join") is False:
-                            with self._party_lock:
-                                self._party_devices.pop(sender_ip, None)
-                            if self._udp_sender:
-                                self._udp_sender.remove_party_target(sender_ip)
-                            self._refresh_party_ui()
+                            if self._is_addressed_to_this_pc(s):
+                                with self._party_lock:
+                                    self._party_devices.pop(sender_ip, None)
+                                if self._udp_sender:
+                                    self._udp_sender.remove_party_target(sender_ip)
+                                self._refresh_party_ui()
 
                         # Remote phone STATS update SERVE tab metrics only; PLAY tab reads local self._phone_receiver.get_stats()
                         if not self._play_active:
@@ -3719,6 +3761,21 @@ TABS:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_cancel_update_download(self) -> None:
+        if getattr(self, "_update_downloading", False):
+            self._update_cancel_event.set()
+            if hasattr(self, "btn_cancel_update"):
+                self.btn_cancel_update.config(state="disabled")
+            if hasattr(self, "update_status_label"):
+                self.update_status_label.config(text="Cancelling download...", fg=WARN)
+
+    def _is_addressed_to_this_pc(self, msg: dict) -> bool:
+        target_host = (msg.get("party_host_ip") or "").strip()
+        if not target_host or target_host == "255.255.255.255":
+            return True
+        local_ips = {a.get("ip") for a in self._adapter_data if a.get("ip")}
+        return target_host in local_ips
+
     def _show_update_bar(self, info: Dict[str, Any]) -> None:
         self._latest_update_info = info
         v_disp = info.get("display_version", info.get("tag_name", ""))
@@ -3729,55 +3786,140 @@ TABS:
     def _on_click_update_now(self) -> None:
         if not self._latest_update_info:
             return
+        if getattr(self, "_update_downloading", False):
+            return
         info = self._latest_update_info
         plat = info.get("platform", updater.get_platform())
         download_url = info.get("download_url", "")
+        asset_name = info.get("asset_name", "") or "AirSpeaker-Update"
         html_url = info.get("html_url", "")
 
-        if plat == "windows" and info.get("is_windows_installed", updater.is_windows_installed()):
-            self.update_bar_label.config(text="⏳ Downloading update installer in background...")
-            self.update_now_btn.config(state="disabled")
+        if not download_url or download_url == html_url:
+            webbrowser.open(html_url or download_url)
+            return
 
-            def _on_done(installer_path):
-                def _launch_and_exit():
-                    self.update_bar_label.config(text="Launching installer and exiting Air Speaker...")
-                    # Quit app after short delay so Inno Setup can overwrite files without lock errors
-                    self.root.after(800, self._quit_app)
-                self.root.after(0, _launch_and_exit)
+        self._update_downloading = True
+        self._update_cancel_event.clear()
+        self.update_now_btn.config(state="disabled")
+        if hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.config(state="disabled")
+        if hasattr(self, "btn_cancel_update"):
+            self.btn_cancel_update.config(state="normal")
+        if hasattr(self, "update_progress_frame"):
+            self.update_progress_frame.pack(fill="x", padx=4, pady=4)
+        if hasattr(self, "update_bar_progress"):
+            self.update_bar_progress.pack(side="left", padx=4, pady=2)
+            self.update_bar_progress.config(mode="indeterminate")
+            self.update_bar_progress.start(10)
 
-            def _on_err(err):
-                self.root.after(0, lambda: [
-                    webbrowser.open(download_url or html_url),
-                    self.update_bar_label.config(text="Download failed; opened browser."),
-                    self.update_now_btn.config(state="normal"),
-                ])
+        init_txt = f"Downloading {asset_name} to Downloads folder..."
+        self.update_bar_label.config(text=init_txt)
+        if hasattr(self, "update_status_label"):
+            self.update_status_label.config(text=init_txt, fg=PRIMARY)
+        if hasattr(self, "update_progress_label"):
+            self.update_progress_label.config(text=init_txt)
 
-            updater.download_and_run_windows_installer(download_url, on_complete=_on_done, on_error=_on_err)
+        def _on_progress(downloaded: int, total: int, speed: float) -> None:
+            def _apply():
+                pct = int((downloaded / total) * 100) if total > 0 else 0
+                pct_str = f" ({pct}%)" if total > 0 else ""
+                speed_str = f" • {updater.format_speed(speed)}" if speed > 0 else ""
+                txt = f"{updater.format_bytes(downloaded)} / {updater.format_bytes(total) if total > 0 else '??'}{pct_str}{speed_str}"
+                self.update_bar_label.config(text=f"⬇ {asset_name}: {txt}")
+                if hasattr(self, "update_progress_label"):
+                    self.update_progress_label.config(text=txt)
+                if hasattr(self, "update_progress_bar"):
+                    if total > 0:
+                        self.update_progress_bar.config(mode="determinate", value=pct)
+                    else:
+                        self.update_progress_bar.config(mode="indeterminate")
+            self.root.after(0, _apply)
 
-        elif plat == "linux":
-            msg = (
-                f"Air Speaker {info.get('display_version')} is available!\n\n"
-                f"Would you like to run the in-place update command now?\n\n"
-                f"  {updater.LINUX_INSTALL_CMD}\n\n"
-                f"• Click [Yes] to run the update command in a terminal.\n"
-                f"• Click [No] to open GitHub Releases in your web browser."
-            )
-            ans = messagebox.askyesnocancel("Air Speaker Update", msg)
-            if ans is True:
-                try:
-                    cmd = f"{updater.LINUX_INSTALL_CMD} && echo 'Update complete! Press Enter to exit.' && read"
-                    subprocess.Popen(["x-terminal-emulator", "-e", "bash", "-c", cmd])
-                except Exception:
-                    try:
-                        subprocess.Popen(["gnome-terminal", "--", "bash", "-c", cmd])
-                    except Exception:
-                        subprocess.Popen(["bash", "-c", updater.LINUX_INSTALL_CMD])
-            elif ans is False:
-                webbrowser.open(html_url or download_url)
+        def _on_complete(saved_path: str) -> None:
+            def _finish():
+                self._update_downloading = False
+                self.update_now_btn.config(state="normal")
+                if hasattr(self, "btn_check_updates"):
+                    self.btn_check_updates.config(state="normal")
+                if hasattr(self, "btn_cancel_update"):
+                    self.btn_cancel_update.config(state="disabled")
+                if hasattr(self, "update_bar_progress"):
+                    self.update_bar_progress.stop()
+                    self.update_bar_progress.pack_forget()
+                if hasattr(self, "update_progress_bar"):
+                    self.update_progress_bar.config(mode="determinate", value=100)
+                done_txt = f"✔ Saved to Downloads: {saved_path}"
+                self.update_bar_label.config(text=f"✔ Downloaded to Downloads/{asset_name}")
+                if hasattr(self, "update_status_label"):
+                    self.update_status_label.config(text=done_txt, fg=ACCENT)
+                if hasattr(self, "update_progress_label"):
+                    self.update_progress_label.config(text=done_txt)
 
-        else:
-            target_url = download_url or html_url
-            webbrowser.open(target_url)
+                if plat == "windows" and info.get("is_windows_installed", updater.is_windows_installed()):
+                    if messagebox.askyesno(
+                        "Update Downloaded",
+                        f"Update saved to:\n{saved_path}\n\nLaunch installer now and close Air Speaker?"
+                    ):
+                        updater.launch_downloaded_windows_installer(saved_path)
+                        self.root.after(600, self._quit_app)
+                elif plat == "windows":
+                    if messagebox.askyesno(
+                        "Update Downloaded",
+                        f"Portable update saved to:\n{saved_path}\n\nOpen Downloads folder?"
+                    ):
+                        updater.open_downloads_folder(saved_path)
+                elif plat == "macos":
+                    if messagebox.askyesno(
+                        "Update Downloaded",
+                        f"DMG saved to:\n{saved_path}\n\nOpen installer DMG now?"
+                    ):
+                        subprocess.Popen(["open", saved_path])
+                elif plat == "linux":
+                    ans = messagebox.askyesnocancel(
+                        "Update Downloaded",
+                        f"Update saved to:\n{saved_path}\n\n"
+                        f"• Click [Yes] to run the in-place Linux updater.\n"
+                        f"• Click [No] to open the Downloads folder."
+                    )
+                    if ans is True:
+                        cmd = f"{updater.LINUX_INSTALL_CMD} && echo 'Update complete! Press Enter.' && read"
+                        for term in (["x-terminal-emulator", "-e", "bash", "-c", cmd],
+                                     ["gnome-terminal", "--", "bash", "-c", cmd],
+                                     ["konsole", "-e", "bash", "-c", cmd]):
+                            try:
+                                subprocess.Popen(term)
+                                break
+                            except Exception:
+                                continue
+                    elif ans is False:
+                        updater.open_downloads_folder(saved_path)
+            self.root.after(0, _finish)
+
+        def _on_error(exc: Exception) -> None:
+            def _fail():
+                self._update_downloading = False
+                self.update_now_btn.config(state="normal")
+                if hasattr(self, "btn_check_updates"):
+                    self.btn_check_updates.config(state="normal")
+                if hasattr(self, "btn_cancel_update"):
+                    self.btn_cancel_update.config(state="disabled")
+                if hasattr(self, "update_bar_progress"):
+                    self.update_bar_progress.stop()
+                    self.update_bar_progress.pack_forget()
+                msg = "Download cancelled." if isinstance(exc, InterruptedError) else f"Download failed: {exc}"
+                self.update_bar_label.config(text=msg)
+                if hasattr(self, "update_status_label"):
+                    self.update_status_label.config(text=msg, fg=WARN)
+            self.root.after(0, _fail)
+
+        updater.download_update_to_downloads(
+            download_url=download_url,
+            filename=asset_name,
+            on_progress=_on_progress,
+            on_complete=_on_complete,
+            on_error=_on_error,
+            cancel_event=self._update_cancel_event,
+        )
 
     def _on_click_skip_update(self) -> None:
         if self._latest_update_info:
@@ -3791,7 +3933,7 @@ TABS:
 
         def _worker():
             try:
-                info = updater.check_for_updates()
+                info = updater.check_for_updates(raise_on_error=True)
                 if info and info.get("available"):
                     def _show():
                         self.btn_check_updates.config(state="normal")
@@ -3805,17 +3947,23 @@ TABS:
                         self.update_status_label.config(text=f"Air Speaker v{APP_VERSION} is up to date.", fg=ACCENT)
                         messagebox.showinfo("Up to Date", f"Air Speaker v{APP_VERSION} is currently up to date!")
                     self.root.after(0, _up_to_date)
+            except urllib.error.HTTPError as exc:
+                def _http_err():
+                    self.btn_check_updates.config(state="normal")
+                    if exc.code == 403:
+                        msg = "GitHub API rate limit exceeded — try again in a few minutes."
+                    else:
+                        msg = f"Update check failed (HTTP {exc.code})."
+                    self.update_status_label.config(text=msg, fg=WARN)
+                self.root.after(0, _http_err)
             except Exception as exc:
                 def _err():
                     self.btn_check_updates.config(state="normal")
-                    self.update_status_label.config(text="Could not check for updates (offline or rate limited).", fg=WARN)
+                    self.update_status_label.config(text="Could not check for updates (offline).", fg=WARN)
                 self.root.after(0, _err)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-
-
-# Backward compatibility alias
 PhoneSpeakerApp = AirSpeakerApp
 
 def run_ui(cfg: Dict[str, Any]) -> None:

@@ -2201,6 +2201,25 @@
                     android:textSize="11sp"
                     android:fontFamily="sans-serif"
                     android:visibility="gone" />
+
+                <LinearLayout android:id="@+id/layoutUpdateDownload" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_width="match_parent" android:orientation="vertical" android:visibility="gone">
+
+                    <ProgressBar android:id="@+id/pbUpdateDownload" android:layout_height="8dp" android:layout_width="match_parent" android:max="100" android:progress="0" android:progressBackgroundTint="@color/m3_surface_highest" android:progressTint="@color/m3_tertiary" style="?android:attr/progressBarStyleHorizontal"/>
+
+                    <LinearLayout android:gravity="center_vertical" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_width="match_parent" android:orientation="horizontal">
+
+                        <TextView android:fontFamily="monospace" android:id="@+id/tvUpdateProgress" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="0.0 MB / 0.0 MB (0%) • 0 KB/s" android:textColor="@color/m3_primary" android:textSize="11sp"/>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCancelUpdateDownload"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:text="Cancel"
+                            android:textColor="@color/m3_error"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 

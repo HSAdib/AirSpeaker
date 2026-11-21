@@ -37,6 +37,24 @@ def venv_python() -> Path:
     return VENV / "bin" / "python"
 
 
+def resolve_app_version() -> str:
+    env_ver = (os.environ.get("AIRSPEAKER_VERSION") or "").strip().lstrip("vV")
+    if env_ver:
+        return env_ver
+    ref_name = (os.environ.get("GITHUB_REF_NAME") or "").strip()
+    if ref_name.startswith(("v", "V")) and len(ref_name) > 1:
+        return ref_name[1:]
+    try:
+        tag = subprocess.check_output(
+            ["git", "describe", "--tags", "--exact-match"], stderr=subprocess.DEVNULL
+        ).decode("utf-8").strip()
+        if tag.startswith(("v", "V")):
+            return tag[1:]
+    except Exception:
+        pass
+    return "1.0.2"
+
+
 def write_build_info() -> str:
     env_sha = os.environ.get("GITHUB_SHA")
     sha = "dev"
@@ -48,9 +66,15 @@ def write_build_info() -> str:
             sha = out.decode("utf-8").strip()
         except Exception:
             sha = "dev"
+    app_ver = resolve_app_version()
     build_info_path = ROOT / "src" / "_build_info.py"
-    build_info_path.write_text(f'BUILD_SHA = "{sha}"\n', encoding="utf-8")
-    print(f"Stamped BUILD_SHA = '{sha}' -> {build_info_path}", flush=True)
+    build_info_path.write_text(
+        f'APP_VERSION = "{app_ver}"
+BUILD_SHA = "{sha}"
+',
+        encoding="utf-8",
+    )
+    print(f"Stamped APP_VERSION = '{app_ver}', BUILD_SHA = '{sha}' -> {build_info_path}", flush=True)
     return sha
 
 

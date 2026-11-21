@@ -11,6 +11,7 @@ import android.util.Log
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
@@ -102,6 +103,15 @@ class InternalAudioStreamer {
     val packetsSent = AtomicLong(0L)
 
     private val targetIpRef = AtomicReference("255.255.255.255")
+    private val addrCache = ConcurrentHashMap<String, InetAddress>()
+
+    private fun resolveAddress(ip: String): InetAddress? {
+        val clean = ip.trim()
+        if (clean.isEmpty() || clean == "0.0.0.0") return null
+        return addrCache.computeIfAbsent(clean) {
+            try { InetAddress.getByName(clean) } catch (_: Exception) { null }
+        }
+    }
     private val targetPort = 5004
 
     @Volatile
@@ -327,12 +337,14 @@ class InternalAudioStreamer {
                 val packetBytes = packetBuf.array()
                 val targetIpStr = targetIpRef.get()
                 if (targetIpStr.isNotBlank() && targetIpStr != "0.0.0.0") {
-                    try {
-                        val targetAddr = InetAddress.getByName(targetIpStr)
-                        val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, targetPort)
-                        sock.send(dgram)
-                    } catch (e: Exception) {
-                        // Ignore transient network errors
+                    val targetAddr = resolveAddress(targetIpStr)
+                    if (targetAddr != null) {
+                        try {
+                            val dgram = DatagramPacket(packetBytes, packetSize, targetAddr, targetPort)
+                            sock.send(dgram)
+                        } catch (e: Exception) {
+                            // Ignore transient network errors
+                        }
                     }
                 }
 
@@ -340,10 +352,13 @@ class InternalAudioStreamer {
                     for (localIp in ControlChannel.getLocalIpv4Addresses()) {
                         val parts = localIp.split(".")
                         if (parts.size == 4 && !parts[0].startsWith("127")) {
-                            val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
-                            try {
-                                sock.send(DatagramPacket(packetBytes, packetSize, InetAddress.getByName("$prefix.255"), targetPort))
-                            } catch (_: Exception) {}
+                            val bcastIp = "${parts[0]}.${parts[1]}.${parts[2]}.255"
+                            val bcastAddr = resolveAddress(bcastIp)
+                            if (bcastAddr != null) {
+                                try {
+                                    sock.send(DatagramPacket(packetBytes, packetSize, bcastAddr, targetPort))
+                                } catch (_: Exception) {}
+                            }
                         }
                     }
                 }
@@ -351,11 +366,13 @@ class InternalAudioStreamer {
                 if (ControlChannel.isHostingOrExtendingParty && ControlChannel.partyPeerIps.isNotEmpty()) {
                     for (peerIp in ControlChannel.partyPeerIps) {
                         if (peerIp != targetIpStr) {
-                            try {
-                                val peerAddr = InetAddress.getByName(peerIp)
-                                val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, targetPort)
-                                sock.send(peerDgram)
-                            } catch (_: Exception) {}
+                            val peerAddr = resolveAddress(peerIp)
+                            if (peerAddr != null) {
+                                try {
+                                    val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, targetPort)
+                                    sock.send(peerDgram)
+                                } catch (_: Exception) {}
+                            }
                         }
                     }
                 }

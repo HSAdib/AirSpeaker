@@ -2,16 +2,18 @@
 version.py — Application version and GitHub repository identifiers.
 """
 
-import os
-import sys
-
-APP_VERSION = "1.0.0"
 GITHUB_REPO = "HSAdib/AirSpeaker"
+APP_VERSION = "1.0.2"
+BUILD_SHA = "dev"
 
 try:
-    from _build_info import BUILD_SHA
+    import _build_info as _bi
+    APP_VERSION = getattr(_bi, "APP_VERSION", APP_VERSION)
+    BUILD_SHA = getattr(_bi, "BUILD_SHA", BUILD_SHA)
 except ImportError:
     try:
-        from src._build_info import BUILD_SHA
+        from src import _build_info as _bi
+        APP_VERSION = getattr(_bi, "APP_VERSION", APP_VERSION)
+        BUILD_SHA = getattr(_bi, "BUILD_SHA", BUILD_SHA)
     except ImportError:
-        BUILD_SHA = "dev"
+        pass

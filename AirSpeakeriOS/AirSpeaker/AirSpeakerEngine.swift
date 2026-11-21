@@ -461,6 +461,19 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var discoveredPartyHosts: [DiscoveredHost] = []
     @Published public var currentPartyHostIp: String = ""
     @Published public var statusMessage: String = "Ready"
+    @Published public var partyBroadcastInternal: Bool = false
+
+    @Published public var updateAssetName: String = "AirSpeaker-v1-iOS.ipa"
+    @Published public var isDownloadingUpdate: Bool = false
+    @Published public var updateDownloadProgress: Double = 0.0
+    @Published public var updateDownloadDetailText: String = ""
+    @Published public var downloadedUpdateFileUrl: URL? = nil
+
+    private var updateDownloadSession: URLSession?
+    private var updateDownloadTask: URLSessionDownloadTask?
+    private var updateDownloadLastTime: TimeInterval = 0
+    private var updateDownloadLastBytes: Int64 = 0
+    private var updateDownloadEmaSpeed: Double = 0
 
     // Slider debouncing and dragging state
     public var isUserDraggingSlider: Bool = false
@@ -1605,13 +1618,15 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         defer { socketLock.unlock() }
         guard serveTxSocket >= 0 else { return }
 
-        var destAddr = sockaddr_in()
-        destAddr.sin_family = sa_family_t(AF_INET)
-        destAddr.sin_port = in_port_t(5004).bigEndian
-        if inet_pton(AF_INET, toIp, &destAddr.sin_addr) == 1 {
-            withUnsafePointer(to: &destAddr) { addrPtr in
-                _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+        if toIp != "0.0.0.0" {
+            var destAddr = sockaddr_in()
+            destAddr.sin_family = sa_family_t(AF_INET)
+            destAddr.sin_port = in_port_t(5004).bigEndian
+            if inet_pton(AF_INET, toIp, &destAddr.sin_addr) == 1 {
+                withUnsafePointer(to: &destAddr) { addrPtr in
+                    _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                        sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
                 }
             }
         }
@@ -1758,19 +1773,23 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 discoveredPartyHosts.removeAll { $0.ip == senderIp }
             }
 
-            // Downstream peer discovery
+            // Downstream peer discovery (verify party_host_ip target)
             if (isPartyHost || isPartyExtending) {
-                let isPartyLeave = payload["party_leave"] as? Bool ?? false
-                if isPartyJoin == true && !isHost {
-                    peersLock.lock()
-                    partyPeerIps.insert(senderIp)
-                    peersLock.unlock()
-                    updatePartyMember(name: dev, ip: senderIp)
-                } else if isPartyLeave {
-                    peersLock.lock()
-                    partyPeerIps.remove(senderIp)
-                    peersLock.unlock()
-                    partyMembers.removeAll { $0.ip == senderIp }
+                let targetHost = (payload["party_host_ip"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let isForThisHost = targetHost.isEmpty || targetHost == "255.255.255.255" || AirSpeakerEngine.getLocalIpv4Addresses().contains(targetHost)
+                if isForThisHost {
+                    let isPartyLeave = payload["party_leave"] as? Bool ?? false
+                    if isPartyJoin == true && !isHost {
+                        peersLock.lock()
+                        partyPeerIps.insert(senderIp)
+                        peersLock.unlock()
+                        updatePartyMember(name: dev, ip: senderIp)
+                    } else if isPartyLeave {
+                        peersLock.lock()
+                        partyPeerIps.remove(senderIp)
+                        peersLock.unlock()
+                        partyMembers.removeAll { $0.ip == senderIp }
+                    }
                 }
             }
 
@@ -1937,7 +1956,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         isPartyHost = true
         isPartyHostBroadcasting = true
         syncRelayFlags()
-        startSpeakerPlayer()
+        if partyBroadcastInternal {
+            startServingInternalAudio(targetIp: "0.0.0.0")
+        } else {
+            startSpeakerPlayer()
+        }
         broadcastBeacon()
     }
 
@@ -1946,7 +1969,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         isPartyHostBroadcasting = false
         syncRelayFlags()
         sendPartyHostStopAnnouncement()
-        stopSpeakerPlayer()
+        if partyBroadcastInternal {
+            stopServingInternalAudio()
+        } else {
+            stopSpeakerPlayer()
+        }
     }
 
     public func sendPartyHostStopAnnouncement() {
@@ -2018,6 +2045,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 "device": deviceName,
                 "party_join": false,
                 "party_leave": true,
+                "party_host_ip": currentPartyHostIp,
                 "is_party_host": false,
                 "is_extended_host": false,
                 "audio_port": 5004
@@ -2125,6 +2153,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             "platform": "ios",
             "force_pcm": self.isAudioPlaying && self.receivedOpusPacket
         ]
+        if self.isPartyJoined && !explicitLeave && !self.currentPartyHostIp.isEmpty {
+            beacon["party_host_ip"] = self.currentPartyHostIp
+        }
         if explicitLeave {
             beacon["party_leave"] = true
         }
@@ -2138,6 +2169,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             "version": 1,
             "device": self.deviceName,
             "party_join": true,
+            "party_host_ip": hostIp,
             "is_party_host": false,
             "is_extended_host": self.isPartyExtending,
             "audio_port": 5004
@@ -2415,8 +2447,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
         guard let url = URL(string: "https://api.github.com/repos/HSAdib/AirSpeaker/releases/latest") else { return }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 5.0
-        request.setValue("AirSpeaker-iOS/1.0.0", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 6.0
+        let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.2"
+        let localBuildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
+        request.setValue("AirSpeaker-iOS/\(localVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
@@ -2443,8 +2477,16 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 remoteSha = String(body[range]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
 
-            let localBuildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
-            let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+            // Exact build SHA short-circuit
+            if let rSha = remoteSha, localBuildSha != "dev",
+               String(rSha.prefix(7)).lowercased() == String(localBuildSha.prefix(7)).lowercased() {
+                if manual {
+                    DispatchQueue.main.async {
+                        self.updateStatusMessage = "Air Speaker v\(localVersion) is up to date."
+                    }
+                }
+                return
+            }
 
             func parseSemver(_ v: String) -> (Int, Int, Int) {
                 let cleaned = v.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
@@ -2473,7 +2515,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             guard isNewerSemver || isNewerRebuild else {
                 if manual {
                     DispatchQueue.main.async {
-                        self.updateStatusMessage = "Air Speaker v1.0.0 is up to date."
+                        self.updateStatusMessage = "Air Speaker v\(localVersion) is up to date."
                     }
                 }
                 return
@@ -2486,12 +2528,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
 
             var downloadUrl = htmlUrl
+            var assetName = "AirSpeaker-\(tagName).ipa"
             if let assets = json["assets"] as? [[String: Any]] {
                 for asset in assets {
                     let name = asset["name"] as? String ?? ""
                     if name.hasSuffix(".ipa") || name.contains("iOS") {
                         if let browserUrl = asset["browser_download_url"] as? String {
                             downloadUrl = browserUrl
+                            assetName = name
                             break
                         }
                     }
@@ -2504,12 +2548,113 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.updateId = newUpdateId
                 self.updateAvailableVersion = displayVersion
                 self.updateDownloadUrl = downloadUrl
+                self.updateAssetName = assetName
                 self.showUpdateBanner = true
                 self.updateStatusMessage = "Update available: \(displayVersion)"
             }
         }.resume()
     }
+
+    public func startUpdateDownload() {
+        guard !updateDownloadUrl.isEmpty, let url = URL(string: updateDownloadUrl) else { return }
+        isDownloadingUpdate = true
+        updateDownloadProgress = 0.0
+        updateDownloadDetailText = "Starting download..."
+        downloadedUpdateFileUrl = nil
+        updateDownloadLastTime = CACurrentMediaTime()
+        updateDownloadLastBytes = 0
+        updateDownloadEmaSpeed = 0
+
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        self.updateDownloadSession = session
+        let task = session.downloadTask(with: url)
+        self.updateDownloadTask = task
+        task.resume()
+    }
+
+    public func cancelUpdateDownload() {
+        updateDownloadTask?.cancel()
+        updateDownloadTask = nil
+        updateDownloadSession?.invalidateAndCancel()
+        updateDownloadSession = nil
+        isDownloadingUpdate = false
+        updateDownloadDetailText = "Download cancelled."
+    }
 }
 
 // Backward compatibility alias
 public typealias PhoneSpeakerEngine = AirSpeakerEngine
+
+
+// MARK: - URLSessionDownloadDelegate
+extension AirSpeakerEngine: URLSessionDownloadDelegate {
+    public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        let now = CACurrentMediaTime()
+        let dt = now - updateDownloadLastTime
+        if dt >= 0.15 || updateDownloadLastTime == 0 {
+            let instSpeed = dt > 0 ? Double(totalBytesWritten - updateDownloadLastBytes) / dt : 0
+            updateDownloadEmaSpeed = updateDownloadEmaSpeed <= 0 ? instSpeed : (0.7 * updateDownloadEmaSpeed + 0.3 * instSpeed)
+            updateDownloadLastTime = now
+            updateDownloadLastBytes = totalBytesWritten
+
+            let pct = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : 0
+            let mbWritten = Double(totalBytesWritten) / (1024.0 * 1024.0)
+            let mbTotal = totalBytesExpectedToWrite > 0 ? Double(totalBytesExpectedToWrite) / (1024.0 * 1024.0) : 0
+            let speedMb = updateDownloadEmaSpeed / (1024.0 * 1024.0)
+
+            let speedStr = speedMb >= 0.1 ? String(format: "%.1f MB/s", speedMb) : String(format: "%.0f KB/s", updateDownloadEmaSpeed / 1024.0)
+            let detail = totalBytesExpectedToWrite > 0
+                ? String(format: "%.1f MB / %.1f MB (%d%%) • %@", mbWritten, mbTotal, Int(pct * 100), speedStr)
+                : String(format: "%.1f MB • %@", mbWritten, speedStr)
+
+            DispatchQueue.main.async {
+                self.updateDownloadProgress = pct
+                self.updateDownloadDetailText = detail
+            }
+        }
+    }
+
+    public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let downloadsDir = docs.appendingPathComponent("Downloads", isDirectory: true)
+
+        do {
+            try fileManager.createDirectory(at: downloadsDir, withIntermediateDirectories: true, attributes: nil)
+            let destUrl = downloadsDir.appendingPathComponent(self.updateAssetName)
+            if fileManager.fileExists(atPath: destUrl.path) {
+                try fileManager.removeItem(at: destUrl)
+            }
+            try fileManager.moveItem(at: location, to: destUrl)
+
+            DispatchQueue.main.async {
+                self.isDownloadingUpdate = false
+                self.updateDownloadProgress = 1.0
+                self.downloadedUpdateFileUrl = destUrl
+                self.updateDownloadDetailText = "✔ Saved to Downloads"
+                self.updateStatusMessage = "Saved to Files → Air Speaker → Downloads/\(self.updateAssetName)"
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.isDownloadingUpdate = false
+                self.updateDownloadDetailText = "File error: \(error.localizedDescription)"
+                self.updateStatusMessage = "Download move failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let err = error {
+            DispatchQueue.main.async {
+                if (err as NSError).code == NSURLErrorCancelled {
+                    self.updateDownloadDetailText = "Download cancelled."
+                } else {
+                    self.updateDownloadDetailText = "Download failed: \(err.localizedDescription)"
+                    self.updateStatusMessage = "Download failed: \(err.localizedDescription)"
+                }
+                self.isDownloadingUpdate = false
+            }
+        }
+    }
+}

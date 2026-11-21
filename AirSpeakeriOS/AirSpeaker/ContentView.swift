@@ -9,6 +9,19 @@
 import SwiftUI
 import UIKit
 
+struct DocumentExportPicker: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+}
+
+import UIKit
+
 private enum M3 {
     static let bg = Color(red: 0.063, green: 0.075, blue: 0.094)               // #101318
     static let surfaceLow = Color(red: 0.090, green: 0.106, blue: 0.133)       // #171B22
@@ -31,6 +44,7 @@ private enum M3 {
 
 public struct ContentView: View {
     @StateObject private var engine = AirSpeakerEngine.shared
+    @State private var showExportPicker = false
     @State private var selectedTab: Int = 0
     @State private var showHelpModal: Bool = false
 
@@ -90,23 +104,56 @@ public struct ContentView: View {
 
                 // Top Update Available Banner
                 if engine.showUpdateBanner {
-                    HStack(spacing: 8) {
-                        Text("⬆ Update Available (\(engine.updateAvailableVersion))")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.95))
-                        Spacer()
-                        if let url = URL(string: engine.updateDownloadUrl), !engine.updateDownloadUrl.isEmpty {
-                            Button("[ DOWNLOAD ]") {
-                                UIApplication.shared.open(url)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("⬆ Update Available (\(engine.updateAvailableVersion))")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.95))
+                            Spacer()
+                            if !engine.isDownloadingUpdate && engine.downloadedUpdateFileUrl == nil {
+                                Button("[ DOWNLOAD ]") {
+                                    engine.startUpdateDownload()
+                                }
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(M3.tertiary)
+                            }
+                            Button("[ ✕ ]") {
+                                engine.dismissUpdateBanner(skip: true)
                             }
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(M3.tertiary)
+                            .foregroundColor(Color(white: 0.6))
                         }
-                        Button("[ ✕ ]") {
-                            engine.dismissUpdateBanner(skip: true)
+
+                        if engine.isDownloadingUpdate {
+                            ProgressView(value: engine.updateDownloadProgress)
+                                .progressViewStyle(LinearProgressViewStyle(tint: M3.tertiary))
+                            HStack {
+                                Text(engine.updateDownloadDetailText)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(M3.primary)
+                                Spacer()
+                                Button("[ CANCEL ]") {
+                                    engine.cancelUpdateDownload()
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.3, blue: 0.3))
+                            }
+                        } else if let fileUrl = engine.downloadedUpdateFileUrl {
+                            HStack {
+                                Text("✔ Saved in Air Speaker/Downloads")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(M3.tertiary)
+                                Spacer()
+                                Button("[ SAVE TO DOWNLOADS / SHARE ]") {
+                                    showExportPicker = true
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+                            }
+                            .sheet(isPresented: $showExportPicker) {
+                                DocumentExportPicker(url: fileUrl)
+                            }
                         }
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(white: 0.6))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -690,6 +737,14 @@ struct PartyStudioTab: View {
                             }
                         }
 
+                        // Broadcast Mode Toggle
+                        Toggle(isOn: $engine.partyBroadcastInternal) {
+                            Text("Broadcast this iPhone's audio (ReplayKit)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: M3.tertiary))
+
                         // Primary Broadcast Button
                         Button(action: {
                             if engine.isPartyHostBroadcasting {
@@ -1248,6 +1303,46 @@ struct SettingsStudioTab: View {
                             .frame(maxWidth: .infinity, minHeight: 38)
                             .background(Color(white: 0.08))
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.primary, lineWidth: 1))
+                    }
+
+                    if engine.isDownloadingUpdate {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView(value: engine.updateDownloadProgress)
+                                .progressViewStyle(LinearProgressViewStyle(tint: M3.tertiary))
+                            HStack {
+                                Text(engine.updateDownloadDetailText)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(M3.primary)
+                                Spacer()
+                                Button("[ CANCEL ]") {
+                                    engine.cancelUpdateDownload()
+                                }
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 1.0, green: 0.3, blue: 0.3))
+                            }
+                        }
+                    } else if let fileUrl = engine.downloadedUpdateFileUrl {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("✔ Saved to Files → Air Speaker → Downloads/\(engine.updateAssetName)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(M3.tertiary)
+                            Button("[ SAVE TO DOWNLOADS / SHARE ]") {
+                                showExportPicker = true
+                            }
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
+                        }
+                    } else if !engine.updateDownloadUrl.isEmpty && engine.updateDownloadUrl != "https://github.com/HSAdib/AirSpeaker/releases/latest" {
+                        Button(action: {
+                            engine.startUpdateDownload()
+                        }) {
+                            Text("⬇ DOWNLOAD UPDATE (\(engine.updateAvailableVersion))")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(M3.tertiary)
+                                .frame(maxWidth: .infinity, minHeight: 34)
+                                .background(Color(white: 0.08))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(M3.tertiary, lineWidth: 1))
+                        }
                     }
 
                     if !engine.updateStatusMessage.isEmpty {

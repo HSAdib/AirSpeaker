@@ -657,6 +657,7 @@ class ControlListener:
         self._announce_thread: Optional[threading.Thread] = None
         self._running = False
         self._party_mode_enabled: bool = False
+        self._is_extended_host: bool = False
         self._target_ip: str = ""
         self._local_ips: set = set()
         self._last_local_ips_refresh: float = 0.0
@@ -679,8 +680,9 @@ class ControlListener:
             self._last_local_ips_refresh = now
         return self._local_ips
 
-    def set_party_mode(self, enabled: bool) -> None:
+    def set_party_mode(self, enabled: bool, is_extended: bool = False) -> None:
         self._party_mode_enabled = bool(enabled)
+        self._is_extended_host = bool(is_extended)
         self.broadcast_announce()
 
     def set_target_ip(self, ip: str) -> None:
@@ -695,7 +697,8 @@ class ControlListener:
                 "version": 1,
                 "pc_name": socket.gethostname(),
                 "party_mode": bool(self._party_mode_enabled),
-                "is_party_host": bool(self._party_mode_enabled),
+                "is_party_host": bool(self._party_mode_enabled and not self._is_extended_host),
+                "is_extended_host": bool(self._party_mode_enabled and self._is_extended_host),
             }).encode("utf-8")
             sock = self._sock
             if sock is not None:
@@ -769,7 +772,8 @@ class ControlListener:
                     "version": 1,
                     "pc_name": socket.gethostname(),
                     "party_mode": bool(self._party_mode_enabled),
-                    "is_party_host": bool(self._party_mode_enabled),
+                    "is_party_host": bool(self._party_mode_enabled and not self._is_extended_host),
+                    "is_extended_host": bool(self._party_mode_enabled and self._is_extended_host),
                 }).encode("utf-8")
                 adapters = list_real_adapters()
                 sock = self._sock
@@ -832,7 +836,8 @@ class ControlListener:
                                 "version": 1,
                                 "pc_name": socket.gethostname(),
                                 "party_mode": bool(self._party_mode_enabled),
-                                "is_party_host": bool(self._party_mode_enabled),
+                                "is_party_host": bool(self._party_mode_enabled and not self._is_extended_host),
+                                "is_extended_host": bool(self._party_mode_enabled and self._is_extended_host),
                             }).encode("utf-8")
                             sock.sendto(reply, (sender_ip, self._bind_port))
                         except Exception:

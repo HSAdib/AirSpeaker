@@ -154,6 +154,7 @@ class MainActivity : AppCompatActivity() {
     private var joinedHostIp: String = ""
     private var joinedHostPort: Int = 5004
     private var lastDiscoveredHostsKey: String = ""
+    private val cancelUpdateDownloadFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     private var lastJoinKeepAliveMs: Long = 0L
 
     private val cameraPermissionLauncher =
@@ -1744,8 +1745,13 @@ class MainActivity : AppCompatActivity() {
         binding.cbPartyBroadcastInternal.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 binding.tvPartyHostModeHint.text = "Internal audio mode: capturing and broadcasting this phone's playback."
+                binding.rbPartyHostCodecPcm.isChecked = true
+                binding.rbPartyHostCodecOpus.isEnabled = false
+                binding.rbPartyHostCodecOpus.alpha = 0.45f
             } else {
                 binding.tvPartyHostModeHint.text = "Relay mode: stream from PC to this phone's IP to feed the party."
+                binding.rbPartyHostCodecOpus.isEnabled = true
+                binding.rbPartyHostCodecOpus.alpha = 1.0f
             }
         }
 
@@ -1769,6 +1775,9 @@ class MainActivity : AppCompatActivity() {
                     startService(intent)
                 }
             } else {
+                isPartyJoinedActive = false
+                ControlChannel.isPartyJoinerActive = false
+                ControlChannel.joinedPartyHostIp = null
                 isPartyHostBroadcastActive = true
                 ControlChannel.isHostingOrExtendingParty = true
                 ControlChannel.isExtendingParty = false
@@ -1976,6 +1985,7 @@ class MainActivity : AppCompatActivity() {
             val (ip, _) = parseHostIpFromUri(raw)
             if (ip.isNotEmpty() && !ControlChannel.partyPeerIps.contains(ip)) {
                 ControlChannel.partyPeerIps.add(ip)
+                ControlChannel.manualPartyPeerIps.add(ip)
                 AudioNative.safeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 binding.etPartyPeerIp.text?.clear()
                 updateStatsUI()
@@ -1984,6 +1994,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnClearPartyPeers.setOnClickListener {
             val toKick = ControlChannel.partyPeerIps.toList()
             ControlChannel.partyPeerIps.clear()
+            ControlChannel.manualPartyPeerIps.clear()
             ControlChannel.partyPeerLastSeen.clear()
             AudioNative.safeSetPartyPeers(emptyArray())
             for (peerIp in toKick) {
@@ -2020,6 +2031,11 @@ class MainActivity : AppCompatActivity() {
                 }, 500L)
             } else {
                 userManuallyStoppedPlayer = false
+                isPartyJoinedActive = false
+                isPartyExtendedActive = false
+                isPartyHostBroadcastActive = false
+                ControlChannel.isPartyJoinerActive = false
+                ControlChannel.joinedPartyHostIp = null
                 AudioNative.safeSetPartyRelay(false)
                 ControlChannel.isHostingOrExtendingParty = false
                 ControlChannel.isExtendingParty = false
@@ -2080,6 +2096,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnCheckForUpdates.setOnClickListener {
             performUpdateCheck(isManual = true)
         }
+        binding.btnCancelUpdateDownload.setOnClickListener {
+            cancelUpdateDownloadFlag.set(true)
+            binding.tvUpdateStatus.text = "Cancelling download..."
+        }
 
         updateCodecBitrateUiState(binding.rbCodecOpus.isChecked)
         showPartyScreen("CHOOSER")
@@ -2120,18 +2140,72 @@ class MainActivity : AppCompatActivity() {
         builder.setTitle("⬆ Update Available")
         builder.setMessage("Air Speaker ${info.displayVersion} is now available!\n\nWould you like to download and install this update?")
         builder.setPositiveButton("Download Update") { _, _ ->
-            try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl))
-                startActivity(intent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Could not open update download URL: ${e.message}")
-            }
+            startInAppUpdateDownload(info)
         }
         builder.setNeutralButton("Later", null)
         builder.setNegativeButton("Skip") { _, _ ->
             UpdateChecker.skipUpdate(this, info.updateId)
         }
         builder.show()
+    }
+
+    private fun startInAppUpdateDownload(info: UpdateChecker.UpdateInfo) {
+        cancelUpdateDownloadFlag.set(false)
+        binding.layoutUpdateDownload.visibility = View.VISIBLE
+        binding.pbUpdateDownload.isIndeterminate = false
+        binding.pbUpdateDownload.progress = 0
+        binding.tvUpdateProgress.text = "Starting download..."
+        binding.tvUpdateStatus.visibility = View.VISIBLE
+        binding.tvUpdateStatus.text = "Downloading ${info.fileName}..."
+
+        // Non-blocking progress dialog
+        val progressDialog = MaterialAlertDialogBuilder(this)
+            .setTitle("⬇ Downloading ${info.displayVersion}")
+            .setMessage("Downloading ${info.fileName} to Downloads folder...")
+            .setCancelable(false)
+            .setNegativeButton("Cancel") { d, _ ->
+                cancelUpdateDownloadFlag.set(true)
+                d.dismiss()
+            }
+            .create()
+
+        progressDialog.show()
+
+        UpdateChecker.downloadApkToDownloads(
+            context = applicationContext,
+            info = info,
+            cancelFlag = cancelUpdateDownloadFlag,
+            onProgress = { downloaded, total, speed ->
+                val pct = if (total > 0) ((downloaded * 100) / total).toInt() else 0
+                val progText = "${UpdateChecker.formatBytes(downloaded)} / ${UpdateChecker.formatBytes(total)} ($pct%) • ${UpdateChecker.formatSpeed(speed)}"
+                binding.pbUpdateDownload.progress = pct
+                binding.tvUpdateProgress.text = progText
+                progressDialog.setMessage(progText)
+            },
+            onComplete = { apkUri, displayPath ->
+                try { progressDialog.dismiss() } catch (_: Exception) {}
+                binding.layoutUpdateDownload.visibility = View.GONE
+                binding.tvUpdateStatus.visibility = View.VISIBLE
+                binding.tvUpdateStatus.text = "✔ Saved to $displayPath"
+
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("✔ Download Complete")
+                    .setMessage("Update saved to:\n$displayPath\n\nInstall now?")
+                    .setPositiveButton("Install Now") { _, _ ->
+                        UpdateChecker.launchApkInstall(this@MainActivity, apkUri)
+                    }
+                    .setNegativeButton("Done", null)
+                    .show()
+            },
+            onError = { exc ->
+                try { progressDialog.dismiss() } catch (_: Exception) {}
+                binding.layoutUpdateDownload.visibility = View.GONE
+                val msg = if (exc is InterruptedException) "Download cancelled." else "Download failed: ${exc.message}"
+                binding.tvUpdateStatus.visibility = View.VISIBLE
+                binding.tvUpdateStatus.text = msg
+                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 
     // ------------------------------------------------------------------
@@ -2609,6 +2683,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            // Prune disconnected joiners/hosts unconditionally in HOST mode as well as JOIN mode
+            if (partyModeScreen == "HOST" || isPartyHostBroadcastActive || isPartyExtendedActive) {
+                ControlChannel.prunePartyHostsAndPeers()
+            }
             // Update Discovered Hosts list
             if (partyModeScreen == "JOIN") {
                 renderDiscoveredHostButtons()
