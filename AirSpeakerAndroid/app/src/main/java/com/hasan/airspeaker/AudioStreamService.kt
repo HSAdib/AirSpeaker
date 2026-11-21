@@ -750,7 +750,7 @@ class AudioStreamService : Service() {
     private fun ensureControlChannel() {
         if (activeControlChannel == null) {
             activeControlChannel = ControlChannel(
-                audioPort = 5004,
+                audioPort = ControlChannel.configuredAudioPort,
                 controlPort = 5005,
                 onConfigSyncReceived = { configJson -> handleConfigSync(configJson) },
                 onPartyKicked = { reason -> handlePartyKicked(reason) }

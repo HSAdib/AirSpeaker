@@ -391,7 +391,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         let validPort = (newPort >= 1024) ? newPort : 5004
         localListenPort = validPort
         UserDefaults.standard.set(Int(validPort), forKey: "AirSpeakerLocalListenPort")
-        if isAudioPlaying {
+        broadcastBeacon()
+        if isAudioPlaying && !isPartyJoined {
             stopSpeakerPlayer()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 guard let self = self else { return }
@@ -403,6 +404,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func applyTargetServerPort(_ newPort: UInt16) {
         let validPort = (newPort >= 1024) ? newPort : 5004
         targetServerPort = validPort
+        stateLock.lock()
+        atomicTargetServerPort = validPort
+        stateLock.unlock()
         UserDefaults.standard.set(Int(validPort), forKey: "AirSpeakerTargetServerPort")
     }
     @Published public var isInternalAudioServing: Bool = false
@@ -485,7 +489,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     @Published public var statusMessage: String = "Ready"
     @Published public var partyBroadcastInternal: Bool = false
 
-    @Published public var updateAssetName: String = "AirSpeaker-v1-iOS.ipa"
+    @Published public var updateAssetName: String = "AirSpeaker-iOS.ipa"
     @Published public var isDownloadingUpdate: Bool = false
     @Published public var updateDownloadProgress: Double = 0.0
     @Published public var updateDownloadDetailText: String = ""
@@ -504,6 +508,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private let eqSaveQueue = DispatchQueue(label: "com.hasan.airspeaker.eqSaveQueue", qos: .utility)
     private var atomicFrameDurationMs: Double = 5.0
     private var atomicServeTargetIp: String = ""
+    private var atomicTargetServerPort: UInt16 = 5004
 
     // MARK: - Update Notification States
     @Published public var updateAvailableVersion: String = ""
@@ -633,7 +638,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         }
         if let savedTargetPort = UserDefaults.standard.value(forKey: "AirSpeakerTargetServerPort") as? Int, savedTargetPort >= 1024 {
             targetServerPort = UInt16(savedTargetPort)
+            stateLock.lock()
+            atomicTargetServerPort = UInt16(savedTargetPort)
+            stateLock.unlock()
         }
+        self.currentLocalIp = AirSpeakerEngine.getPreferredHostIp()
         setupAudioSession()
         setupAudioEngine()
         refreshAdapterIps()
@@ -904,9 +913,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     // MARK: - Start / Stop Speaker Player (UDP Listen Port)
-    public func startSpeakerPlayer(port: Int = 5004, manualHost: String = "") {
+    public func startSpeakerPlayer(port: Int? = nil, manualHost: String = "") {
         guard !isAudioPlaying else { return }
-        let actualPort = (port >= 1024 && port != 5004) ? port : Int(localListenPort)
+        let actualPort = (port != nil && port! >= 1024 && port! <= 65535) ? port! : Int(localListenPort)
         setupAudioSession()
         if !manualHost.isEmpty {
             updateServerIp(manualHost)
@@ -1112,15 +1121,17 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
 
             stateLock.lock()
-            let needServerIp = atomicConnectedServerIp.isEmpty
-            if needServerIp {
+            let isParty = atomicRelayActive
+            let ipChanged = (!senderIp.isEmpty && senderIp != atomicConnectedServerIp && !isParty)
+            if ipChanged || atomicConnectedServerIp.isEmpty {
                 atomicConnectedServerIp = senderIp
             }
             stateLock.unlock()
-            if needServerIp {
+            if ipChanged {
                 DispatchQueue.main.async { [weak self] in
-                    if self?.connectedServerIp.isEmpty == true {
-                        self?.connectedServerIp = senderIp
+                    guard let self = self else { return }
+                    if !self.isPartyJoined && self.connectedServerIp != senderIp {
+                        self.connectedServerIp = senderIp
                     }
                 }
             }
@@ -1653,11 +1664,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     private func sendServePacket(_ packet: [UInt8], toIp: String) {
         let subnetBcast = (toIp == "255.255.255.255") ? getCachedSubnetBroadcastIp() : nil
-        let sPort = in_port_t(targetServerPort).bigEndian
 
         stateLock.lock()
+        let tPort = self.atomicTargetServerPort
         let relayOn = self.atomicRelayActive
         stateLock.unlock()
+
+        let sPort = in_port_t(tPort).bigEndian
+        let partyPeerPort = in_port_t(5004).bigEndian
 
         let peers: [String]
         if relayOn {
@@ -1701,7 +1715,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         for peer in peers where peer != toIp {
             var peerAddr = sockaddr_in()
             peerAddr.sin_family = sa_family_t(AF_INET)
-            peerAddr.sin_port = sPort
+            peerAddr.sin_port = partyPeerPort
             if inet_pton(AF_INET, peer, &peerAddr.sin_addr) == 1 {
                 withUnsafePointer(to: &peerAddr) { addrPtr in
                     _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -2266,11 +2280,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         let isHostActive = self.isPartyHost && self.isPartyHostBroadcasting && !self.isPartyExtending
         let isExtActive = self.isPartyExtending && self.isPartyJoined
         let localIps = AirSpeakerEngine.getLocalIpv4Addresses()
-        if let primary = localIps.first {
-            DispatchQueue.main.async {
-                if self.currentLocalIp != primary {
-                    self.currentLocalIp = primary
-                }
+        let preferredIp = AirSpeakerEngine.getPreferredHostIp()
+        DispatchQueue.main.async {
+            if self.currentLocalIp != preferredIp {
+                self.currentLocalIp = preferredIp
             }
         }
         var beacon: [String: Any] = [
@@ -2508,6 +2521,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             lines.append("en0        : 127.0.0.1")
         }
         availableIpListText = lines.joined(separator: "\n")
+        let preferredIp = AirSpeakerEngine.getPreferredHostIp()
+        if self.currentLocalIp != preferredIp {
+            self.currentLocalIp = preferredIp
+        }
     }
 
     // MARK: - Hotspot-First Local IPv4 Address Discovery
@@ -2583,7 +2600,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         guard let url = URL(string: "https://api.github.com/repos/HSAdib/AirSpeaker/releases/latest") else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 6.0
-        let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.2.1"
+        let localVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.2.2"
         let localBuildSha = (Bundle.main.infoDictionary?["AirSpeakerBuildSHA"] as? String ?? "dev").trimmingCharacters(in: .whitespacesAndNewlines)
         request.setValue("AirSpeaker-iOS/\(localVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
@@ -2617,7 +2634,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                String(rSha.prefix(7)).lowercased() == String(localBuildSha.prefix(7)).lowercased() {
                 if manual {
                     DispatchQueue.main.async {
-                        self.updateStatusMessage = "Air Speaker v\(localVersion) is up to date."
+                        self.updateStatusMessage = "AirSpeaker v\(localVersion) is up to date."
                     }
                 }
                 return
@@ -2650,7 +2667,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             guard isNewerSemver || isNewerRebuild else {
                 if manual {
                     DispatchQueue.main.async {
-                        self.updateStatusMessage = "Air Speaker v\(localVersion) is up to date."
+                        self.updateStatusMessage = "AirSpeaker v\(localVersion) is up to date."
                     }
                 }
                 return
@@ -2792,7 +2809,7 @@ extension AirSpeakerEngine: URLSessionDownloadDelegate {
                 self.updateDownloadProgress = 1.0
                 self.downloadedUpdateFileUrl = destUrl
                 self.updateDownloadDetailText = "✔ Saved to Downloads/AirSpeaker"
-                self.updateStatusMessage = "Saved to Files → Air Speaker → Downloads/AirSpeaker/\(self.updateAssetName)"
+                self.updateStatusMessage = "Saved to Files → AirSpeaker → Downloads/AirSpeaker/\(self.updateAssetName)"
             }
         } catch {
             DispatchQueue.main.async {

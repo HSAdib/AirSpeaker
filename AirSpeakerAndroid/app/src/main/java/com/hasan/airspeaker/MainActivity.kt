@@ -917,7 +917,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (!AudioStreamService.isStreaming && !AudioStreamService.isServing && preStreamDiscoveryChannel == null) {
             preStreamDiscoveryChannel = ControlChannel(
-                audioPort = 5004,
+                audioPort = ControlChannel.configuredAudioPort,
                 controlPort = 5005,
                 onConfigSyncReceived = { configJson ->
                     runOnUiThread { applyIncomingConfigSync(configJson) }
@@ -1755,13 +1755,6 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerServeBitrate.alpha = 0.45f
 
         binding.btnToggleServe.setOnClickListener { toggleServing() }
-        binding.btnSetServeTargetIp.setOnClickListener {
-            val ip = binding.etServeTargetIp.text.toString().trim()
-            if (ip.isNotBlank()) {
-                AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(ip)
-                Toast.makeText(this, "Target IP set to $ip", Toast.LENGTH_SHORT).show()
-            }
-        }
 
         binding.rgOutputEngine.setOnCheckedChangeListener { _, checkedId ->
             if (!suppressSync) {
@@ -2197,11 +2190,14 @@ class MainActivity : AppCompatActivity() {
             val validPort = p.coerceIn(1024, 65535)
             binding.etPhoneListenPort.setText(validPort.toString())
             ControlChannel.configuredAudioPort = validPort
+            AudioStreamService.activeControlChannel?.audioPort = validPort
+            preStreamDiscoveryChannel?.audioPort = validPort
+            ControlChannel.sendPreStreamBeacon()
             getSharedPreferences("airspeaker_prefs", MODE_PRIVATE).edit()
                 .putInt("phone_listen_port", validPort)
                 .apply()
             Toast.makeText(this, "Phone listen port set to $validPort", Toast.LENGTH_SHORT).show()
-            if (AudioStreamService.isStreaming) {
+            if (AudioStreamService.isStreaming && !isPartyJoinedActive) {
                 val stopIntent = Intent(this, AudioStreamService::class.java).apply {
                     action = AudioStreamService.ACTION_STOP
                 }
@@ -2223,7 +2219,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnCopyPhoneIpPort.setOnClickListener {
-            val primaryIp = ControlChannel.getLocalIpv4Addresses().firstOrNull() ?: "127.0.0.1"
+            val primaryIp = ControlChannel.getPreferredHostIp()
             val port = binding.etPhoneListenPort.text.toString().trim().toIntOrNull() ?: 5004
             val textToCopy = "$primaryIp:$port"
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -2723,6 +2719,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshServiceButtonState() {
+        val lPort = ControlChannel.configuredAudioPort
+        val sPort = binding.etServeTargetPort.text?.toString()?.trim()?.toIntOrNull() ?: 5004
         val hostStarting = awaitingMediaProjectionResult ||
             (SystemClock.elapsedRealtime() - lastServiceStartTimeMs) < 2000L
         if (isPartyHostBroadcastActive && !hostStarting &&
@@ -2797,7 +2795,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnToggleServe.setTextColor(errFg)
             binding.btnToggleServe.backgroundTintList = ColorStateList.valueOf(errBg)
             binding.btnToggleServe.strokeWidth = 0
-            binding.tvServeStatus.text = "Streaming Internal Audio (Port 5004)"
+            binding.tvServeStatus.text = "Streaming Internal Audio (Port $sPort)"
             binding.tvServeStatus.setTextColor(terFg)
             val pps = AudioStreamService.internalAudioStreamerInstance?.txPps?.get() ?: 0
             binding.tvServePps.text = "TX PPS: $pps pps"
@@ -2808,7 +2806,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnToggleServe.setTextColor(terFg)
             binding.btnToggleServe.backgroundTintList = ColorStateList.valueOf(terBg)
             binding.btnToggleServe.strokeWidth = 0
-            binding.tvServeStatus.text = "Audio Sender: Ready (Port 5004)"
+            binding.tvServeStatus.text = "Audio Sender: Ready (Port $sPort)"
             binding.tvServeStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
             binding.tvServePps.text = "TX PPS: 0 pps"
             binding.pbServeLevel.progress = 0
@@ -2819,13 +2817,13 @@ class MainActivity : AppCompatActivity() {
             val backendTag = AudioStreamService.activeBackendLabel
             statusParts.add("Play ($backendTag)")
         }
-        if (AudioStreamService.isServing) statusParts.add("Serve (Port 5004)")
+        if (AudioStreamService.isServing) statusParts.add("Serve (Port $sPort)")
         if (statusParts.isEmpty()) {
             if (pcStreamingHintActive) {
                 binding.tvStatus.text = "PC is streaming — Tap Start Speaker Player"
                 binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.m3_primary))
             } else {
-                binding.tvStatus.text = "Ready • Port 5004"
+                binding.tvStatus.text = "Ready • Port $lPort"
                 binding.tvStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.m3_on_surface_variant))
             }
         } else {
@@ -2907,7 +2905,7 @@ class MainActivity : AppCompatActivity() {
                 else "💻 PC ($displayIp) — Idle / Waiting..."
             } else "💻 Waiting for PC connection..."
             val partyPeers = ControlChannel.partyPeerIps.size
-            val primaryIp = ControlChannel.getLocalIpv4Addresses().firstOrNull() ?: "127.0.0.1"
+            val primaryIp = ControlChannel.getPreferredHostIp()
             val listenPort = binding.etPhoneListenPort.text.toString().trim().ifBlank { "5004" }
             binding.tvConnectedDeviceSub.text = if (partyPeers > 0) {
                 "📱 $primaryIp:$listenPort (${ControlChannel.getPhoneModelName()}) • 🎉 Party: $partyPeers peer(s)"

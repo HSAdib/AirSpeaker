@@ -265,12 +265,18 @@ class ControlChannel(
 
                         if (msgType == "PC_ANNOUNCE") {
                             val rxStats = AudioNative.getStats()
-                            val isReceivingAudio = rxStats.rxPps > 0
-                            if (!isReceivingAudio && !isPartyJoinerActive && !Companion.isPartyJoinerActive) {
-                                activePcIp = senderIp
-                                lastKnownPcIp = senderIp
-                                if (!isHostingOrExtendingParty) {
-                                    AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                            val audioSenderIp = AudioNative.safeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }
+                            val isReceivingAudio = AudioStreamService.isStreaming && rxStats.rxPps > 0 && !audioSenderIp.isNullOrBlank()
+                            if (!isPartyJoinerActive && !Companion.isPartyJoinerActive) {
+                                if (isReceivingAudio) {
+                                    activePcIp = audioSenderIp
+                                    lastKnownPcIp = audioSenderIp
+                                } else {
+                                    activePcIp = senderIp
+                                    lastKnownPcIp = senderIp
+                                    if (!isHostingOrExtendingParty) {
+                                        AudioStreamService.internalAudioStreamerInstance?.updateTargetIp(senderIp)
+                                    }
                                 }
                             }
                             val pcName = json.optString("pc_name", "")
@@ -337,7 +343,7 @@ class ControlChannel(
                         put("app", "AirSpeaker")
                         put("version", 1)
                         put("ips", JSONArray(ips))
-                        put("audio_port", audioPort)
+                        put("audio_port", configuredAudioPort)
                         put("device", getPhoneModelName())
                         put("party_join", isPartyJoinerActive || Companion.isPartyJoinerActive)
                         if (isPartyJoinerActive || Companion.isPartyJoinerActive) {
@@ -406,8 +412,14 @@ class ControlChannel(
                 statsSocket = sock
                 while (isRunning) {
                     Thread.sleep(300)
-                    val targetIp = activePcIp?.takeIf { !isOwnLocalIp(it) }
-                        ?: AudioNative.nativeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }
+                    val stats = AudioNative.getStats()
+                    val targetIp = if (stats.rxPps > 0) {
+                        AudioNative.safeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }
+                            ?: activePcIp?.takeIf { !isOwnLocalIp(it) }
+                    } else {
+                        activePcIp?.takeIf { !isOwnLocalIp(it) }
+                            ?: AudioNative.safeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }
+                    }
 
                     val pingTs = lastPingPcTs
                     val pingRx = lastPingRxElapsedMs
@@ -417,7 +429,6 @@ class ControlChannel(
                         0L
                     }
 
-                    val stats = AudioNative.getStats()
                     val totalPkts = stats.rxPackets + stats.lostPackets
                     val lossPct = if (totalPkts > 0L) (stats.lostPackets.toDouble() * 100.0) / totalPkts.toDouble() else 0.0
                     val json = JSONObject().apply {

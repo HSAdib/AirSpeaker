@@ -1,5 +1,5 @@
 """
-ui.py — Tkinter-based GUI for Air Speaker v1 Studio.
+ui.py — Tkinter-based GUI for AirSpeaker.
 
 Theme: black background, white foreground/borders, Consolas font.
 Tabs: Stream / Roles | Audio & Buffer Settings | Windows Virtual Device
@@ -283,8 +283,8 @@ class AirSpeakerApp:
         self._target_history = collections.deque([30.0] * 60, maxlen=60)
         self._last_graph_tick = 0.0
         self._connected_phone_name = "Waiting for phone..."
-        self._last_rx_pps_nonzero_time: float = 0.0
-        self._peer_device_playing: bool = False
+        self._last_phone_rx_pps_time: float = 0.0
+        self._peer_device_playing: Dict[str, bool] = {}
         self._last_adapter_poll_time: float = 0.0
         self._last_adapter_sig: str = ""
         self.pc_self_ip_var = tk.StringVar(value="Waiting for network...")
@@ -487,7 +487,7 @@ class AirSpeakerApp:
         return False
 
     def _setup_window(self) -> None:
-        self.root.title("AirSpeaker — Material 3 Studio")
+        self.root.title("AirSpeaker")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
         self.root.minsize(560, 650)
@@ -558,7 +558,7 @@ class AirSpeakerApp:
         title_frame = tk.Frame(self.root, bg=BG, bd=1, relief="solid")
         title_frame.pack(fill="x", padx=8, pady=(8, 4))
         tk.Label(
-            title_frame, text="◀ Air Speaker v1 Studio ▶",
+            title_frame, text="◀ AirSpeaker ▶",
             bg=BG, fg=FG, font=FONT_MONO_LG
         ).pack(side="left", padx=8, pady=4)
 
@@ -757,7 +757,7 @@ class AirSpeakerApp:
         self.conn_device_name_var = tk.StringVar(value="Waiting for phone connection...")
         tk.Label(conn_info, textvariable=self.conn_device_name_var, bg=CARD_BG, fg="#FFFFFF", font=FONT_MONO_LG, anchor="w").pack(fill="x")
 
-        self.conn_device_ip_var = tk.StringVar(value="Open Air Speaker on your phone (Auto-Discovery active)")
+        self.conn_device_ip_var = tk.StringVar(value="Open AirSpeaker on your phone (Auto-Discovery active)")
         tk.Label(conn_info, textvariable=self.conn_device_ip_var, bg=CARD_BG, fg="#99AABB", font=FONT_MONO_SM, anchor="w").pack(fill="x")
 
         vol_bar_row = tk.Frame(conn_card, bg=CARD_BG)
@@ -1424,7 +1424,7 @@ class AirSpeakerApp:
 
         desc_text = (
             "Use BlackHole 2ch to route isolated PC or Phone internal audio into Discord, Zoom, FaceTime, or OBS,\n"
-            "or capture system audio via Multi-Output Device into Air Speaker:"
+            "or capture system audio via Multi-Output Device into AirSpeaker:"
             if is_mac else (
                 "Create virtual sinks via pactl / PipeWire to stream isolated PC audio to your phone\nor route Phone internal audio into Discord, Zoom, or OBS:"
                 if is_linux else
@@ -1441,7 +1441,7 @@ class AirSpeakerApp:
         install_lbl = "📥 Install BlackHole 2ch (CoreAudio)" if is_mac else ("📥 Create Virtual Speaker & Mic (pactl)" if is_linux else "📥 Install Virtual Audio Driver (VB-CABLE)")
         ttk.Button(btn_row1, text=install_lbl, command=self._install_driver).pack(side="left", padx=(0, 6))
         if not is_linux and not is_mac:
-            ttk.Button(btn_row1, text="🏷 Rename Cable to Air Speaker Audio", command=self._rename_device).pack(side="left", padx=(0, 6))
+            ttk.Button(btn_row1, text="🏷 Rename Cable to AirSpeaker Audio", command=self._rename_device).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row1, text="↻ Rescan Devices", command=self._refresh_all_devices).pack(side="left")
 
         btn_row2 = tk.Frame(vf, bg=BG)
@@ -3128,7 +3128,7 @@ class AirSpeakerApp:
         port = self._get_pc_listen_port()
         self.pc_listen_port_var.set(str(port))
         self.cfg["listen_port"] = port
-        save_config(self.cfg)
+        self._schedule_save_config(100)
         if self._play_active:
             self._stop_audio_receiver()
             self._start_audio_receiver()
@@ -3146,26 +3146,30 @@ class AirSpeakerApp:
         except Exception:
             pass
 
-    def _is_stream_delivering(self) -> bool:
-        """Returns True if PC is actively transmitting or receiving live audio frames."""
-        now = time.time()
-        if self._streaming and self._pps > 0:
-            return True
-        if (now - self._last_rx_pps_nonzero_time) < 3.0:
-            return True
-        return False
+    def _is_stream_delivering(self, max_age: float = 2.5) -> bool:
+        """True ONLY when the remote phone confirms live audio receipt (rx_pps > 0)."""
+        return self._normal_streaming and (time.monotonic() - self._last_phone_rx_pps_time) <= max_age
 
-    def _auto_refresh_adapters_if_changed(self) -> None:
-        now = time.time()
-        if (now - self._last_adapter_poll_time) < 4.0:
+    def _auto_refresh_adapters_if_changed(self, force: bool = False, prefer_subnet_of: Optional[str] = None) -> None:
+        now = time.monotonic()
+        min_gap = 1.5 if force else 3.0
+        if (now - self._last_adapter_poll_time) < min_gap:
             return
         self._last_adapter_poll_time = now
         try:
             adapters = list_real_adapters()
             sig = "|".join(f"{a.get('name')}:{a.get('ip')}:{a.get('is_up')}" for a in adapters)
-            if sig != self._last_adapter_sig:
+            if sig != self._last_adapter_sig or prefer_subnet_of:
                 self._last_adapter_sig = sig
                 self._refresh_adapters()
+                if prefer_subnet_of:
+                    pref = ".".join(prefer_subnet_of.split(".")[:3]) + "."
+                    for idx, a in enumerate(self._adapter_data):
+                        if a.get("is_up") and a.get("ip", "").startswith(pref):
+                            if self.adapter_combo.current() != idx:
+                                self.adapter_combo.current(idx)
+                                self._on_adapter_selected()
+                            break
         except Exception:
             pass
 
@@ -3252,7 +3256,7 @@ class AirSpeakerApp:
         if rx_on and self._rx_pps > 0:
             rx = f"PLAY RX: LIVE ({self._rx_pps} pps)"
         elif rx_on:
-            rx = "PLAY RX: LISTENING (:5004)"
+            rx = f"PLAY RX: LISTENING (:{self._get_pc_listen_port()})"
         else:
             rx = "PLAY RX: STOPPED"
         self._status_set(f"{spk} | {rx}", ACCENT if (self._streaming or (rx_on and self._rx_pps > 0)) else FG)
@@ -3496,8 +3500,6 @@ class AirSpeakerApp:
                         self.pps_var.set(f"TX Packets: {data}/s")
                     elif kind == "rx_pps":
                         self._rx_pps = data
-                        if data > 0:
-                            self._last_rx_pps_nonzero_time = time.time()
                         if hasattr(self, "play_rx_pps_var"):
                             self.play_rx_pps_var.set(f"{data} pps")
                         self._update_combined_status()
@@ -3610,7 +3612,7 @@ class AirSpeakerApp:
                         if sender_ip and active_adapter_ip:
                             act_prefix = ".".join(active_adapter_ip.split(".")[:3]) + "."
                             if not sender_ip.startswith(act_prefix):
-                                self._auto_refresh_adapters_if_changed()
+                                self._auto_refresh_adapters_if_changed(force=True, prefer_subnet_of=sender_ip)
                                 adapter_sel = self.adapter_combo.current()
                                 if 0 <= adapter_sel < len(self._adapter_data):
                                     active_adapter_ip = self._adapter_data[adapter_sel].get("ip", "")
@@ -3649,8 +3651,9 @@ class AirSpeakerApp:
                         elif self._connected_phone_name == "Waiting for phone...":
                             self.conn_device_name_var.set("Android Phone")
                         is_playing = bool(msg.get("playing", False))
-                        was_playing = self._peer_last_playing.get(best_ip, False)
-                        self._peer_last_playing[best_ip] = is_playing
+                        dev_key = dev_name or best_ip
+                        was_playing = self._peer_device_playing.get(dev_key, False)
+                        self._peer_device_playing[dev_key] = is_playing
                         is_serving = bool(msg.get("serving", False))
                         if is_playing and is_serving:
                             self.conn_device_ip_var.set(f"{best_ip}  •  CONNECTED (PLAYING + SERVING)")
@@ -3693,16 +3696,20 @@ class AirSpeakerApp:
                             self.adapter_combo.current(matching_adapter_idx)
                             self._on_adapter_selected()
 
-                        self.phone_ip_var.set(f"Phone: {best_ip}")
-
                         is_ip_focused = False
                         try:
                             is_ip_focused = (self.root.focus_get() == self.ip_entry)
                         except Exception:
                             pass
 
+                        is_port_focused = False
+                        try:
+                            is_port_focused = (self.root.focus_get() == self.port_entry)
+                        except Exception:
+                            pass
+
                         adv_audio_port = msg.get("audio_port")
-                        if adv_audio_port and isinstance(adv_audio_port, int) and 1024 <= adv_audio_port <= 65535:
+                        if adv_audio_port and isinstance(adv_audio_port, int) and 1024 <= adv_audio_port <= 65535 and not is_port_focused:
                             cur_port_str = self.ip_port_var.get().strip()
                             if str(adv_audio_port) != cur_port_str and not self._is_stream_delivering():
                                 self.ip_port_var.set(str(adv_audio_port))
@@ -3712,9 +3719,17 @@ class AirSpeakerApp:
                         if not is_ip_focused and self._manual_ip_override is None and not msg.get("party_join"):
                             current_ip = self.ip_var.get().strip()
                             current_ip_alive = self._is_ip_recently_seen(current_ip)
+                            up_prefixes = {
+                                ".".join(a["ip"].split(".")[:3]) + "."
+                                for a in self._adapter_data
+                                if a.get("is_up") and a.get("ip")
+                            }
+                            current_ip_on_up_subnet = bool(current_ip) and any(current_ip.startswith(p) for p in up_prefixes)
+
                             should_update_ip = (
                                 not current_ip
                                 or current_ip in ("127.0.0.1", "0.0.0.0", "255.255.255.255")
+                                or (not current_ip_on_up_subnet and not self._is_stream_delivering())
                                 or (current_ip not in candidates and (not self._streaming or not current_ip_alive or not self._is_stream_delivering()))
                             )
                             if not should_update_ip and active_adapter_ip and not self._is_stream_delivering():
@@ -3743,6 +3758,8 @@ class AirSpeakerApp:
                                 if self._audio_capture:
                                     threading.Thread(target=self._audio_capture.ensure_alive, daemon=True).start()
 
+                        self.phone_ip_var.set(f"Phone: {self.ip_var.get().strip() or best_ip}:{self.ip_port_var.get().strip() or AUDIO_PORT}")
+
                     elif kind == "stats":
                         s = data
                         sender_ip_stat = s.get("_sender_ip")
@@ -3767,12 +3784,25 @@ class AirSpeakerApp:
                             self._last_peer_ip = sender_ip
                         rx_pps_phone = int(s.get("rx_pps", 0) or 0)
                         if rx_pps_phone > 0:
-                            self._last_rx_pps_nonzero_time = time.time()
+                            self._last_phone_rx_pps_time = time.monotonic()
                         is_playing = bool(s.get("playing", False)) or rx_pps_phone > 0
                         is_serving = bool(s.get("serving", False)) or int(s.get("serve_pps", 0) or 0) > 0
 
+                        up_prefixes = {
+                            ".".join(a["ip"].split(".")[:3]) + "."
+                            for a in self._adapter_data
+                            if a.get("is_up") and a.get("ip")
+                        }
+                        cur_ip_on_up_subnet = bool(cur_ip) and any(cur_ip.startswith(p) for p in up_prefixes)
+
                         if self._normal_streaming and is_playing and sender_ip and self._manual_ip_override is None and not s.get("party_join"):
-                            if sender_ip != cur_ip and not self._is_ip_recently_seen(cur_ip) and not self._is_stream_delivering():
+                            should_stat_switch = (
+                                sender_ip != cur_ip
+                                and rx_pps_phone == 0
+                                and not self._is_stream_delivering()
+                                and (not self._is_ip_recently_seen(cur_ip) or not cur_ip_on_up_subnet)
+                            )
+                            if should_stat_switch:
                                 self.ip_var.set(sender_ip)
                                 if self._control_listener:
                                     self._control_listener.set_target_ip(sender_ip)
@@ -3836,7 +3866,7 @@ class AirSpeakerApp:
         self._ui_queue.put(("driver_done", (ok, msg)))
 
     def _rename_device(self) -> None:
-        ok, msg = set_virtual_device_friendly_name("Air Speaker Virtual Audio")
+        ok, msg = set_virtual_device_friendly_name("AirSpeaker Virtual Audio")
         if ok:
             messagebox.showinfo("Virtual Device", msg)
             self._check_virtual_device_status()
@@ -3952,11 +3982,12 @@ class AirSpeakerApp:
         with self._party_lock:
             self.cfg["party_ips"] = list(self._party_devices.keys())
         self.cfg["config_rev"] = self._config_rev
+        self.cfg["listen_port"] = self._get_pc_listen_port()
         save(self.cfg)
 
     def _show_help_dialog(self) -> None:
         dlg = tk.Toplevel(self.root)
-        dlg.title("Air Speaker v1 Studio — User Guide & Help")
+        dlg.title("AirSpeaker — User Guide & Help")
         dlg.configure(bg=BG)
         dlg.geometry("680x580")
         dlg.resizable(True, True)
@@ -3964,7 +3995,7 @@ class AirSpeakerApp:
         header = tk.Frame(dlg, bg=BG)
         header.pack(fill="x", padx=12, pady=(10, 6))
         tk.Label(
-            header, text="◀ Air Speaker v1 Studio Guide ▶",
+            header, text="◀ AirSpeaker Guide ▶",
             bg=BG, fg=ACCENT, font=FONT_MONO_LG
         ).pack(side="left")
         ttk.Button(header, text="✕ Close", command=dlg.destroy).pack(side="right")
@@ -3984,7 +4015,7 @@ class AirSpeakerApp:
         scrollbar.config(command=guide_text.yview)
 
         help_content = """============================================================
-AIR SPEAKER v1 STUDIO — USER GUIDE (CROSS-PLATFORM STUDIO)
+AIRSPEAKER — USER GUIDE (CROSS-PLATFORM STUDIO)
 ============================================================
 
 PLATFORMS SUPPORTED:
@@ -4040,7 +4071,7 @@ TABS:
             img = _make_tray_image(64)
             if img is None:
                 return
-            self._tray_icon = pystray.Icon("AirSpeaker", img, "Air Speaker v1", menu)
+            self._tray_icon = pystray.Icon("AirSpeaker", img, "AirSpeaker", menu)
             threading.Thread(target=self._tray_icon.run, daemon=True).start()
         except Exception as e:
             logger.warning("Failed to start tray icon: %s", e)
@@ -4315,8 +4346,8 @@ TABS:
                 else:
                     def _up_to_date():
                         self.btn_check_updates.config(state="normal")
-                        self.update_status_label.config(text=f"Air Speaker v{APP_VERSION} is up to date.", fg=ACCENT)
-                        messagebox.showinfo("Up to Date", f"Air Speaker v{APP_VERSION} is currently up to date!")
+                        self.update_status_label.config(text=f"AirSpeaker v{APP_VERSION} is up to date.", fg=ACCENT)
+                        messagebox.showinfo("Up to Date", f"AirSpeaker v{APP_VERSION} is currently up to date!")
                     self.root.after(0, _up_to_date)
             except urllib.error.HTTPError as exc:
                 def _http_err():

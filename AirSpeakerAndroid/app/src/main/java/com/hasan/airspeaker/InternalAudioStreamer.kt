@@ -382,7 +382,7 @@ class InternalAudioStreamer {
                             val peerAddr = resolveAddress(peerIp)
                             if (peerAddr != null) {
                                 try {
-                                    val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, curTargetPort)
+                                    val peerDgram = DatagramPacket(packetBytes, packetSize, peerAddr, 5004)
                                     sock.send(peerDgram)
                                 } catch (_: Exception) {}
                             }

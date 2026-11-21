@@ -333,7 +333,10 @@ struct PlayerStudioTab: View {
 
                         Button(action: {
                             if let p = UInt16(phoneListenPortInput.trimmingCharacters(in: .whitespacesAndNewlines)), p >= 1024 {
+                                phoneListenPortInput = "\(p)"
                                 engine.applyLocalListenPort(p)
+                            } else {
+                                phoneListenPortInput = "\(engine.localListenPort)"
                             }
                         }) {
                             Text("APPLY")
@@ -373,7 +376,10 @@ struct PlayerStudioTab: View {
                         Button(action: {
                             let trimmed = pcIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
                             if let portVal = UInt16(pcPortInput.trimmingCharacters(in: .whitespacesAndNewlines)), portVal >= 1024 {
+                                pcPortInput = "\(portVal)"
                                 engine.applyTargetServerPort(portVal)
+                            } else if !pcPortInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                pcPortInput = "\(engine.targetServerPort)"
                             }
                             if !trimmed.isEmpty {
                                 engine.connectedServerIp = trimmed
@@ -615,7 +621,10 @@ struct ServeStudioTab: View {
                         Button(action: {
                             let trimmed = targetIpInput.trimmingCharacters(in: .whitespacesAndNewlines)
                             if let portVal = UInt16(targetPortInput.trimmingCharacters(in: .whitespacesAndNewlines)), portVal >= 1024 {
+                                targetPortInput = "\(portVal)"
                                 engine.applyTargetServerPort(portVal)
+                            } else if !targetPortInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                targetPortInput = "\(engine.targetServerPort)"
                             }
                             if !trimmed.isEmpty {
                                 engine.updateServeTargetIp(trimmed)
