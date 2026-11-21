@@ -74,20 +74,53 @@ class AudioStreamService : Service() {
         @Volatile var activeBackendLabel: String = "OBOE"
             private set
 
+        @Volatile var isUserMuted: Boolean = false
+            private set
+
         fun setUserVolumeGain(gain: Float) {
             val clamped = gain.coerceIn(0f, 2f)
             instance?.savedVolumeGain = clamped
-            AudioNative.nativeSetVolumeGain(clamped)
+            AudioNative.safeSetVolumeGain(clamped)
+        }
+
+        fun setUserMuted(muted: Boolean) {
+            isUserMuted = muted
+            val svc = instance
+            if (svc != null) {
+                svc.userMuted = muted
+                if (!muted) {
+                    svc.pausedByHeadset = false
+                    svc.pausedByFocus = false
+                }
+                svc.applyEffectiveMuteAndGain()
+            } else {
+                AudioNative.safeSetMuted(muted)
+            }
         }
 
         private var lastServiceConfigRev = 0
         private val seenServiceSyncIds = ArrayDeque<Int>(32)
+        private var latestMergedConfig: JSONObject? = null
 
         @Synchronized
         fun getLatestConfigRev(): Int = lastServiceConfigRev
 
         @Synchronized
-        fun markLocalConfigSent(rev: Int, syncId: Int) {
+        fun getLatestSyncedConfig(): JSONObject? = latestMergedConfig?.let { JSONObject(it.toString()) }
+
+        @Synchronized
+        private fun cacheMergedConfig(json: JSONObject) {
+            val merged = latestMergedConfig ?: JSONObject()
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                merged.put(k, json.get(k))
+            }
+            latestMergedConfig = merged
+        }
+
+        @Synchronized
+        fun markLocalConfigSent(rev: Int, syncId: Int, json: JSONObject? = null) {
             if (rev > lastServiceConfigRev) {
                 lastServiceConfigRev = rev
             }
@@ -95,6 +128,9 @@ class AudioStreamService : Service() {
                 seenServiceSyncIds.removeFirst()
             }
             seenServiceSyncIds.addLast(syncId)
+            if (json != null) {
+                cacheMergedConfig(json)
+            }
         }
     }
 
@@ -505,6 +541,7 @@ class AudioStreamService : Service() {
 
     private fun startAudioPlayer(port: Int = 5004) {
         Log.d(TAG, "startAudioPlayer entry on port $port")
+        userMuted = isUserMuted
         pausedByHeadset = false
         pausedByFocus = false
         applyEffectiveMuteAndGain()
@@ -750,7 +787,8 @@ class AudioStreamService : Service() {
                 } else if (incomingRev <= lastServiceConfigRev) {
                     return
                 }
-                lastServiceConfigRev = maxOf(lastServiceConfigRev, incomingRev) + 1
+                lastServiceConfigRev = maxOf(lastServiceConfigRev, incomingRev)
+                cacheMergedConfig(json)
             }
 
             sendBroadcast(
@@ -760,17 +798,18 @@ class AudioStreamService : Service() {
             )
 
             if (json.has("custom_buffer_ms")) {
-                AudioNative.nativeSetTargetBufferMs(json.getDouble("custom_buffer_ms").toFloat())
+                AudioNative.safeSetTargetBufferMs(json.getDouble("custom_buffer_ms").toFloat())
             }
             if (json.has("auto_buffer")) {
-                AudioNative.nativeSetAutoMode(json.getBoolean("auto_buffer"))
+                AudioNative.safeSetAutoMode(json.getBoolean("auto_buffer"))
             }
             if (json.has("volume_gain")) {
                 savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                AudioNative.nativeSetVolumeGain(savedVolumeGain)
+                AudioNative.safeSetVolumeGain(savedVolumeGain)
             }
             if (json.has("muted")) {
                 userMuted = json.getBoolean("muted")
+                isUserMuted = userMuted
                 if (!userMuted) {
                     pausedByHeadset = false
                     pausedByFocus = false

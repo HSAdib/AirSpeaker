@@ -211,7 +211,7 @@ bool JitterBuffer::processPackets(int16_t* decoded_buf) {
         mHasStarted = false;
         mIsPrebuffering = true;
         if (resetReq) {
-            mPcmRingBuffer.reset();
+            mPcmRingBuffer.flushFromProducer();
         }
         std::lock_guard<std::mutex> lock(mPacketMutex);
         if (mPacketMap.empty()) return false;

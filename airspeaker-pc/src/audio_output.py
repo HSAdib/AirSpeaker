@@ -325,7 +325,13 @@ class AudioReceiver:
         self._lock = threading.Lock()
         self._volume_gain: float = 1.0
         self._pps_count = 0
+        self._current_rx_pps = 0
         self._last_pps_time = 0.0
+        self._rx_packets: int = 0
+        self._lost_packets: int = 0
+        self._late_packets: int = 0
+        self._underruns: int = 0
+        self._active_codec: int = CODEC_PCM16
         self.peak_level: float = 0.0
         self._frame_duration_ms: float = 5.0
 
@@ -424,20 +430,42 @@ class AudioReceiver:
             return True
         return False
 
+    def get_stats(self) -> Dict[str, float]:
+        buf_ms = float(len(self._pcm_queue) * self._frame_duration_ms)
+        total_pkts = self._rx_packets + self._lost_packets
+        loss_pct = (self._lost_packets * 100.0 / total_pkts) if total_pkts > 0 else 0.0
+        return {
+            "buffer_ms": buf_ms,
+            "target_ms": float(self._target_buffer_ms),
+            "codec": "Opus" if self._active_codec == CODEC_OPUS else "PCM16",
+            "rx_pps": self._current_rx_pps,
+            "underruns": self._underruns,
+            "lost_packets": self._lost_packets,
+            "packet_loss_pct": loss_pct,
+            "late_packets": self._late_packets,
+            "rx_packets": self._rx_packets,
+        }
+
     def _close_audio_sink(self) -> None:
         self._resampler = None
         if self._pacat_proc:
-            try:
-                if self._pacat_proc.stdin:
-                    self._pacat_proc.stdin.close()
-            except Exception:
-                pass
-            try:
-                self._pacat_proc.terminate()
-                self._pacat_proc.wait(timeout=1.0)
-            except Exception:
-                pass
+            proc = self._pacat_proc
             self._pacat_proc = None
+            try:
+                if proc.stdin:
+                    proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    logger.warning("pacat did not exit after terminate(); sending SIGKILL")
+                    proc.kill()
+                    proc.wait(timeout=1.0)
+            except Exception:
+                pass
         if self._stream:
             try:
                 self._stream.stop_stream()
@@ -489,6 +517,12 @@ class AudioReceiver:
             self._last_valid_frame = b"\x00" * 960
             self._pcm_queue.clear()
             self._pps_count = 0
+            self._current_rx_pps = 0
+            self._rx_packets = 0
+            self._lost_packets = 0
+            self._late_packets = 0
+            self._underruns = 0
+            self._active_codec = CODEC_PCM16
             self._last_pps_time = time.monotonic()
             self._rx_thread = threading.Thread(target=self._rx_loop, name="PhoneAudioRxSocket", daemon=True)
             self._play_thread = threading.Thread(target=self._play_loop, name="PhoneAudioRxPlay", daemon=True)
@@ -558,13 +592,18 @@ class AudioReceiver:
                     if sender_ip == self._last_sender_ip and self._last_seq is not None:
                         diff = (self._last_seq - seq) & 0xFFFFFFFF
                         if seq == self._last_seq or (0 < diff < 500):
+                            self._late_packets += 1
                             continue
+                        fwd_diff = (seq - self._last_seq) & 0xFFFFFFFF
+                        if 1 < fwd_diff < 500:
+                            self._lost_packets += (fwd_diff - 1)
                     self._last_seq = seq
                     self._last_sender_ip = sender_ip
 
                     payload = data[12:]
                     codec = header["codec"]
                     channels = header["channels"]
+                    self._active_codec = codec
 
                     decoded_pcm = None
                     out_channels = CHANNELS
@@ -582,6 +621,7 @@ class AudioReceiver:
                             continue
                         decoded_pcm = decoded_pcm[:usable]
                         self._pps_count += 1
+                        self._rx_packets += 1
                         self._last_rx_time = time.monotonic()
                         if not self._manual_mute:
                             self._muted = False
@@ -602,6 +642,7 @@ class AudioReceiver:
             if (now - self._last_pps_time) >= 1.0:
                 elapsed = now - self._last_pps_time
                 pps = int(round(self._pps_count / elapsed))
+                self._current_rx_pps = pps
                 if self._on_stats:
                     try:
                         self._on_stats(pps)
@@ -725,6 +766,8 @@ class AudioReceiver:
                 else:
                     now = time.monotonic()
                     if (now - self._last_rx_time) < 0.060 and self._conceal_count < 4 and not self._muted:
+                        if self._conceal_count == 0:
+                            self._underruns += 1
                         self._conceal_count += 1
                         arr = np.frombuffer(self._last_valid_frame, dtype="<i2").astype(np.float32) * 0.80
                         self._last_valid_frame = arr.astype("<i2").tobytes()

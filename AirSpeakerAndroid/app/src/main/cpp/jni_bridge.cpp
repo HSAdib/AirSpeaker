@@ -1,10 +1,11 @@
 #include "native_audio.h"
 #include <jni.h>
+#include <memory>
 #include <mutex>
 #include <algorithm>
 #include <cmath>
 
-static NativeAudioEngine* gAudioEngine = nullptr;
+static std::shared_ptr<NativeAudioEngine> gAudioEngine;
 static std::mutex gEngineMutex;
 
 // Cached settings so UI changes made before nativeStart() are preserved
@@ -27,7 +28,7 @@ JNIEXPORT jboolean JNICALL
 Java_com_hasan_airspeaker_AudioNative_nativeStart(JNIEnv* /*env*/, jobject /*thiz*/, jint port) {
     std::lock_guard<std::mutex> lock(gEngineMutex);
     if (!gAudioEngine) {
-        gAudioEngine = new NativeAudioEngine();
+        gAudioEngine = std::make_shared<NativeAudioEngine>();
     }
     gAudioEngine->setTargetBufferMs(gSavedTargetMs);
     gAudioEngine->setAutoMode(gSavedAutoMode);
@@ -44,12 +45,16 @@ Java_com_hasan_airspeaker_AudioNative_nativeStart(JNIEnv* /*env*/, jobject /*thi
 
 JNIEXPORT void JNICALL
 Java_com_hasan_airspeaker_AudioNative_nativeStop(JNIEnv* /*env*/, jobject /*thiz*/) {
-    std::lock_guard<std::mutex> lock(gEngineMutex);
-    if (gAudioEngine) {
-        gAudioEngine->stop();
-        delete gAudioEngine;
-        gAudioEngine = nullptr;
+    std::shared_ptr<NativeAudioEngine> engineToStop;
+    {
+        std::lock_guard<std::mutex> lock(gEngineMutex);
+        engineToStop = std::move(gAudioEngine);
+        if (engineToStop) {
+            engineToStop->stop();
+        }
     }
+    // Destruction occurs here only after all in-flight local shared_ptr holders exit.
+    engineToStop.reset();
 }
 
 JNIEXPORT void JNICALL
@@ -308,7 +313,7 @@ Java_com_hasan_airspeaker_AudioNative_nativeReadExternalPcm(JNIEnv* env, jobject
     jsize len = env->GetArrayLength(outBuffer);
     if (len < numFrames * 2) return 0;
 
-    NativeAudioEngine* engine = nullptr;
+    std::shared_ptr<NativeAudioEngine> engine;
     {
         std::lock_guard<std::mutex> lock(gEngineMutex);
         engine = gAudioEngine;

@@ -49,6 +49,17 @@ public:
     }
 
     /**
+     * Producer-only lock-free flush for live streams.
+     * Advances mMinimumReadableSequence to mWriteSequence without touching
+     * mReadSequence or mBuffer, preserving strict SPSC ownership while the
+     * audio callback thread is concurrently executing readFrames().
+     */
+    void flushFromProducer() {
+        uint64_t cur_write = mWriteSequence.load(std::memory_order_relaxed);
+        mMinimumReadableSequence.store(cur_write, std::memory_order_release);
+    }
+
+    /**
      * Producer: write decoded stereo PCM frames into the ring buffer.
      * Called strictly from the dedicated decode/reorder worker thread.
      * Never modifies mReadSequence.

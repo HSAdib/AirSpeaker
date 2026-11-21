@@ -480,7 +480,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     // MARK: - Synchronization & Locks
     private let peersLock = NSLock()
     private let stateLock = NSLock()
+    private let socketLock = NSLock()        // Guards serveTxSocket and relayTxSocket FD lifecycle & sendto()
+    private let controlSocketLock = NSLock() // Guards controlSocket FD lifecycle & sendto()
     private let atomicUnderruns = AtomicInt()
+    private var cachedSubnetBroadcastIp: String = ""
+    private var lastSubnetBroadcastRefresh: TimeInterval = 0
     private var lastSyncId: Int = Int(Date().timeIntervalSince1970 * 1000) & 0x7FFFFFFF
     private var seenSyncIds: [Int] = []
     private var suppressSync: Bool = false
@@ -509,6 +513,26 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private var controlSocket: Int32 = -1
     private var serveTxSocket: Int32 = -1
     private var relayTxSocket: Int32 = -1
+
+    private func getCachedSubnetBroadcastIp(forceRefresh: Bool = false) -> String? {
+        let now = ProcessInfo.processInfo.systemUptime
+        stateLock.lock()
+        let shouldRefresh = forceRefresh || cachedSubnetBroadcastIp.isEmpty || (now - lastSubnetBroadcastRefresh > 2.0)
+        let existing = cachedSubnetBroadcastIp
+        stateLock.unlock()
+
+        if !shouldRefresh {
+            return existing.isEmpty ? nil : existing
+        }
+
+        let parts = AirSpeakerEngine.getPreferredHostIp().split(separator: ".")
+        let bcast = (parts.count == 4 && parts[0] != "127") ? "\(parts[0]).\(parts[1]).\(parts[2]).255" : ""
+        stateLock.lock()
+        cachedSubnetBroadcastIp = bcast
+        lastSubnetBroadcastRefresh = now
+        stateLock.unlock()
+        return bcast.isEmpty ? nil : bcast
+    }
 
     // Rx Session State & Socket Safety
     private let rxStateLock = NSLock()
@@ -990,10 +1014,15 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         var buffer = [UInt8](repeating: 0, count: 4096)
         var senderAddr = sockaddr_in()
         var senderLen = socklen_t(MemoryLayout<sockaddr_in>.size)
-        var localSeqLast: UInt32 = 0
+        var hasSeqInitialized = false
+        var expectedSeq64: UInt64 = 0
+        var highestSeq64: UInt64 = 0
+        var lastPacketArrivalUptime: TimeInterval = 0
+        var reorderMap: [UInt64: (channels: Int, payload: [UInt8])] = [:]
+        reorderMap.reserveCapacity(32)
         var localLastSyncReq: TimeInterval = 0
         var cachedMyIps: [String] = AirSpeakerEngine.getLocalIpv4Addresses()
-        var lastIpRefresh: TimeInterval = Date().timeIntervalSince1970
+        var lastIpRefresh: TimeInterval = ProcessInfo.processInfo.systemUptime
 
         while isRxSessionActive(sessionId) {
             let bytesRead = withUnsafeMutablePointer(to: &senderAddr) { addrPtr in
@@ -1054,14 +1083,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 continue
             }
 
-            // Snapshot thread-safe state
+            // Snapshot thread-safe state (packet loss is accounted after reorder window below)
             stateLock.lock()
-            if seq < 15 && localSeqLast > 30 {
-                localSeqLast = seq
-            } else if localSeqLast > 0 && seq > localSeqLast + 1 {
-                packetsLost += UInt64(seq - localSeqLast - 1)
-            }
-            localSeqLast = seq
             packetsReceived += 1
             let relayActive = atomicRelayActive
             let curVolume = atomicVolume
@@ -1109,103 +1132,171 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 continue
             }
 
-            // Audio Playout (PCM16): payload begins at byte 12
-            let pcmPayloadBytes = bytesRead - 12
-            let sampleCount = pcmPayloadBytes / 2
-            let frameCount = AVAudioFrameCount(channels == 1 ? sampleCount : (sampleCount / 2))
-            guard frameCount > 0 else { continue }
+            // Audio Playout (PCM16) with 32-bit wrap-safe reordering & accurate loss accounting
+            let nowUptime = ProcessInfo.processInfo.systemUptime
+            let isStreamRestart = !hasSeqInitialized
+                || (nowUptime - lastPacketArrivalUptime) > 0.6
+                || (seq < 15 && (highestSeq64 & 0xFFFF_FFFF) > 30 && (highestSeq64 & 0xFFFF_FFFF) < 0xFFFE_0000)
+            lastPacketArrivalUptime = nowUptime
 
-            let frameDurMs = max(1.0, (Double(frameCount) * 1000.0) / 48000.0)
-            stateLock.lock()
-            atomicFrameDurationMs = frameDurMs
-            stateLock.unlock()
+            let seq64: UInt64
+            if isStreamRestart {
+                reorderMap.removeAll(keepingCapacity: true)
+                hasSeqInitialized = true
+                seq64 = UInt64(seq)
+                expectedSeq64 = seq64
+                highestSeq64 = seq64
+            } else {
+                let diffFromHighest = Int32(bitPattern: seq &- UInt32(truncatingIfNeeded: highestSeq64))
+                let signedSeq = Int64(highestSeq64) + Int64(diffFromHighest)
+                guard signedSeq >= 0 else { continue }
+                seq64 = UInt64(signedSeq)
 
-            // Dynamic buffer thresholds based on real frame duration (5ms, 10ms, or 20ms)
-            let maxQueued = max(8, Int(ceil((Double(effectiveTargetMs) * 2.0) / frameDurMs)))
-            if audioBufferQueueCount.value >= maxQueued {
-                atomicOverflows.increment()
-                continue
+                // Drop late packets already played past expectedSeq64 without mutating highestSeq64 or double-counting loss
+                if seq64 < expectedSeq64 {
+                    continue
+                }
+                if seq64 > highestSeq64 {
+                    highestSeq64 = seq64
+                }
+                if reorderMap[seq64] != nil {
+                    continue
+                }
             }
 
-            if let pcmBuf = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) {
-                pcmBuf.frameLength = frameCount
-                let left = pcmBuf.floatChannelData![0]
-                let right = pcmBuf.floatChannelData![1]
+            let pcmPayloadBytes = bytesRead - 12
+            guard pcmPayloadBytes >= 2 else { continue }
+            reorderMap[seq64] = (channels: channels, payload: Array(buffer[12..<bytesRead]))
 
-                if channels == 1 {
-                    for i in 0..<Int(frameCount) {
-                        let off = 12 + i * 2
-                        let u16 = UInt16(buffer[off]) | (UInt16(buffer[off + 1]) << 8)
-                        let s = Float(Int16(bitPattern: u16)) / 32768.0
-                        left[i] = s
-                        right[i] = s
+            // Hard bound on reorder map size (64 packets)
+            while reorderMap.count > 64 {
+                if let oldestKey = reorderMap.keys.min() {
+                    reorderMap.removeValue(forKey: oldestKey)
+                    if oldestKey >= expectedSeq64 {
+                        let skipped = (oldestKey - expectedSeq64) + 1
+                        stateLock.lock()
+                        packetsLost += skipped
+                        stateLock.unlock()
+                        expectedSeq64 = oldestKey + 1
                     }
                 } else {
-                    for i in 0..<Int(frameCount) {
-                        let offL = 12 + i * 4
-                        let offR = offL + 2
-                        let uL = UInt16(buffer[offL]) | (UInt16(buffer[offL + 1]) << 8)
-                        let uR = UInt16(buffer[offR]) | (UInt16(buffer[offR + 1]) << 8)
-                        left[i] = Float(Int16(bitPattern: uL)) / 32768.0
-                        right[i] = Float(Int16(bitPattern: uR)) / 32768.0
+                    break
+                }
+            }
+
+            // Reorder window: hold up to 3 packets (15ms) to recover out-of-order arrivals before declaring loss
+            let maxReorderWindow: UInt64 = 3
+            while isRxSessionActive(sessionId) {
+                if let entry = reorderMap.removeValue(forKey: expectedSeq64) {
+                    expectedSeq64 &+= 1
+                    let payload = entry.payload
+                    let pktChannels = entry.channels
+                    let sampleCount = payload.count / 2
+                    let frameCount = AVAudioFrameCount(pktChannels == 1 ? sampleCount : (sampleCount / 2))
+                    guard frameCount > 0 else { continue }
+
+                    let frameDurMs = max(1.0, (Double(frameCount) * 1000.0) / 48000.0)
+                    stateLock.lock()
+                    atomicFrameDurationMs = frameDurMs
+                    stateLock.unlock()
+
+                    let maxQueued = max(8, Int(ceil((Double(effectiveTargetMs) * 2.0) / frameDurMs)))
+                    if audioBufferQueueCount.value >= maxQueued {
+                        atomicOverflows.increment()
+                        continue
                     }
-                }
 
-                let gain: Float = curMuted ? 0.0 : curVolume
-                if curMuted {
-                    memset(left, 0, Int(frameCount) * MemoryLayout<Float>.size)
-                    memset(right, 0, Int(frameCount) * MemoryLayout<Float>.size)
-                    rxEQDSP.reset()
-                } else {
-                    rxEQDSP.processFloatStereo(left: left, right: right, frameCount: Int(frameCount), gain: gain)
-                }
+                    if let pcmBuf = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) {
+                        pcmBuf.frameLength = frameCount
+                        let left = pcmBuf.floatChannelData![0]
+                        let right = pcmBuf.floatChannelData![1]
 
-                let minPrebuffer = max(2, Int(round(Double(effectiveTargetMs) / frameDurMs)))
-                guard isRxSessionActive(sessionId) else { break }
-                audioControlQueue.async { [weak self] in
-                    guard let self = self, self.isRxSessionActive(sessionId) else { return }
-
-                    let playSession = self.playbackSessionId
-                    if self.audioBufferQueueCount.value == 0 && !self.isPrebufferingAudio {
-                        self.atomicUnderruns.increment()
-                        self.isPrebufferingAudio = true
-                        if self.playerNode.isPlaying {
-                            self.playerNode.pause()
+                        if pktChannels == 1 {
+                            for i in 0..<Int(frameCount) {
+                                let off = i * 2
+                                let u16 = UInt16(payload[off]) | (UInt16(payload[off + 1]) << 8)
+                                let s = Float(Int16(bitPattern: u16)) / 32768.0
+                                left[i] = s
+                                right[i] = s
+                            }
+                        } else {
+                            for i in 0..<Int(frameCount) {
+                                let offL = i * 4
+                                let offR = offL + 2
+                                let uL = UInt16(payload[offL]) | (UInt16(payload[offL + 1]) << 8)
+                                let uR = UInt16(payload[offR]) | (UInt16(payload[offR + 1]) << 8)
+                                left[i] = Float(Int16(bitPattern: uL)) / 32768.0
+                                right[i] = Float(Int16(bitPattern: uR)) / 32768.0
+                            }
                         }
-                    }
-                    self.audioBufferQueueCount.increment()
-                    self.playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
-                        guard let self = self else { return }
-                        self.audioControlQueue.async {
-                            if self.playbackSessionId == playSession {
-                                self.audioBufferQueueCount.decrement()
+
+                        let gain: Float = curMuted ? 0.0 : curVolume
+                        if curMuted {
+                            memset(left, 0, Int(frameCount) * MemoryLayout<Float>.size)
+                            memset(right, 0, Int(frameCount) * MemoryLayout<Float>.size)
+                            rxEQDSP.reset()
+                        } else {
+                            rxEQDSP.processFloatStereo(left: left, right: right, frameCount: Int(frameCount), gain: gain)
+                        }
+
+                        let minPrebuffer = max(2, Int(round(Double(effectiveTargetMs) / frameDurMs)))
+                        guard isRxSessionActive(sessionId) else { break }
+                        audioControlQueue.async { [weak self] in
+                            guard let self = self, self.isRxSessionActive(sessionId) else { return }
+
+                            let playSession = self.playbackSessionId
+                            if self.audioBufferQueueCount.value == 0 && !self.isPrebufferingAudio {
+                                self.atomicUnderruns.increment()
+                                self.isPrebufferingAudio = true
+                                if self.playerNode.isPlaying {
+                                    self.playerNode.pause()
+                                }
+                            }
+                            self.audioBufferQueueCount.increment()
+                            self.playerNode.scheduleBuffer(pcmBuf, at: nil, options: []) { [weak self] in
+                                guard let self = self else { return }
+                                self.audioControlQueue.async {
+                                    if self.playbackSessionId == playSession {
+                                        self.audioBufferQueueCount.decrement()
+                                    }
+                                }
+                            }
+                            if self.isPrebufferingAudio && self.audioBufferQueueCount.value >= minPrebuffer {
+                                self.isPrebufferingAudio = false
+                                if !self.audioEngine.isRunning {
+                                    try? self.audioEngine.start()
+                                }
+                                if !self.playerNode.isPlaying {
+                                    self.playerNode.play()
+                                }
                             }
                         }
                     }
-                    if self.isPrebufferingAudio && self.audioBufferQueueCount.value >= minPrebuffer {
-                        self.isPrebufferingAudio = false
-                        if !self.audioEngine.isRunning {
-                            try? self.audioEngine.start()
-                        }
-                        if !self.playerNode.isPlaying {
-                            self.playerNode.play()
-                        }
-                    }
+                } else if highestSeq64 >= expectedSeq64 && (highestSeq64 - expectedSeq64) > maxReorderWindow {
+                    // Packet expectedSeq64 did not arrive within the reorder window -> count as lost once and advance
+                    stateLock.lock()
+                    packetsLost += 1
+                    stateLock.unlock()
+                    expectedSeq64 &+= 1
+                } else {
+                    break
                 }
             }
         }
     }
 
     private func sendAudioPacket(_ data: [UInt8], toIp: String, port: Int) {
-        if relayTxSocket < 0 {
-            relayTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
-        }
-        guard relayTxSocket >= 0 else { return }
-
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port = in_port_t(port).bigEndian
         guard inet_pton(AF_INET, toIp, &dest.sin_addr) == 1 else { return }
+
+        socketLock.lock()
+        defer { socketLock.unlock() }
+        if relayTxSocket < 0 {
+            relayTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
+        }
+        guard relayTxSocket >= 0 else { return }
 
         _ = withUnsafePointer(to: &dest) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -1327,25 +1418,42 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             return
         }
 
-        serveTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
-        guard serveTxSocket >= 0 else {
+        // Pre-warm subnet broadcast IP on caller thread so the real-time audio callback never calls getifaddrs()
+        _ = getCachedSubnetBroadcastIp(forceRefresh: true)
+
+        let newSock = socket(AF_INET, SOCK_DGRAM, 0)
+        guard newSock >= 0 else {
             DispatchQueue.main.async {
                 self.statusMessage = "Failed to open UDP transmit socket"
             }
             return
         }
         var broadcast: Int32 = 1
-        setsockopt(serveTxSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(newSock, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
         var sndBuf: Int32 = 65536
-        setsockopt(serveTxSocket, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(newSock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+        socketLock.lock()
+        closeSocket(&serveTxSocket)
+        serveTxSocket = newSock
+        socketLock.unlock()
 
         var seq: UInt32 = 1
         var sampleAccumulator: [Int16] = []
         let serveLock = NSLock()
+        var resamplePhase: Double = 0.0
+        var prevResampleL: Float = 0.0
+        var prevResampleR: Float = 0.0
+        var hasPrevResample: Bool = false
 
         recorder.startCapture(handler: { [weak self] (sampleBuffer, bufferType, error) in
-            guard let self = self, error == nil, bufferType == .audioApp, self.serveTxSocket >= 0 else { return }
-            guard var decodedStereo = self.extractInterleavedInt16Stereo(from: sampleBuffer) else { return }
+            guard let self = self, error == nil, bufferType == .audioApp else { return }
+            self.socketLock.lock()
+            let txOpen = self.serveTxSocket >= 0
+            self.socketLock.unlock()
+            guard txOpen else { return }
+
+            guard let rawStereo = self.extractInterleavedInt16Stereo(from: sampleBuffer) else { return }
 
             var inSampleRate: Double = 48000.0
             if let fmtDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
@@ -1356,27 +1464,49 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 }
             }
 
-            // Resample to 48 kHz stereo if iOS ReplayKit delivers 44.1 kHz
-            if abs(inSampleRate - 48000.0) > 100.0 && decodedStereo.count >= 4 {
-                let inFrames = decodedStereo.count / 2
-                let outFrames = max(1, Int(round(Double(inFrames) * 48000.0 / inSampleRate)))
-                var resampled = [Int16](repeating: 0, count: outFrames * 2)
-                let ratio = Double(inFrames - 1) / Double(max(1, outFrames - 1))
-                for f in 0..<outFrames {
-                    let srcPos = Double(f) * ratio
-                    let idx0 = min(inFrames - 1, Int(srcPos))
-                    let idx1 = min(inFrames - 1, idx0 + 1)
-                    let frac = Float(srcPos - Double(idx0))
-                    let l = Float(decodedStereo[idx0 * 2]) * (1.0 - frac) + Float(decodedStereo[idx1 * 2]) * frac
-                    let r = Float(decodedStereo[idx0 * 2 + 1]) * (1.0 - frac) + Float(decodedStereo[idx1 * 2 + 1]) * frac
-                    resampled[f * 2] = Int16(max(-32768.0, min(32767.0, l)))
-                    resampled[f * 2 + 1] = Int16(max(-32768.0, min(32767.0, r)))
-                }
-                decodedStereo = resampled
-            }
-
             var maxSample: Int32 = 0
             serveLock.lock()
+
+            // Fractional phase-continuous resampler (eliminates chunk-boundary clicks at 44.1 kHz -> 48 kHz)
+            let decodedStereo: [Int16]
+            if abs(inSampleRate - 48000.0) > 100.0 && rawStereo.count >= 2 {
+                let inFrames = rawStereo.count / 2
+                let step = inSampleRate / 48000.0
+                var resampled: [Int16] = []
+                resampled.reserveCapacity(Int(ceil(Double(inFrames) / step)) * 2 + 4)
+
+                let lastValidPos = Double(inFrames - 1)
+                while resamplePhase < lastValidPos {
+                    let l: Float
+                    let r: Float
+                    if resamplePhase < 0.0 {
+                        let frac = Float(resamplePhase + 1.0)
+                        let s0L = hasPrevResample ? prevResampleL : Float(rawStereo[0])
+                        let s0R = hasPrevResample ? prevResampleR : Float(rawStereo[1])
+                        l = s0L * (1.0 - frac) + Float(rawStereo[0]) * frac
+                        r = s0R * (1.0 - frac) + Float(rawStereo[1]) * frac
+                    } else {
+                        let idx0 = Int(resamplePhase)
+                        let idx1 = min(inFrames - 1, idx0 + 1)
+                        let frac = Float(resamplePhase - Double(idx0))
+                        l = Float(rawStereo[idx0 * 2]) * (1.0 - frac) + Float(rawStereo[idx1 * 2]) * frac
+                        r = Float(rawStereo[idx0 * 2 + 1]) * (1.0 - frac) + Float(rawStereo[idx1 * 2 + 1]) * frac
+                    }
+                    resampled.append(Int16(max(-32768.0, min(32767.0, l.rounded()))))
+                    resampled.append(Int16(max(-32768.0, min(32767.0, r.rounded()))))
+                    resamplePhase += step
+                }
+                prevResampleL = Float(rawStereo[(inFrames - 1) * 2])
+                prevResampleR = Float(rawStereo[(inFrames - 1) * 2 + 1])
+                hasPrevResample = true
+                resamplePhase -= Double(inFrames)
+                decodedStereo = resampled
+            } else {
+                resamplePhase = 0.0
+                hasPrevResample = false
+                decodedStereo = rawStereo
+            }
+
             sampleAccumulator.append(contentsOf: decodedStereo)
 
             while sampleAccumulator.count >= 480 {
@@ -1441,9 +1571,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 if let error = error {
                     self?.statusMessage = "Capture error: \(error.localizedDescription)"
                     self?.isInternalAudioServing = false
-                    if var sock = self?.serveTxSocket {
-                        self?.closeSocket(&sock)
-                        self?.serveTxSocket = -1
+                    if let self = self {
+                        self.socketLock.lock()
+                        self.closeSocket(&self.serveTxSocket)
+                        self.socketLock.unlock()
                     }
                 } else {
                     self?.isInternalAudioServing = true
@@ -1455,7 +1586,25 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     private func sendServePacket(_ packet: [UInt8], toIp: String) {
+        let subnetBcast = (toIp == "255.255.255.255") ? getCachedSubnetBroadcastIp() : nil
+
+        stateLock.lock()
+        let relayOn = self.atomicRelayActive
+        stateLock.unlock()
+
+        let peers: [String]
+        if relayOn {
+            peersLock.lock()
+            peers = Array(self.partyPeerIps)
+            peersLock.unlock()
+        } else {
+            peers = []
+        }
+
+        socketLock.lock()
+        defer { socketLock.unlock() }
         guard serveTxSocket >= 0 else { return }
+
         var destAddr = sockaddr_in()
         destAddr.sin_family = sa_family_t(AF_INET)
         destAddr.sin_port = in_port_t(5004).bigEndian
@@ -1467,14 +1616,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
         }
 
-        if toIp == "255.255.255.255" {
-            let parts = self.localIpAddress.split(separator: ".")
-            if parts.count == 4 {
-                let subnetBcast = "\(parts[0]).\(parts[1]).\(parts[2]).255"
-                var bcastAddr = sockaddr_in()
-                bcastAddr.sin_family = sa_family_t(AF_INET)
-                bcastAddr.sin_port = in_port_t(5004).bigEndian
-                inet_pton(AF_INET, subnetBcast, &bcastAddr.sin_addr)
+        if let bcast = subnetBcast {
+            var bcastAddr = sockaddr_in()
+            bcastAddr.sin_family = sa_family_t(AF_INET)
+            bcastAddr.sin_port = in_port_t(5004).bigEndian
+            if inet_pton(AF_INET, bcast, &bcastAddr.sin_addr) == 1 {
                 withUnsafePointer(to: &bcastAddr) { addrPtr in
                     _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
                         sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
@@ -1483,19 +1629,11 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
         }
 
-        stateLock.lock()
-        let relayOn = self.atomicRelayActive
-        stateLock.unlock()
-
-        if relayOn {
-            self.peersLock.lock()
-            let peers = Array(self.partyPeerIps)
-            self.peersLock.unlock()
-            for peer in peers where peer != toIp {
-                var peerAddr = sockaddr_in()
-                peerAddr.sin_family = sa_family_t(AF_INET)
-                peerAddr.sin_port = in_port_t(5004).bigEndian
-                inet_pton(AF_INET, peer, &peerAddr.sin_addr)
+        for peer in peers where peer != toIp {
+            var peerAddr = sockaddr_in()
+            peerAddr.sin_family = sa_family_t(AF_INET)
+            peerAddr.sin_port = in_port_t(5004).bigEndian
+            if inet_pton(AF_INET, peer, &peerAddr.sin_addr) == 1 {
                 withUnsafePointer(to: &peerAddr) { addrPtr in
                     _ = addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
                         sendto(self.serveTxSocket, packet, 972, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
@@ -1507,7 +1645,7 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
     public func stopServingInternalAudio() {
         guard isInternalAudioServing else { return }
-        RPScreenRecorder.shared().stopCapture { [weak self] error in
+        RPScreenRecorder.shared().stopCapture { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.txEQDSP.reset()
@@ -1515,7 +1653,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                 self.statusMessage = "Internal Audio Sender Stopped"
                 self.servePeakLevel = 0.0
                 self.serveTxPps = 0
+                self.socketLock.lock()
                 self.closeSocket(&self.serveTxSocket)
+                self.socketLock.unlock()
                 if !self.isAudioPlaying {
                     self.stopStatsTimer()
                 }
@@ -1849,14 +1989,18 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     public func toggleExtendParty() {
         isPartyExtending.toggle()
         if isPartyExtending {
+            socketLock.lock()
             if relayTxSocket < 0 {
                 relayTxSocket = socket(AF_INET, SOCK_DGRAM, 0)
                 var broadcast: Int32 = 1
                 setsockopt(relayTxSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
             }
+            socketLock.unlock()
             statusMessage = "Extending Party (Daisy-chain repeater active)"
         } else {
+            socketLock.lock()
             closeSocket(&relayTxSocket)
+            socketLock.unlock()
             statusMessage = "Party extension stopped"
         }
         broadcastBeacon()
@@ -1882,7 +2026,9 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         broadcastBeacon(explicitLeave: true)
         stopPartyKeepAliveTimer()
         stopSpeakerPlayer()
+        socketLock.lock()
         closeSocket(&relayTxSocket)
+        socketLock.unlock()
         partyScreen = "CHOOSER"
         isPartyHost = false
         isPartyHostBroadcasting = false
@@ -2121,12 +2267,16 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     public func sendControlMessage(_ dict: [String: Any], toIp: String) {
-        guard let data = try? JSONSerialization.data(withJSONObject: dict), controlSocket >= 0 else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
 
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port = in_port_t(5005).bigEndian
         guard inet_pton(AF_INET, toIp, &dest.sin_addr) == 1 else { return }
+
+        controlSocketLock.lock()
+        defer { controlSocketLock.unlock() }
+        guard controlSocket >= 0 else { return }
 
         data.withUnsafeBytes { ptr in
             withUnsafePointer(to: &dest) { addrPtr in
@@ -2151,9 +2301,14 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         stopPartyKeepAliveTimer()
         beaconTimer?.invalidate()
         beaconTimer = nil
+        socketLock.lock()
         closeSocket(&relayTxSocket)
+        closeSocket(&serveTxSocket)
+        socketLock.unlock()
         isRunningControl = false
+        controlSocketLock.lock()
         closeSocket(&controlSocket)
+        controlSocketLock.unlock()
     }
 
     // MARK: - Adapter Enumeration

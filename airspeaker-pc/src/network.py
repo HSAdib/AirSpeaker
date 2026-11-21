@@ -290,9 +290,6 @@ class UDPSender:
                 port = int(parts[1])
         with self._lock:
             self._party_targets[ip] = int(port)
-            if not self._target_ip:
-                self._target_ip = ip
-                self._target_port = int(port)
 
     def remove_party_target(self, ip: str) -> None:
         with self._lock:
@@ -301,8 +298,6 @@ class UDPSender:
     def clear_party_targets(self) -> None:
         with self._lock:
             self._party_targets.clear()
-            if self._target_ip:
-                self._party_targets[self._target_ip] = self._target_port
 
     def get_party_targets(self) -> List[str]:
         with self._lock:
@@ -324,8 +319,6 @@ class UDPSender:
             self._target_ip = "" if is_party_host else target_ip
             self._target_port = target_port
             self._party_targets.clear()
-            if not is_party_host and target_ip and target_ip not in ("0.0.0.0", "255.255.255.255"):
-                self._party_targets[target_ip] = int(target_port)
             self._codec = codec
             self._frame_ms = frame_ms
             self._bind_ip = bind_ip
@@ -362,8 +355,6 @@ class UDPSender:
             old_ip = self._target_ip
             self._target_ip = target_ip
             self._target_port = target_port
-            if target_ip and target_ip not in ("0.0.0.0", "255.255.255.255"):
-                self._party_targets[target_ip] = int(target_port)
             if self._sock:
                 try:
                     self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

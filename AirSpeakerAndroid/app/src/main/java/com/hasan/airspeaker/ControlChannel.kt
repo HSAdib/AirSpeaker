@@ -212,15 +212,19 @@ class ControlChannel(
                                 // Rule 4: Handle downstream peers
                                 val wantsJoin = json.optBoolean("party_join", false)
                                 val explicitLeave = json.optBoolean("party_leave", false)
+                                val targetHostIp = json.optString("party_host_ip", "").trim()
+                                val myLocalIps = getLocalIpv4Addresses()
+                                val addressedToThisHost = targetHostIp.isEmpty() || myLocalIps.contains(targetHostIp) || targetHostIp == "255.255.255.255"
+
                                 if (isHostingOrExtendingParty || AudioNative.nativeIsPartyRelay()) {
-                                    if (wantsJoin && !isHost) {
+                                    if (wantsJoin && !isHost && addressedToThisHost) {
                                         partyPeerLastSeen[senderIp] = android.os.SystemClock.elapsedRealtime()
                                         if (partyPeerIps.add(senderIp)) {
                                             AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
                                             onPartyHostDiscovered?.invoke()
                                             Log.i(TAG, "Party Mode: registered downstream peer $senderIp (total=${partyPeerIps.size})")
                                         }
-                                    } else if (explicitLeave) {
+                                    } else if (explicitLeave && addressedToThisHost) {
                                         partyPeerLastSeen.remove(senderIp)
                                         if (partyPeerIps.remove(senderIp)) {
                                             AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
@@ -317,6 +321,9 @@ class ControlChannel(
                         put("audio_port", audioPort)
                         put("device", getPhoneModelName())
                         put("party_join", isPartyJoinerActive || Companion.isPartyJoinerActive)
+                        if (isPartyJoinerActive || Companion.isPartyJoinerActive) {
+                            joinedPartyHostIp?.let { put("party_host_ip", it) }
+                        }
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
                         put("serving", AudioStreamService.isServing)
@@ -447,6 +454,7 @@ class ControlChannel(
         @Volatile var lastKnownPcIp: String? = null
         @Volatile var lastKnownPcName: String = "PC"
         val partyPeerIps = java.util.concurrent.CopyOnWriteArraySet<String>()
+        @Volatile var joinedPartyHostIp: String? = null
         val partyPeerLastSeen = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val discoveredPartyHosts = java.util.concurrent.ConcurrentHashMap<String, DiscoveredPartyHost>()
         var onPartyHostDiscovered: (() -> Unit)? = null
@@ -516,6 +524,7 @@ class ControlChannel(
         }
 
         fun sendPartyJoinAnnouncement(hostIp: String) {
+            joinedPartyHostIp = hostIp.trim()
             isPartyJoinerActive = true
             kotlin.concurrent.thread(name = "PartyJoinAnnouncer", isDaemon = true) {
                 try {
@@ -526,6 +535,7 @@ class ControlChannel(
                         put("version", 1)
                         put("device", getPhoneModelName())
                         put("party_join", true)
+                        put("party_host_ip", hostIp.trim())
                         put("is_party_host", false)
                         put("is_extended_host", isExtendingParty)
                         put("audio_port", 5004)
@@ -544,6 +554,7 @@ class ControlChannel(
 
         fun sendPartyLeaveAnnouncement(hostIp: String?) {
             isPartyJoinerActive = false
+            joinedPartyHostIp = null
             val cleanIp = hostIp?.trim().orEmpty()
             if (cleanIp.isEmpty()) return
             kotlin.concurrent.thread(name = "PartyLeaveAnnouncer", isDaemon = true) {
@@ -556,6 +567,7 @@ class ControlChannel(
                         put("device", getPhoneModelName())
                         put("party_join", false)
                         put("party_leave", true)
+                        put("party_host_ip", cleanIp)
                         put("is_party_host", false)
                         put("is_extended_host", false)
                         put("audio_port", 5004)
@@ -649,6 +661,9 @@ class ControlChannel(
                         put("audio_port", 5004)
                         put("device", getPhoneModelName())
                         put("party_join", isPartyJoinerActive)
+                        if (isPartyJoinerActive) {
+                            joinedPartyHostIp?.let { put("party_host_ip", it) }
+                        }
                         put("is_party_host", isHostingOrExtendingParty && !isExtendingParty)
                         put("is_extended_host", isExtendingParty)
                         put("serving", AudioStreamService.isServing)

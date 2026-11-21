@@ -275,6 +275,8 @@ class AirSpeakerApp:
         self._last_os_mute: Optional[bool] = None
         self.sync_os_vol_var = tk.BooleanVar(value=False)
         self._gain_sync_after_id: Optional[str] = None
+        self._buffer_sync_after_id: Optional[str] = None
+        self._save_config_after_id: Optional[str] = None
         self._phone_audio_engine = self.cfg.get("audio_output_engine", "OBOE_LOW_LATENCY")
         self._phone_audio_fx = bool(self.cfg.get("enable_audio_effects", False))
         self._phone_exclusive_mode = self.cfg.get("exclusive_audio_mode", "MIX_WITH_OTHERS")
@@ -435,7 +437,31 @@ class AirSpeakerApp:
             pj_on, pj_gains = self._eq_manager.get_effective_rx_gains(is_party_join=True)
             self._party_join_receiver.set_eq_gains(pj_on, pj_gains)
         self.cfg["eq_settings"] = self._eq_manager.to_dict()
+        self._schedule_save_config(250)
+
+    def _schedule_save_config(self, delay_ms: int = 250) -> None:
+        if self._save_config_after_id is not None:
+            try:
+                self.root.after_cancel(self._save_config_after_id)
+            except Exception:
+                pass
+        self._save_config_after_id = self.root.after(delay_ms, self._flush_scheduled_save_config)
+
+    def _flush_scheduled_save_config(self) -> None:
+        self._save_config_after_id = None
         self._save_config()
+
+    def _is_active_tx_target(self, sender_ip: Optional[str]) -> bool:
+        if not sender_ip:
+            return False
+        cur_ip = self.ip_var.get().strip()
+        if sender_ip == cur_ip:
+            return True
+        if self._party_streaming or self.party_mode_var.get():
+            with self._party_lock:
+                if sender_ip in self._party_devices:
+                    return True
+        return False
 
     def _setup_window(self) -> None:
         self.root.title("Air Speaker — Material 3 Studio")
@@ -2148,11 +2174,10 @@ class AirSpeakerApp:
             self._control_listener.set_target_ip(new_ip)
         self.phone_ip_var.set(f"Phone: {new_ip}")
         self.conn_device_ip_var.set(f"{new_ip}  •  TARGET SET")
-        self._register_party_device(new_ip, "Manual Device", new_port, manual=True)
         if self._normal_streaming and self._udp_sender:
             self._udp_sender.update_target(new_ip, new_port)
             self._update_combined_status()
-        self._save_config()
+        self._schedule_save_config(250)
         send_control_message(new_ip, self._get_current_config(), CONTROL_PORT)
 
     # ------------------------------------------------------------------
@@ -2231,7 +2256,7 @@ class AirSpeakerApp:
         self._config_rev += 1
         self.sync_rev_label.config(text=f"SYNC REV: {self._config_rev}")
         cfg = self._get_current_config()
-        self._save_config()
+        self._schedule_save_config(250)
 
         if self._streaming:
             c = self.codec_var.get()
@@ -2369,7 +2394,12 @@ class AirSpeakerApp:
             self._party_join_receiver.set_target_buffer_ms(float(val))
         self.buffer_mode_var.set("CUSTOM")
         self.audio_profile_var.set("CUSTOM")
-        self._on_local_setting_changed()
+        if self._buffer_sync_after_id is not None:
+            try:
+                self.root.after_cancel(self._buffer_sync_after_id)
+            except Exception:
+                pass
+        self._buffer_sync_after_id = self.root.after(60, self._on_local_setting_changed)
 
     def _on_gain_slider_changed(self, val) -> None:
         if self._suppress_sync:
@@ -2455,25 +2485,31 @@ class AirSpeakerApp:
             incoming_rev = 0
 
         incoming_sync_id = msg.get("sync_id")
-        force_pcm = (msg.get("force_pcm") is True or msg.get("platform") == "ios")
+        sender_ip = msg.get("_sender_ip", "")
+        dev_name = msg.get("device", "")
+        is_ios_sender = (
+            msg.get("force_pcm") is True
+            or msg.get("platform") == "ios"
+            or ("iphone" in dev_name.lower())
+            or ("ipad" in dev_name.lower())
+        )
+        allow_pcm_override = is_ios_sender and self._is_active_tx_target(sender_ip) and (self.codec_var.get() != CODEC_PCM16)
 
         if incoming_sync_id is not None:
-            if incoming_sync_id in self._seen_sync_ids and not force_pcm:
+            if incoming_sync_id in self._seen_sync_ids:
                 return
-            if incoming_rev < self._config_rev and not force_pcm:
+            if incoming_rev < self._config_rev and not allow_pcm_override:
                 return
             self._seen_sync_ids.append(incoming_sync_id)
             self._last_sync_id = incoming_sync_id
-        elif incoming_rev <= self._config_rev and not force_pcm:
+        elif incoming_rev <= self._config_rev and not allow_pcm_override:
             return
 
         self._suppress_sync = True
         try:
-            self._config_rev = max(self._config_rev, incoming_rev) + 1
+            self._config_rev = max(self._config_rev, incoming_rev)
             self.sync_rev_label.config(text=f"SYNC REV: {self._config_rev}")
 
-            dev_name = msg.get("device", "")
-            sender_ip = msg.get("_sender_ip", "")
             if dev_name and dev_name != "Android":
                 self._connected_phone_name = dev_name
                 self.conn_device_name_var.set(dev_name)
@@ -2483,7 +2519,7 @@ class AirSpeakerApp:
                         self.ip_var.set(sender_ip)
                 self.conn_device_ip_var.set(f"{sender_ip}  •  CONNECTED")
 
-            if force_pcm or ("iphone" in dev_name.lower()) or ("ipad" in dev_name.lower()):
+            if is_ios_sender and self._is_active_tx_target(sender_ip):
                 self.codec_var.set(CODEC_PCM16)
                 self._update_codec_ui_state()
             elif "codec" in msg:
@@ -2611,7 +2647,7 @@ class AirSpeakerApp:
                     self._udp_sender.set_codec_and_bitrate(c, br, f_ms)
                     self._udp_sender.set_routing_and_gain(True, gain, muted)
 
-            self._save_config()
+            self._schedule_save_config(250)
             logger.info("Applied incoming CONFIG_SYNC rev %d (sync_id=%s) from phone", incoming_rev, incoming_sync_id)
         finally:
             self._suppress_sync = False
@@ -2765,6 +2801,7 @@ class AirSpeakerApp:
                     activebackground="#145C3E", activeforeground=ACCENT
                 )
             if self._normal_streaming and self._udp_sender:
+                self._udp_sender.clear_party_targets()
                 self._udp_sender.set_party_mode(False)
         else:
             self._normal_streaming = False
@@ -2865,8 +2902,16 @@ class AirSpeakerApp:
                 bg=ACCENT_BG, fg=ACCENT,
                 activebackground="#145C3E", activeforeground=ACCENT
             )
+        if hasattr(self, "play_buf_level_var"):
+            self.play_buf_level_var.set("-- ms")
         if hasattr(self, "play_rx_pps_var"):
             self.play_rx_pps_var.set("0 pps")
+        if hasattr(self, "play_underruns_var"):
+            self.play_underruns_var.set("0")
+        if hasattr(self, "play_lost_var"):
+            self.play_lost_var.set("0 (0.0%)")
+        if hasattr(self, "play_late_var"):
+            self.play_late_var.set("0")
         self._update_combined_status()
 
     def _toggle_mic_receiver(self) -> None:
@@ -2998,12 +3043,26 @@ class AirSpeakerApp:
                         buf_val = float(len(self._party_join_receiver._pcm_queue) * f_ms)
                     except Exception:
                         pass
-                elif buf_val == 0.0 and self._play_active and self._phone_receiver and self._rx_pps > 0:
+                if self._play_active and self._phone_receiver and self._phone_receiver.is_running:
                     try:
-                        f_ms = float(getattr(self._phone_receiver, "_frame_duration_ms", 5.0))
-                        buf_val = float(len(self._phone_receiver._pcm_queue) * f_ms)
+                        rx_stats = self._phone_receiver.get_stats()
+                        buf_val = float(rx_stats["buffer_ms"])
+                        tgt_val = float(rx_stats["target_ms"])
+                        losses = int(rx_stats["lost_packets"])
                         if hasattr(self, "play_buf_level_var"):
                             self.play_buf_level_var.set(f"{buf_val:.1f} ms")
+                        if hasattr(self, "play_target_var"):
+                            self.play_target_var.set(f"{tgt_val:.1f} ms")
+                        if hasattr(self, "play_codec_var"):
+                            self.play_codec_var.set(f"{rx_stats['codec']} (48kHz Stereo)")
+                        if hasattr(self, "play_rx_pps_var"):
+                            self.play_rx_pps_var.set(f"{int(rx_stats['rx_pps'])} pps")
+                        if hasattr(self, "play_underruns_var"):
+                            self.play_underruns_var.set(str(int(rx_stats["underruns"])))
+                        if hasattr(self, "play_lost_var"):
+                            self.play_lost_var.set(f"{losses} ({rx_stats['packet_loss_pct']:.1f}%)")
+                        if hasattr(self, "play_late_var"):
+                            self.play_late_var.set(str(int(rx_stats["late_packets"])))
                     except Exception:
                         pass
                 elif buf_val == 0.0 and self._streaming and self._pps > 0:
@@ -3140,7 +3199,11 @@ class AirSpeakerApp:
                     elif kind == "config_sync":
                         sender_ip = data.get("_sender_ip")
                         if sender_ip:
-                            if self._manual_ip_override is None and self.ip_var.get().strip() != sender_ip:
+                            if (
+                                self._manual_ip_override is None
+                                and (not self._streaming or not self.ip_var.get().strip())
+                                and self.ip_var.get().strip() != sender_ip
+                            ):
                                 self.ip_var.set(sender_ip)
                                 if self._control_listener:
                                     self._control_listener.set_target_ip(sender_ip)
@@ -3245,7 +3308,7 @@ class AirSpeakerApp:
 
                         is_ios = (msg.get("platform") == "ios" or msg.get("force_pcm") is True or
                                   "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
-                        if is_ios and self.codec_var.get() != CODEC_PCM16:
+                        if is_ios and self._is_active_tx_target(best_ip) and self.codec_var.get() != CODEC_PCM16:
                             self.codec_var.set(CODEC_PCM16)
                             self._update_codec_ui_state()
                             self._on_local_setting_changed()
@@ -3318,7 +3381,7 @@ class AirSpeakerApp:
 
                         is_ios = (s.get("platform") == "ios" or s.get("force_pcm") is True or
                                   "iphone" in dev_name.lower() or "ipad" in dev_name.lower())
-                        if is_ios and self.codec_var.get() != CODEC_PCM16:
+                        if is_ios and self._is_active_tx_target(s.get("_sender_ip")) and self.codec_var.get() != CODEC_PCM16:
                             self.codec_var.set(CODEC_PCM16)
                             self._update_codec_ui_state()
                             self._on_local_setting_changed()
@@ -3345,30 +3408,12 @@ class AirSpeakerApp:
                                 self._udp_sender.remove_party_target(sender_ip)
                             self._refresh_party_ui()
 
-                        if hasattr(self, "play_buf_level_var"):
-                            buf_ms = s.get("buffer_ms", "--")
-                            if isinstance(buf_ms, (int, float)) and buf_ms > 0.0:
-                                self.play_buf_level_var.set(f"{buf_ms:.1f} ms")
-                            elif not (self._play_active and self._rx_pps > 0):
-                                self.play_buf_level_var.set(f"{buf_ms:.1f} ms" if isinstance(buf_ms, (int, float)) else "-- ms")
-                        if hasattr(self, "play_target_var"):
-                            tgt_ms = s.get("target_ms", self.custom_buffer_var.get())
-                            self.play_target_var.set(f"{tgt_ms:.1f} ms" if isinstance(tgt_ms, (int, float)) else f"{self.custom_buffer_var.get():.1f} ms")
-                        if hasattr(self, "play_codec_var"):
-                            codec_name = s.get("codec")
-                            if not codec_name and "active_codec" in s:
-                                codec_name = "Opus" if int(s.get("active_codec", 0)) == 1 else "PCM16"
-                            self.play_codec_var.set(f"{codec_name or 'PCM16'} (48kHz Stereo)")
-                        if hasattr(self, "play_rx_pps_var"):
-                            self.play_rx_pps_var.set(f"{self._rx_pps} pps")
-                        if hasattr(self, "play_underruns_var"):
-                            self.play_underruns_var.set(str(s.get("underruns", 0)))
-                        if hasattr(self, "play_lost_var"):
-                            lost = s.get("lost_packets", 0)
-                            loss_pct = s.get("packet_loss_pct", 0.0)
-                            self.play_lost_var.set(f"{lost} ({loss_pct:.1f}%)")
-                        if hasattr(self, "play_late_var"):
-                            self.play_late_var.set(str(s.get("late_packets", 0)))
+                        # Remote phone STATS update SERVE tab metrics only; PLAY tab reads local self._phone_receiver.get_stats()
+                        if not self._play_active:
+                            if hasattr(self, "play_buf_level_var"):
+                                self.play_buf_level_var.set("-- ms")
+                            if hasattr(self, "play_target_var"):
+                                self.play_target_var.set(f"{self.custom_buffer_var.get():.1f} ms")
                         self._update_combined_status()
 
                         self.latency_var.set(
@@ -3647,6 +3692,12 @@ TABS:
                 self._tray_icon.stop()
             except Exception:
                 pass
+        if self._save_config_after_id is not None:
+            try:
+                self.root.after_cancel(self._save_config_after_id)
+            except Exception:
+                pass
+            self._save_config_after_id = None
         self._save_config()
         self.root.destroy()
         sys.exit(0)

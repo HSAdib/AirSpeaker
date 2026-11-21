@@ -651,12 +651,23 @@ class AudioCapture:
         with self._lock:
             self._running = False
             if getattr(self, "_parec_proc", None) is not None:
+                proc = self._parec_proc
+                self._parec_proc = None
                 try:
-                    self._parec_proc.terminate()
-                    self._parec_proc.wait(timeout=1.0)
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        logger.warning("parec did not exit after terminate(); sending SIGKILL")
+                        proc.kill()
+                        proc.wait(timeout=1.0)
                 except Exception:
                     pass
-                self._parec_proc = None
+                try:
+                    if proc.stdout:
+                        proc.stdout.close()
+                except Exception:
+                    pass
             if self._thread and self._thread is not threading.current_thread():
                 self._thread.join(timeout=1.0)
                 self._thread = None
