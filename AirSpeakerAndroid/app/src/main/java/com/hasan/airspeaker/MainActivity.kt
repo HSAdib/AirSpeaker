@@ -155,6 +155,8 @@ class MainActivity : AppCompatActivity() {
     private var joinedHostPort: Int = 5004
     private var lastDiscoveredHostsKey: String = ""
     private val cancelUpdateDownloadFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var latestUpdateInfo: UpdateChecker.UpdateInfo? = null
+    private var downloadedUpdateUri: Uri? = null
     private var lastJoinKeepAliveMs: Long = 0L
 
     private val cameraPermissionLauncher =
@@ -2096,6 +2098,15 @@ class MainActivity : AppCompatActivity() {
         binding.btnCheckForUpdates.setOnClickListener {
             performUpdateCheck(isManual = true)
         }
+                binding.btnDownloadUpdate.setOnClickListener {
+            latestUpdateInfo?.let { startInAppUpdateDownload(it) }
+        }
+        binding.btnInstallUpdateNow.setOnClickListener {
+            downloadedUpdateUri?.let { UpdateChecker.launchApkInstall(this, it) }
+        }
+        binding.btnSeeUpdateInFiles.setOnClickListener {
+            UpdateChecker.openDownloadsAirSpeakerFolder(this)
+        }
         binding.btnCancelUpdateDownload.setOnClickListener {
             cancelUpdateDownloadFlag.set(true)
             binding.tvUpdateStatus.text = "Cancelling download..."
@@ -2117,12 +2128,16 @@ class MainActivity : AppCompatActivity() {
                 binding.btnCheckForUpdates.isEnabled = true
             }
             if (info != null && info.isAvailable) {
-                if (isManual) {
-                    binding.tvUpdateStatus.visibility = View.VISIBLE
-                    binding.tvUpdateStatus.text = "Update available: ${info.displayVersion}"
-                }
+                latestUpdateInfo = info
+                downloadedUpdateUri = null
+                binding.layoutUpdateCompleteActions.visibility = View.GONE
+                binding.btnDownloadUpdate.visibility = View.VISIBLE
+                binding.btnDownloadUpdate.text = "⬇ DOWNLOAD UPDATE (${info.displayVersion})"
+                binding.tvUpdateStatus.visibility = View.VISIBLE
+                binding.tvUpdateStatus.text = "Update available: ${info.displayVersion} (Downloads/AirSpeaker)"
                 showUpdateDialog(info)
             } else if (isManual) {
+                binding.btnDownloadUpdate.visibility = View.GONE
                 binding.tvUpdateStatus.visibility = View.VISIBLE
                 binding.tvUpdateStatus.text = "Air Speaker is up to date."
                 MaterialAlertDialogBuilder(this)
@@ -2138,8 +2153,9 @@ class MainActivity : AppCompatActivity() {
         if (isFinishing || isDestroyed) return
         val builder = MaterialAlertDialogBuilder(this)
         builder.setTitle("⬆ Update Available")
-        builder.setMessage("Air Speaker ${info.displayVersion} is now available!\n\nWould you like to download and install this update?")
+        builder.setMessage("Air Speaker ${info.displayVersion} is now available!\n\nDownload directly into Downloads/AirSpeaker?")
         builder.setPositiveButton("Download Update") { _, _ ->
+            selectTab(3)
             startInAppUpdateDownload(info)
         }
         builder.setNeutralButton("Later", null)
@@ -2151,56 +2167,56 @@ class MainActivity : AppCompatActivity() {
 
     private fun startInAppUpdateDownload(info: UpdateChecker.UpdateInfo) {
         cancelUpdateDownloadFlag.set(false)
+        downloadedUpdateUri = null
+        binding.btnDownloadUpdate.visibility = View.GONE
+        binding.layoutUpdateCompleteActions.visibility = View.GONE
         binding.layoutUpdateDownload.visibility = View.VISIBLE
         binding.pbUpdateDownload.isIndeterminate = false
         binding.pbUpdateDownload.progress = 0
         binding.tvUpdateProgress.text = "Starting download..."
         binding.tvUpdateStatus.visibility = View.VISIBLE
-        binding.tvUpdateStatus.text = "Downloading ${info.fileName}..."
-
-        // Non-blocking progress dialog
-        val progressDialog = MaterialAlertDialogBuilder(this)
-            .setTitle("⬇ Downloading ${info.displayVersion}")
-            .setMessage("Downloading ${info.fileName} to Downloads folder...")
-            .setCancelable(false)
-            .setNegativeButton("Cancel") { d, _ ->
-                cancelUpdateDownloadFlag.set(true)
-                d.dismiss()
-            }
-            .create()
-
-        progressDialog.show()
+        binding.tvUpdateStatus.text = "Downloading ${info.fileName} to Downloads/AirSpeaker..."
 
         UpdateChecker.downloadApkToDownloads(
             context = applicationContext,
             info = info,
             cancelFlag = cancelUpdateDownloadFlag,
             onProgress = { downloaded, total, speed ->
-                val pct = if (total > 0) ((downloaded * 100) / total).toInt() else 0
-                val progText = "${UpdateChecker.formatBytes(downloaded)} / ${UpdateChecker.formatBytes(total)} ($pct%) • ${UpdateChecker.formatSpeed(speed)}"
-                binding.pbUpdateDownload.progress = pct
+                if (isFinishing || isDestroyed) return@downloadApkToDownloads
+                val pct = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
+                val totalText = if (total > 0) UpdateChecker.formatBytes(total) else "??"
+                val progText = "${UpdateChecker.formatBytes(downloaded)} / $totalText ($pct%) • ${UpdateChecker.formatSpeed(speed)}"
+                binding.pbUpdateDownload.isIndeterminate = (total <= 0)
+                if (total > 0) binding.pbUpdateDownload.progress = pct
                 binding.tvUpdateProgress.text = progText
-                progressDialog.setMessage(progText)
             },
             onComplete = { apkUri, displayPath ->
                 if (isFinishing || isDestroyed) return@downloadApkToDownloads
-                try { progressDialog.dismiss() } catch (_: Exception) {}
+                downloadedUpdateUri = apkUri
                 binding.layoutUpdateDownload.visibility = View.GONE
+                binding.btnDownloadUpdate.visibility = View.GONE
                 binding.tvUpdateStatus.visibility = View.VISIBLE
                 binding.tvUpdateStatus.text = "✔ Saved to $displayPath"
+                binding.layoutUpdateCompleteActions.visibility = View.VISIBLE
 
                 MaterialAlertDialogBuilder(this)
                     .setTitle("✔ Download Complete")
-                    .setMessage("Update saved to:\n$displayPath\n\nInstall now?")
+                    .setMessage("Update saved to:\n$displayPath")
                     .setPositiveButton("Install Now") { _, _ ->
                         UpdateChecker.launchApkInstall(this@MainActivity, apkUri)
+                    }
+                    .setNeutralButton("See in Files") { _, _ ->
+                        UpdateChecker.openDownloadsAirSpeakerFolder(this@MainActivity)
                     }
                     .setNegativeButton("Done", null)
                     .show()
             },
             onError = { exc ->
-                try { progressDialog.dismiss() } catch (_: Exception) {}
+                if (isFinishing || isDestroyed) return@downloadApkToDownloads
                 binding.layoutUpdateDownload.visibility = View.GONE
+                if (latestUpdateInfo != null) {
+                    binding.btnDownloadUpdate.visibility = View.VISIBLE
+                }
                 val msg = if (exc is InterruptedException) "Download cancelled." else "Download failed: ${exc.message}"
                 binding.tvUpdateStatus.visibility = View.VISIBLE
                 binding.tvUpdateStatus.text = msg

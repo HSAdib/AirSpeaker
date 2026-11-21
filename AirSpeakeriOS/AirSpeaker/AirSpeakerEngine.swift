@@ -2567,11 +2567,33 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
         updateDownloadEmaSpeed = 0
 
         let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 600
+        config.waitsForConnectivity = true
+        config.httpMaximumConnectionsPerHost = 6
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         self.updateDownloadSession = session
         let task = session.downloadTask(with: url)
         self.updateDownloadTask = task
         task.resume()
+    }
+
+    @discardableResult
+    public func openDownloadsInFilesApp() -> Bool {
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let targetDir = docs
+            .appendingPathComponent("Downloads", isDirectory: true)
+            .appendingPathComponent("AirSpeaker", isDirectory: true)
+        try? fileManager.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
+        if var comps = URLComponents(url: targetDir, resolvingAgainstBaseURL: false) {
+            comps.scheme = "shareddocuments"
+            if let sharedUrl = comps.url, UIApplication.shared.canOpenURL(sharedUrl) {
+                UIApplication.shared.open(sharedUrl, options: [:], completionHandler: nil)
+                return true
+            }
+        }
+        return false
     }
 
     public func cancelUpdateDownload() {
@@ -2593,7 +2615,7 @@ extension AirSpeakerEngine: URLSessionDownloadDelegate {
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         let now = CACurrentMediaTime()
         let dt = now - updateDownloadLastTime
-        if dt >= 0.15 || updateDownloadLastTime == 0 {
+        if dt >= 0.10 || updateDownloadLastTime == 0 || (totalBytesExpectedToWrite > 0 && totalBytesWritten >= totalBytesExpectedToWrite) {
             let instSpeed = dt > 0 ? Double(totalBytesWritten - updateDownloadLastBytes) / dt : 0
             updateDownloadEmaSpeed = updateDownloadEmaSpeed <= 0 ? instSpeed : (0.7 * updateDownloadEmaSpeed + 0.3 * instSpeed)
             updateDownloadLastTime = now
@@ -2619,7 +2641,9 @@ extension AirSpeakerEngine: URLSessionDownloadDelegate {
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         let fileManager = FileManager.default
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let downloadsDir = docs.appendingPathComponent("Downloads", isDirectory: true)
+        let downloadsDir = docs
+            .appendingPathComponent("Downloads", isDirectory: true)
+            .appendingPathComponent("AirSpeaker", isDirectory: true)
 
         do {
             try fileManager.createDirectory(at: downloadsDir, withIntermediateDirectories: true, attributes: nil)
@@ -2633,8 +2657,8 @@ extension AirSpeakerEngine: URLSessionDownloadDelegate {
                 self.isDownloadingUpdate = false
                 self.updateDownloadProgress = 1.0
                 self.downloadedUpdateFileUrl = destUrl
-                self.updateDownloadDetailText = "✔ Saved to Downloads"
-                self.updateStatusMessage = "Saved to Files → Air Speaker → Downloads/\(self.updateAssetName)"
+                self.updateDownloadDetailText = "✔ Saved to Downloads/AirSpeaker"
+                self.updateStatusMessage = "Saved to Files → Air Speaker → Downloads/AirSpeaker/\(self.updateAssetName)"
             }
         } catch {
             DispatchQueue.main.async {

@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import threading
 import time
 import urllib.error
@@ -38,20 +40,20 @@ def get_platform() -> str:
 
 
 def get_downloads_dir() -> Path:
-    """Return the user's Downloads directory across Windows, macOS, and Linux."""
+    """Return the AirSpeaker downloads directory (<OS Downloads>/AirSpeaker)."""
+    base = None
     if sys.platform.startswith("linux") and shutil.which("xdg-user-dir"):
         try:
             out = subprocess.check_output(["xdg-user-dir", "DOWNLOAD"], text=True, timeout=2).strip()
             if out:
-                p = Path(out)
-                p.mkdir(parents=True, exist_ok=True)
-                return p
+                base = Path(out)
         except Exception:
             pass
-    p = Path.home() / "Downloads"
+    if base is None:
+        base = Path.home() / "Downloads"
+    p = base / "AirSpeaker"
     p.mkdir(parents=True, exist_ok=True)
     return p
-
 
 def format_bytes(num_bytes: float) -> str:
     val = max(0.0, float(num_bytes))
@@ -206,6 +208,7 @@ def check_for_updates(timeout: float = 6.0, raise_on_error: bool = False) -> Opt
 
 
 def open_downloads_folder(file_path: Optional[str] = None) -> None:
+    """Open Downloads/AirSpeaker and highlight the downloaded update file when supported."""
     downloads = str(get_downloads_dir())
     try:
         if sys.platform.startswith("win"):
@@ -219,9 +222,32 @@ def open_downloads_folder(file_path: Optional[str] = None) -> None:
             else:
                 subprocess.Popen(["open", downloads])
         else:
-            subprocess.Popen(["xdg-open", downloads])
+            if file_path and os.path.exists(file_path):
+                if shutil.which("dbus-send"):
+                    try:
+                        uri = Path(file_path).resolve().as_uri()
+                        res = subprocess.run(
+                            [
+                                "dbus-send", "--session",
+                                "--dest=org.freedesktop.FileManager1",
+                                "--type=method_call",
+                                "/org/freedesktop/FileManager1",
+                                "org.freedesktop.FileManager1.ShowItems",
+                                f"array:string:{uri}", "string:",
+                            ],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=2,
+                        )
+                        if res.returncode == 0:
+                            return
+                    except Exception:
+                        pass
+                subprocess.Popen(["xdg-open", str(Path(file_path).resolve().parent)])
+            else:
+                subprocess.Popen(["xdg-open", downloads])
     except Exception as exc:
-        logger.debug("Could not open Downloads folder: %s", exc)
+        logger.debug("Could not open Downloads/AirSpeaker folder: %s", exc)
 
 
 def download_update_to_downloads(
@@ -256,7 +282,7 @@ def download_update_to_downloads(
                     while True:
                         if cancel_event is not None and cancel_event.is_set():
                             raise InterruptedError("Download cancelled by user")
-                        chunk = resp.read(65536)
+                        chunk = resp.read(262144)
                         if not chunk:
                             break
                         out_f.write(chunk)
@@ -264,7 +290,7 @@ def download_update_to_downloads(
 
                         now = time.monotonic()
                         dt = now - last_cb_t
-                        if dt >= 0.12 or (total_bytes > 0 and downloaded >= total_bytes):
+                        if dt >= 0.10 or (total_bytes > 0 and downloaded >= total_bytes):
                             inst_speed = (downloaded - last_cb_bytes) / max(0.001, dt)
                             ema_speed = inst_speed if ema_speed <= 0.0 else (0.7 * ema_speed + 0.3 * inst_speed)
                             last_cb_t = now
@@ -293,3 +319,71 @@ def download_update_to_downloads(
 
 def launch_downloaded_windows_installer(installer_path: str) -> None:
     subprocess.Popen([installer_path, "/SILENT", "/CLOSEAPPLICATIONS"])
+
+
+def install_downloaded_update(saved_path: str, is_win_installed: bool = False) -> Tuple[bool, str, bool]:
+    """
+    Install or launch the downloaded update package.
+    Returns (success, status_message, should_quit_current_app).
+    """
+    if not saved_path or not os.path.exists(saved_path):
+        return False, "Downloaded update file not found.", False
+
+    plat = get_platform()
+    try:
+        if plat == "windows":
+            if is_win_installed or "setup" in os.path.basename(saved_path).lower():
+                launch_downloaded_windows_installer(saved_path)
+                return True, "Launching Windows Setup installer...", True
+            subprocess.Popen([saved_path])
+            return True, "Launching updated portable executable...", True
+
+        if plat == "macos":
+            subprocess.Popen(["open", saved_path])
+            return True, "Opened macOS installer DMG. Drag Air Speaker into Applications.", False
+
+        # Linux: install directly from downloaded tarball into ~/.local/share/AirSpeaker/app
+        app_dir = Path.home() / ".local" / "share" / "AirSpeaker" / "app"
+        if saved_path.endswith(".tar.gz"):
+            staging = Path(tempfile.mkdtemp(prefix="airspeaker_upd_"))
+            try:
+                with tarfile.open(saved_path, "r:gz") as tf:
+                    staging_resolved = staging.resolve()
+                    for member in tf.getmembers():
+                        member_dest = (staging / member.name).resolve()
+                        if not str(member_dest).startswith(str(staging_resolved)):
+                            raise RuntimeError("Unsafe path in update archive")
+                    tf.extractall(staging)
+                if not (staging / "AirSpeaker").exists():
+                    raise RuntimeError("AirSpeaker binary missing in archive")
+                app_dir.parent.mkdir(parents=True, exist_ok=True)
+                backup_dir = app_dir.with_name("app.old")
+                if backup_dir.exists():
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+                if app_dir.exists():
+                    app_dir.rename(backup_dir)
+                shutil.move(str(staging), str(app_dir))
+                shutil.rmtree(backup_dir, ignore_errors=True)
+                new_bin = app_dir / "AirSpeaker"
+                new_bin.chmod(new_bin.stat().st_mode | 0o755)
+                subprocess.Popen([str(new_bin)], start_new_session=True)
+                return True, "Update installed! Restarting Air Speaker...", True
+            except Exception as exc:
+                shutil.rmtree(staging, ignore_errors=True)
+                logger.warning("Direct Linux tarball install failed (%s); falling back to terminal updater", exc)
+
+        cmd = f"{LINUX_INSTALL_CMD} && echo 'Update complete! Press Enter.' && read"
+        for term in (
+            ["x-terminal-emulator", "-e", "bash", "-c", cmd],
+            ["gnome-terminal", "--", "bash", "-c", cmd],
+            ["konsole", "-e", "bash", "-c", cmd],
+        ):
+            try:
+                subprocess.Popen(term)
+                return True, "Launched Linux updater in terminal.", False
+            except Exception:
+                continue
+        return False, f"Run in terminal:\n{LINUX_INSTALL_CMD}", False
+    except Exception as exc:
+        return False, f"Failed to launch installer: {exc}", False
+

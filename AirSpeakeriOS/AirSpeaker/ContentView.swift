@@ -20,6 +20,16 @@ struct DocumentExportPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 }
 
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
 
 private enum M3 {
     static let bg = Color(red: 0.063, green: 0.075, blue: 0.094)               // #101318
@@ -44,6 +54,7 @@ private enum M3 {
 public struct ContentView: View {
     @StateObject private var engine = AirSpeakerEngine.shared
     @State private var showExportPicker = false
+    @State private var showInstallShareSheet = false
     @State private var selectedTab: Int = 0
     @State private var showHelpModal: Bool = false
 
@@ -138,22 +149,44 @@ public struct ContentView: View {
                                 .foregroundColor(Color(red: 1.0, green: 0.3, blue: 0.3))
                             }
                         } else if let fileUrl = engine.downloadedUpdateFileUrl {
-                            HStack {
-                                Text("✔ Saved in Air Speaker/Downloads")
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                    .foregroundColor(M3.tertiary)
-                                Spacer()
-                                Button("[ SAVE TO DOWNLOADS / SHARE ]") {
-                                    showExportPicker = true
-                                }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("✔ Saved to Files → Air Speaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
-                            }
-                            .sheet(isPresented: $showExportPicker) {
-                                DocumentExportPicker(url: fileUrl)
+                                .foregroundColor(M3.tertiary)
+                            HStack(spacing: 8) {
+                                Button(action: {
+                                    showInstallShareSheet = true
+                                }) {
+                                    Text("⚡ INSTALL NOW")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundColor(M3.onTertiaryContainer)
+                                        .frame(maxWidth: .infinity, minHeight: 36)
+                                        .background(M3.tertiaryContainer)
+                                        .cornerRadius(14)
+                                }
+                                .sheet(isPresented: $showInstallShareSheet) {
+                                    ShareSheet(items: [fileUrl])
+                                }
+
+                                Button(action: {
+                                    if !engine.openDownloadsInFilesApp() {
+                                        showExportPicker = true
+                                    }
+                                }) {
+                                    Text("📂 SEE IN FILES")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundColor(M3.onSecondaryContainer)
+                                        .frame(maxWidth: .infinity, minHeight: 36)
+                                        .background(M3.secondaryContainer)
+                                        .cornerRadius(14)
+                                }
+                                .sheet(isPresented: $showExportPicker) {
+                                    DocumentExportPicker(url: fileUrl)
+                                }
                             }
                         }
-                    }
+                            }
+                        }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(M3.surface)
@@ -1137,9 +1170,10 @@ struct SettingsStudioTab: View {
     @ObservedObject var engine: AirSpeakerEngine
     @State private var showUniversalEQSheet: Bool = false
     @State private var showExportPicker: Bool = false
+    @State private var showInstallShareSheet: Bool = false
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
     }
 
     var body: some View {
@@ -1322,20 +1356,42 @@ struct SettingsStudioTab: View {
                             }
                         }
                     } else if let fileUrl = engine.downloadedUpdateFileUrl {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("✔ Saved to Files → Air Speaker → Downloads/\(engine.updateAssetName)")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("✔ Saved to Files → Air Speaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundColor(M3.tertiary)
-                            Button("[ SAVE TO DOWNLOADS / SHARE ]") {
-                                showExportPicker = true
+                            HStack(spacing: 8) {
+                                Button(action: {
+                                    showInstallShareSheet = true
+                                }) {
+                                    Text("⚡ INSTALL NOW")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundColor(M3.onTertiaryContainer)
+                                        .frame(maxWidth: .infinity, minHeight: 36)
+                                        .background(M3.tertiaryContainer)
+                                        .cornerRadius(14)
+                                }
+                                .sheet(isPresented: $showInstallShareSheet) {
+                                    ShareSheet(items: [fileUrl])
+                                }
+
+                                Button(action: {
+                                    if !engine.openDownloadsInFilesApp() {
+                                        showExportPicker = true
+                                    }
+                                }) {
+                                    Text("📂 SEE IN FILES")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundColor(M3.onSecondaryContainer)
+                                        .frame(maxWidth: .infinity, minHeight: 36)
+                                        .background(M3.secondaryContainer)
+                                        .cornerRadius(14)
+                                }
+                                .sheet(isPresented: $showExportPicker) {
+                                    DocumentExportPicker(url: fileUrl)
+                                }
                             }
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.0))
-                        }
-                        .sheet(isPresented: $showExportPicker) {
-                            DocumentExportPicker(url: fileUrl)
-                        }
-                    } else if !engine.updateDownloadUrl.isEmpty && engine.updateDownloadUrl != "https://github.com/HSAdib/AirSpeaker/releases/latest" {
+                        } else if !engine.updateDownloadUrl.isEmpty && engine.updateDownloadUrl != "https://github.com/HSAdib/AirSpeaker/releases/latest" {
                         Button(action: {
                             engine.startUpdateDownload()
                         }) {

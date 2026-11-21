@@ -353,6 +353,7 @@ class AirSpeakerApp:
         self._schedule_ui_update()
 
         self._latest_update_info: Optional[Dict[str, Any]] = None
+        self._downloaded_update_path: Optional[str] = None
         self._update_downloading: bool = False
         self._update_cancel_event = threading.Event()
         self.root.after(2500, self._check_updates_background)
@@ -571,6 +572,14 @@ class AirSpeakerApp:
             font=FONT_MONO_SM, padx=6, pady=2, command=self._on_click_skip_update
         )
         self.skip_update_btn.pack(side="left", padx=4, pady=2)
+        self.banner_install_btn = StudioButton(
+            self.update_bar_frame, text="⚡ Install Now", bg=ACCENT_BG, fg=ACCENT,
+            font=FONT_MONO_BOLD, padx=6, pady=2, command=self._on_click_install_downloaded_update
+        )
+        self.banner_files_btn = StudioButton(
+            self.update_bar_frame, text="📂 See in Files", bg="#15222E", fg=PRIMARY,
+            font=FONT_MONO_BOLD, padx=6, pady=2, command=self._on_click_see_in_files
+        )
 
         # Tab Notebook (Unified 5 Tabs: PLAY | SERVE | PARTY | SETTINGS | VIRTUAL DEVICE)
         self.notebook = ttk.Notebook(self.root)
@@ -1288,8 +1297,13 @@ class AirSpeakerApp:
         )
         self.btn_check_updates.pack(side="right", padx=4)
 
-        self.update_status_label = tk.Label(up_f, text="", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, anchor="w")
+        self.update_status_label = tk.Label(up_f, text="Download location: Downloads/AirSpeaker", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM, anchor="w")
         self.update_status_label.pack(fill="x", padx=4, pady=(1, 2))
+
+        self.btn_download_update_settings = StudioButton(
+            up_f, text="⬇ Download Update", bg=ACCENT_BG, fg=ACCENT,
+            font=FONT_MONO_BOLD, padx=8, pady=4, command=self._on_click_update_now
+        )
 
         # Progress frame for active update downloads
         self.update_progress_frame = tk.Frame(up_f, bg=BG)
@@ -1308,11 +1322,19 @@ class AirSpeakerApp:
         )
         self.btn_cancel_update.pack(side="right", padx=2)
 
-        self.btn_open_downloads = StudioButton(
-            prog_detail_row, text="Open Downloads", bg="#15222E", fg=FG_MUTED,
-            font=FONT_MONO_SM, padx=6, pady=1, command=lambda: updater.open_downloads_folder(str(updater.get_downloads_dir()))
+        # Post-download completion actions: Install Now + See in Files
+        self.update_done_actions_frame = tk.Frame(up_f, bg=BG)
+        self.btn_install_update_now = StudioButton(
+            self.update_done_actions_frame, text="⚡ Install Now", bg=ACCENT_BG, fg=ACCENT,
+            font=FONT_MONO_BOLD, padx=10, pady=4, command=self._on_click_install_downloaded_update
         )
-        self.btn_open_downloads.pack(side="right", padx=2)
+        self.btn_install_update_now.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        self.btn_see_in_files = StudioButton(
+            self.update_done_actions_frame, text="📂 See in Files", bg="#15222E", fg=PRIMARY,
+            font=FONT_MONO_BOLD, padx=10, pady=4, command=self._on_click_see_in_files
+        )
+        self.btn_see_in_files.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
     # ------------------------------------------------------------------
     # TAB 3: Windows Virtual Device & Tools
@@ -3779,10 +3801,43 @@ TABS:
 
     def _show_update_bar(self, info: Dict[str, Any]) -> None:
         self._latest_update_info = info
+        self._downloaded_update_path = None
         v_disp = info.get("display_version", info.get("tag_name", ""))
         self.update_bar_label.config(text=f"⬆ New Update Available ({v_disp})")
+        if hasattr(self, "banner_install_btn"):
+            self.banner_install_btn.pack_forget()
+        if hasattr(self, "banner_files_btn"):
+            self.banner_files_btn.pack_forget()
         self.update_now_btn.config(state="normal")
+        if not self.update_now_btn.winfo_ismapped():
+            self.update_now_btn.pack(side="left", padx=4, pady=2)
         self.update_bar_frame.pack(fill="x", padx=8, pady=(0, 4), before=self.notebook)
+
+        if hasattr(self, "update_done_actions_frame"):
+            self.update_done_actions_frame.pack_forget()
+        if hasattr(self, "update_status_label"):
+            self.update_status_label.config(text=f"New update available: {v_disp} (Downloads/AirSpeaker)", fg="#00FFCC")
+        if hasattr(self, "btn_download_update_settings"):
+            self.btn_download_update_settings.config(text=f"⬇ Download Update ({v_disp})", state="normal")
+            self.btn_download_update_settings.pack(fill="x", padx=4, pady=(2, 4))
+
+    def _on_click_install_downloaded_update(self) -> None:
+        if not self._downloaded_update_path:
+            return
+        info = self._latest_update_info or {}
+        ok, msg, should_quit = updater.install_downloaded_update(
+            self._downloaded_update_path,
+            is_win_installed=bool(info.get("is_windows_installed", updater.is_windows_installed())),
+        )
+        if hasattr(self, "update_status_label"):
+            self.update_status_label.config(text=msg, fg=ACCENT if ok else WARN)
+        if ok and should_quit:
+            self.root.after(500, self._quit_app)
+        elif not ok:
+            messagebox.showwarning("Install Update", msg)
+
+    def _on_click_see_in_files(self) -> None:
+        updater.open_downloads_folder(self._downloaded_update_path)
 
     def _on_click_update_now(self) -> None:
         if not self._latest_update_info:
@@ -3790,7 +3845,6 @@ TABS:
         if getattr(self, "_update_downloading", False):
             return
         info = self._latest_update_info
-        plat = info.get("platform", updater.get_platform())
         download_url = info.get("download_url", "")
         asset_name = info.get("asset_name", "") or "AirSpeaker-Update"
         html_url = info.get("html_url", "")
@@ -3800,8 +3854,18 @@ TABS:
             return
 
         self._update_downloading = True
+        self._downloaded_update_path = None
         self._update_cancel_event.clear()
         self.update_now_btn.config(state="disabled")
+        if hasattr(self, "btn_download_update_settings"):
+            self.btn_download_update_settings.config(state="disabled")
+            self.btn_download_update_settings.pack_forget()
+        if hasattr(self, "update_done_actions_frame"):
+            self.update_done_actions_frame.pack_forget()
+        if hasattr(self, "banner_install_btn"):
+            self.banner_install_btn.pack_forget()
+        if hasattr(self, "banner_files_btn"):
+            self.banner_files_btn.pack_forget()
         if hasattr(self, "btn_check_updates"):
             self.btn_check_updates.config(state="disabled")
         if hasattr(self, "btn_cancel_update"):
@@ -3813,7 +3877,7 @@ TABS:
             self.update_bar_progress.config(mode="indeterminate")
             self.update_bar_progress.start(10)
 
-        init_txt = f"Downloading {asset_name} to Downloads folder..."
+        init_txt = f"Downloading {asset_name} to Downloads/AirSpeaker..."
         self.update_bar_label.config(text=init_txt)
         if hasattr(self, "update_status_label"):
             self.update_status_label.config(text=init_txt, fg=PRIMARY)
@@ -3842,7 +3906,7 @@ TABS:
         def _on_complete(saved_path: str) -> None:
             def _finish():
                 self._update_downloading = False
-                self.update_now_btn.config(state="normal")
+                self._downloaded_update_path = saved_path
                 if hasattr(self, "btn_check_updates"):
                     self.btn_check_updates.config(state="normal")
                 if hasattr(self, "btn_cancel_update"):
@@ -3852,51 +3916,20 @@ TABS:
                     self.update_bar_progress.pack_forget()
                 if hasattr(self, "update_progress_bar"):
                     self.update_progress_bar.config(mode="determinate", value=100)
-                done_txt = f"✔ Saved to Downloads: {saved_path}"
-                self.update_bar_label.config(text=f"✔ Downloaded to Downloads/{asset_name}")
+                if hasattr(self, "update_progress_frame"):
+                    self.update_progress_frame.pack_forget()
+
+                done_txt = f"✔ Saved to Downloads/AirSpeaker/{asset_name}"
+                self.update_bar_label.config(text=done_txt)
+                self.update_now_btn.pack_forget()
+                if hasattr(self, "banner_install_btn"):
+                    self.banner_install_btn.pack(side="left", padx=4, pady=2)
+                if hasattr(self, "banner_files_btn"):
+                    self.banner_files_btn.pack(side="left", padx=4, pady=2)
                 if hasattr(self, "update_status_label"):
                     self.update_status_label.config(text=done_txt, fg=ACCENT)
-                if hasattr(self, "update_progress_label"):
-                    self.update_progress_label.config(text=done_txt)
-
-                if plat == "windows" and info.get("is_windows_installed", updater.is_windows_installed()):
-                    if messagebox.askyesno(
-                        "Update Downloaded",
-                        f"Update saved to:\n{saved_path}\n\nLaunch installer now and close Air Speaker?"
-                    ):
-                        updater.launch_downloaded_windows_installer(saved_path)
-                        self.root.after(600, self._quit_app)
-                elif plat == "windows":
-                    if messagebox.askyesno(
-                        "Update Downloaded",
-                        f"Portable update saved to:\n{saved_path}\n\nOpen Downloads folder?"
-                    ):
-                        updater.open_downloads_folder(saved_path)
-                elif plat == "macos":
-                    if messagebox.askyesno(
-                        "Update Downloaded",
-                        f"DMG saved to:\n{saved_path}\n\nOpen installer DMG now?"
-                    ):
-                        subprocess.Popen(["open", saved_path])
-                elif plat == "linux":
-                    ans = messagebox.askyesnocancel(
-                        "Update Downloaded",
-                        f"Update saved to:\n{saved_path}\n\n"
-                        f"• Click [Yes] to run the in-place Linux updater.\n"
-                        f"• Click [No] to open the Downloads folder."
-                    )
-                    if ans is True:
-                        cmd = f"{updater.LINUX_INSTALL_CMD} && echo 'Update complete! Press Enter.' && read"
-                        for term in (["x-terminal-emulator", "-e", "bash", "-c", cmd],
-                                     ["gnome-terminal", "--", "bash", "-c", cmd],
-                                     ["konsole", "-e", "bash", "-c", cmd]):
-                            try:
-                                subprocess.Popen(term)
-                                break
-                            except Exception:
-                                continue
-                    elif ans is False:
-                        updater.open_downloads_folder(saved_path)
+                if hasattr(self, "update_done_actions_frame"):
+                    self.update_done_actions_frame.pack(fill="x", padx=4, pady=(4, 2))
             self.root.after(0, _finish)
 
         def _on_error(exc: Exception) -> None:
@@ -3910,6 +3943,11 @@ TABS:
                 if hasattr(self, "update_bar_progress"):
                     self.update_bar_progress.stop()
                     self.update_bar_progress.pack_forget()
+                if hasattr(self, "update_progress_frame"):
+                    self.update_progress_frame.pack_forget()
+                if hasattr(self, "btn_download_update_settings") and self._latest_update_info:
+                    self.btn_download_update_settings.config(state="normal")
+                    self.btn_download_update_settings.pack(fill="x", padx=4, pady=(2, 4))
                 msg = "Download cancelled." if isinstance(exc, InterruptedError) else f"Download failed: {exc}"
                 self.update_bar_label.config(text=msg)
                 if hasattr(self, "update_status_label"):

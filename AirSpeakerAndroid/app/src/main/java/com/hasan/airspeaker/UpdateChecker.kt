@@ -1,6 +1,9 @@
 package com.hasan.airspeaker
 
+import android.app.DownloadManager
 import android.content.ContentValues
+import android.provider.DocumentsContract
+import java.io.BufferedOutputStream
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -302,7 +305,7 @@ object UpdateChecker {
                     val contentValues = ContentValues().apply {
                         put(MediaStore.Downloads.DISPLAY_NAME, info.fileName)
                         put(MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive")
-                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/AirSpeaker")
                         put(MediaStore.Downloads.IS_PENDING, 1)
                     }
 
@@ -310,41 +313,43 @@ object UpdateChecker {
                         ?: throw RuntimeException("Could not create MediaStore download entry")
 
                     try {
-                        resolver.openOutputStream(uri)?.use { out ->
-                            val buf = ByteArray(32768)
-                            var read: Int
-                            var downloaded: Long = 0
-                            var lastProgressTime = System.currentTimeMillis()
-                            var lastProgressBytes: Long = 0
-                            var emaSpeed = 0.0
+                        resolver.openOutputStream(uri)?.use { rawOut ->
+                            BufferedOutputStream(rawOut, 131072).use { out ->
+                                val buf = ByteArray(131072)
+                                var read: Int
+                                var downloaded: Long = 0
+                                var lastProgressTime = System.currentTimeMillis()
+                                var lastProgressBytes: Long = 0
+                                var emaSpeed = 0.0
 
-                            while (stream.read(buf).also { read = it } != -1) {
-                                if (cancelFlag.get()) {
-                                    throw InterruptedException("Download cancelled by user")
-                                }
-                                out.write(buf, 0, read)
-                                downloaded += read
+                                while (stream.read(buf).also { read = it } != -1) {
+                                    if (cancelFlag.get()) {
+                                        throw InterruptedException("Download cancelled by user")
+                                    }
+                                    out.write(buf, 0, read)
+                                    downloaded += read
 
-                                val now = System.currentTimeMillis()
-                                val dt = (now - lastProgressTime) / 1000.0
-                                if (dt >= 0.15) {
-                                    val instSpeed = (downloaded - lastProgressBytes) / dt
-                                    emaSpeed = if (emaSpeed <= 0.0) instSpeed else (0.7 * emaSpeed + 0.3 * instSpeed)
-                                    lastProgressTime = now
-                                    lastProgressBytes = downloaded
-                                    val curD = downloaded
-                                    val curSpeed = emaSpeed
-                                    mainHandler.post { onProgress(curD, totalBytes, curSpeed) }
+                                    val now = System.currentTimeMillis()
+                                    val dt = (now - lastProgressTime) / 1000.0
+                                    if (dt >= 0.12 || (totalBytes > 0 && downloaded >= totalBytes)) {
+                                        val instSpeed = (downloaded - lastProgressBytes) / dt.coerceAtLeast(0.001)
+                                        emaSpeed = if (emaSpeed <= 0.0) instSpeed else (0.7 * emaSpeed + 0.3 * instSpeed)
+                                        lastProgressTime = now
+                                        lastProgressBytes = downloaded
+                                        val curD = downloaded
+                                        val curSpeed = emaSpeed
+                                        mainHandler.post { onProgress(curD, totalBytes, curSpeed) }
+                                    }
                                 }
+                                out.flush()
                             }
-                            out.flush()
                         } ?: throw RuntimeException("Could not open output stream for $uri")
 
                         contentValues.clear()
                         contentValues.put(MediaStore.Downloads.IS_PENDING, 0)
                         resolver.update(uri, contentValues, null, null)
 
-                        mainHandler.post { onComplete(uri, "Downloads/${info.fileName}") }
+                        mainHandler.post { onComplete(uri, "Downloads/AirSpeaker/${info.fileName}") }
                     } catch (e: Exception) {
                         try { resolver.delete(uri, null, null) } catch (_: Exception) {}
                         throw e
@@ -352,12 +357,13 @@ object UpdateChecker {
                 } else {
                     // API 24–28: Write directly to public Downloads directory
                     val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    val targetDir = if (downloadsDir.exists() || downloadsDir.mkdirs()) downloadsDir else context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                    val baseDir = if (downloadsDir.exists() || downloadsDir.mkdirs()) downloadsDir else context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                    val targetDir = File(baseDir, "AirSpeaker").apply { mkdirs() }
                     val partFile = File(targetDir, "${info.fileName}.part")
                     val finalFile = File(targetDir, info.fileName)
 
-                    FileOutputStream(partFile).use { out ->
-                        val buf = ByteArray(32768)
+                    BufferedOutputStream(FileOutputStream(partFile), 131072).use { out ->
+                        val buf = ByteArray(131072)
                         var read: Int
                         var downloaded: Long = 0
                         var lastProgressTime = System.currentTimeMillis()
@@ -373,8 +379,8 @@ object UpdateChecker {
 
                             val now = System.currentTimeMillis()
                             val dt = (now - lastProgressTime) / 1000.0
-                            if (dt >= 0.15) {
-                                val instSpeed = (downloaded - lastProgressBytes) / dt
+                            if (dt >= 0.12 || (totalBytes > 0 && downloaded >= totalBytes)) {
+                                val instSpeed = (downloaded - lastProgressBytes) / dt.coerceAtLeast(0.001)
                                 emaSpeed = if (emaSpeed <= 0.0) instSpeed else (0.7 * emaSpeed + 0.3 * instSpeed)
                                 lastProgressTime = now
                                 lastProgressBytes = downloaded
@@ -393,7 +399,7 @@ object UpdateChecker {
                     }
 
                     val apkUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", finalFile)
-                    mainHandler.post { onComplete(apkUri, finalFile.absolutePath) }
+                    mainHandler.post { onComplete(apkUri, "Downloads/AirSpeaker/${info.fileName}") }
                 }
             } catch (e: Exception) {
                 if (e is InterruptedException) {
@@ -410,6 +416,7 @@ object UpdateChecker {
     }
 
     fun launchApkInstall(context: Context, apkUri: Uri) {
+
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
@@ -419,6 +426,43 @@ object UpdateChecker {
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch APK installer: ${e.message}", e)
+        }
+    }
+
+    fun openDownloadsAirSpeakerFolder(context: Context) {
+        val docUri = Uri.parse("content://com.android.externalstorage.documents/document/primary:Download%2FAirSpeaker")
+        val treeUri = Uri.parse("content://com.android.externalstorage.documents/tree/primary:Download%2FAirSpeaker")
+        val intents = listOf(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(docUri, "vnd.android.document/directory")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(treeUri, "vnd.android.document/directory")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+            Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+        for (intent in intents) {
+            try {
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+        }
+        try {
+            val fallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, docUri)
+                }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(fallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open Downloads/AirSpeaker folder: ${e.message}", e)
         }
     }
 }

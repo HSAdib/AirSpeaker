@@ -2190,6 +2190,19 @@
                     app:strokeWidth="1dp"
                     android:fontFamily="sans-serif"
                     android:textSize="12sp" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDownloadUpdate"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="8dp"
+                    android:text="⬇ DOWNLOAD UPDATE"
+                    android:textColor="@color/m3_on_tertiary_container"
+                    app:backgroundTint="@color/m3_tertiary_container"
+                    android:fontFamily="sans-serif"
+                    android:textStyle="bold"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
 
                 <TextView
                     android:id="@+id/tvUpdateStatus"
@@ -2219,6 +2232,36 @@
                             android:textColor="@color/m3_error"
                             android:textSize="11sp" />
                     </LinearLayout>
+                <LinearLayout android:id="@+id/layoutUpdateCompleteActions" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_width="match_parent" android:orientation="horizontal" android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnInstallUpdateNow"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        android:text="⚡ Install Now"
+                        android:textAllCaps="false"
+                        android:textColor="@color/m3_on_tertiary_container"
+                        app:backgroundTint="@color/m3_tertiary_container"
+                        android:fontFamily="sans-serif-medium"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSeeUpdateInFiles"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:text="📂 See in Files"
+                        android:textAllCaps="false"
+                        android:textColor="@color/m3_on_secondary_container"
+                        app:backgroundTint="@color/m3_secondary_container"
+                        android:fontFamily="sans-serif-medium"
+                        android:textSize="12sp" />
+                </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
