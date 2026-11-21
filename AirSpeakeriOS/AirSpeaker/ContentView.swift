@@ -149,44 +149,44 @@ public struct ContentView: View {
                                 .foregroundColor(Color(red: 1.0, green: 0.3, blue: 0.3))
                             }
                         } else if let fileUrl = engine.downloadedUpdateFileUrl {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("✔ Saved to Files → Air Speaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(M3.tertiary)
-                            HStack(spacing: 8) {
-                                Button(action: {
-                                    showInstallShareSheet = true
-                                }) {
-                                    Text("⚡ INSTALL NOW")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .foregroundColor(M3.onTertiaryContainer)
-                                        .frame(maxWidth: .infinity, minHeight: 36)
-                                        .background(M3.tertiaryContainer)
-                                        .cornerRadius(14)
-                                }
-                                .sheet(isPresented: $showInstallShareSheet) {
-                                    ShareSheet(items: [fileUrl])
-                                }
-
-                                Button(action: {
-                                    if !engine.openDownloadsInFilesApp() {
-                                        showExportPicker = true
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("✔ Saved to Files → Air Speaker → Downloads/AirSpeaker/\(engine.updateAssetName)")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(M3.tertiary)
+                                HStack(spacing: 8) {
+                                    Button(action: {
+                                        showInstallShareSheet = true
+                                    }) {
+                                        Text("⚡ INSTALL NOW")
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundColor(M3.onTertiaryContainer)
+                                            .frame(maxWidth: .infinity, minHeight: 36)
+                                            .background(M3.tertiaryContainer)
+                                            .cornerRadius(14)
                                     }
-                                }) {
-                                    Text("📂 SEE IN FILES")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .foregroundColor(M3.onSecondaryContainer)
-                                        .frame(maxWidth: .infinity, minHeight: 36)
-                                        .background(M3.secondaryContainer)
-                                        .cornerRadius(14)
-                                }
-                                .sheet(isPresented: $showExportPicker) {
-                                    DocumentExportPicker(url: fileUrl)
+                                    .sheet(isPresented: $showInstallShareSheet) {
+                                        ShareSheet(items: [fileUrl])
+                                    }
+
+                                    Button(action: {
+                                        if !engine.openDownloadsInFilesApp() {
+                                            showExportPicker = true
+                                        }
+                                    }) {
+                                        Text("📂 SEE IN FILES")
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundColor(M3.onSecondaryContainer)
+                                            .frame(maxWidth: .infinity, minHeight: 36)
+                                            .background(M3.secondaryContainer)
+                                            .cornerRadius(14)
+                                    }
+                                    .sheet(isPresented: $showExportPicker) {
+                                        DocumentExportPicker(url: fileUrl)
+                                    }
                                 }
                             }
                         }
-                            }
-                        }
+                    }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(M3.surface)
@@ -1391,7 +1391,8 @@ struct SettingsStudioTab: View {
                                     DocumentExportPicker(url: fileUrl)
                                 }
                             }
-                        } else if !engine.updateDownloadUrl.isEmpty && engine.updateDownloadUrl != "https://github.com/HSAdib/AirSpeaker/releases/latest" {
+                        }
+                    } else if !engine.updateDownloadUrl.isEmpty && engine.updateDownloadUrl != "https://github.com/HSAdib/AirSpeaker/releases/latest" {
                         Button(action: {
                             engine.startUpdateDownload()
                         }) {

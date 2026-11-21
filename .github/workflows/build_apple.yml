@@ -403,7 +403,7 @@ jobs:
             - **Phone (Android & iOS — Exactly 4 Tabs):** \`[ PLAY ]\` *(Default on startup)* | \`[ SERVE ]\` | \`[ PARTY ]\` | \`[ SETTINGS ]\`
             - **PC (Windows, macOS, Linux — Exactly 5 Tabs):** \`[ PLAY ]\` | \`[ SERVE ]\` *(Default on startup)* | \`[ PARTY ]\` | \`[ SETTINGS ]\` | \`[ VIRTUAL DEVICE ]\`
           - **Multi-Device Party Mode:** Synchronized multi-device broadcasting and daisy-chain personal hotspot extension.
-          - **In-App Settings Updater (All 5 OSes):** Check for updates, download at full speed with live speed/progress directly into `Downloads/AirSpeaker`, and tap **Install Now** or **See in Files**.
+          - **In-App Settings Updater (All 5 OSes):** Check for updates, download at full speed with live speed/progress directly into \`Downloads/AirSpeaker\`, and tap **Install Now** or **See in Files**.
 
           #### Deliverables for All 5 Operating Systems:
           - **Windows (Installed App):** \`AirSpeaker-v1-Setup.exe\` (Native Start Menu & Windows Settings setup)
