@@ -100,6 +100,7 @@ class AudioStreamService : Service() {
 
         private var lastServiceConfigRev = 0
         private val seenServiceSyncIds = ArrayDeque<Int>(32)
+        private val lastServiceRevBySession = HashMap<Int, Int>()
         private var latestMergedConfig: JSONObject? = null
 
         @Synchronized
@@ -775,17 +776,40 @@ class AudioStreamService : Service() {
 
     private fun handleConfigSync(json: JSONObject) {
         try {
+            val senderIp = json.optString("_sender_ip", "")
+            // Party Host Authority: ignore CONFIG_SYNC sent by party joiners
+            if (ControlChannel.isHostingOrExtendingParty && !ControlChannel.isExtendingParty) {
+                if (ControlChannel.partyPeerIps.contains(senderIp) || json.optBoolean("party_join", false) || !json.optBoolean("is_party_host", false)) {
+                    return
+                }
+            }
+            // Party Joiner Authority: only accept CONFIG_SYNC from the joined host
+            val isHostSync = json.optBoolean("party_host_sync", false) || json.optBoolean("is_party_host", false)
+            if (ControlChannel.isPartyJoinerActive) {
+                val joinedHost = ControlChannel.joinedPartyHostIp?.trim().orEmpty()
+                if (joinedHost.isNotEmpty() && senderIp.isNotEmpty() && senderIp != joinedHost) {
+                    return
+                }
+            }
+
             val incomingRev = json.optInt("rev", 0)
             val incomingSyncId = if (json.has("sync_id")) json.getInt("sync_id") else null
+            val incomingSessionId = if (json.has("session_id")) json.getInt("session_id") else null
 
             synchronized(AudioStreamService::class.java) {
-                if (incomingSyncId != null) {
-                    if (seenServiceSyncIds.contains(incomingSyncId)) return
+                if (incomingSyncId != null && seenServiceSyncIds.contains(incomingSyncId)) return
+                if (incomingSessionId != null) {
+                    val lastSessRev = lastServiceRevBySession[incomingSessionId] ?: 0
+                    if (incomingRev <= lastSessRev) return
+                    lastServiceRevBySession[incomingSessionId] = incomingRev
+                } else if (incomingSyncId != null) {
                     if (incomingRev < lastServiceConfigRev) return
-                    if (seenServiceSyncIds.size >= 32) seenServiceSyncIds.removeFirst()
-                    seenServiceSyncIds.addLast(incomingSyncId)
                 } else if (incomingRev <= lastServiceConfigRev) {
                     return
+                }
+                if (incomingSyncId != null) {
+                    if (seenServiceSyncIds.size >= 32) seenServiceSyncIds.removeFirst()
+                    seenServiceSyncIds.addLast(incomingSyncId)
                 }
                 lastServiceConfigRev = maxOf(lastServiceConfigRev, incomingRev)
                 cacheMergedConfig(json)
@@ -803,19 +827,22 @@ class AudioStreamService : Service() {
             if (json.has("auto_buffer")) {
                 AudioNative.safeSetAutoMode(json.getBoolean("auto_buffer"))
             }
-            if (json.has("volume_gain")) {
-                savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                AudioNative.safeSetVolumeGain(savedVolumeGain)
-            }
-            if (json.has("muted")) {
-                userMuted = json.getBoolean("muted")
-                isUserMuted = userMuted
-                if (!userMuted) {
-                    pausedByHeadset = false
-                    pausedByFocus = false
+            // Party Joiners keep their own local volume & mute independent from the Host
+            if (!(ControlChannel.isPartyJoinerActive && isHostSync)) {
+                if (json.has("volume_gain")) {
+                    savedVolumeGain = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
+                    AudioNative.safeSetVolumeGain(savedVolumeGain)
                 }
+                if (json.has("muted")) {
+                    userMuted = json.getBoolean("muted")
+                    isUserMuted = userMuted
+                    if (!userMuted) {
+                        pausedByHeadset = false
+                        pausedByFocus = false
+                    }
+                }
+                applyEffectiveMuteAndGain()
             }
-            applyEffectiveMuteAndGain()
             if (json.has("exclusive_audio_mode")) {
                 val oldMode = exclusiveAudioMode
                 exclusiveAudioMode = json.getString("exclusive_audio_mode")

@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import queue
+import random
 import socket
 import subprocess
 import sys
@@ -264,10 +265,18 @@ class AirSpeakerApp:
         self._rx_pps = 0
         self._peak_level = 0.0
         self._phone_stats: dict = {}
-        self._config_rev = int(cfg.get("config_rev", 1))
+        self._session_id = random.randint(1, 0x7FFFFFFE)
+        self._config_rev = 1
+        self._last_applied_rev_by_session: Dict[int, int] = {}
         self._last_sync_id = int(time.time() * 1000) & 0x7FFFFFFF
         self._seen_sync_ids = collections.deque(maxlen=32)
         self._suppress_sync = False
+        self._is_dragging_slider = False
+        self._last_local_slider_time = 0.0
+        self._last_peer_ip: str = ""
+        self.party_join_host_cfg_var = tk.StringVar(
+            value="🔒 Host Controls: PCM16 • Buffer: AUTO (30.0 ms) — Only the Party Host can change bitrate, buffer & delay"
+        )
         self._delay_history = collections.deque([0.0] * 60, maxlen=60)
         self._target_history = collections.deque([30.0] * 60, maxlen=60)
         self._last_graph_tick = 0.0
@@ -379,6 +388,8 @@ class AirSpeakerApp:
             bg=BG, fg=FG, troughcolor=INPUT_BG, highlightthickness=0, bd=0, length=170,
             command=self._on_buffer_slider_changed
         )
+        sc.bind("<ButtonPress-1>", self._on_slider_press)
+        sc.bind("<ButtonRelease-1>", self._on_buffer_slider_release)
         sc.pack(side="left", padx=4)
         lbl = tk.Label(custom_row, text=f"{self.custom_buffer_var.get():.1f} ms", bg=BG, fg=ACCENT, font=FONT_MONO_SM)
         lbl.pack(side="left")
@@ -655,6 +666,8 @@ class AirSpeakerApp:
             command=self._on_gain_slider_changed
         )
         self.gain_slider.pack(side="left", padx=4)
+        self.gain_slider.bind("<ButtonPress-1>", self._on_slider_press)
+        self.gain_slider.bind("<ButtonRelease-1>", self._on_gain_slider_release)
         self.gain_val_label = tk.Label(v_row, text=f"{int(self.volume_gain_var.get() * 100)}%", bg=BG, fg=ACCENT, font=FONT_MONO_SM, width=5)
         self.gain_val_label.pack(side="left")
         self.mute_btn = StudioButton(
@@ -739,6 +752,8 @@ class AirSpeakerApp:
             command=self._on_gain_slider_changed
         )
         self.conn_vol_slider.pack(side="left", fill="x", expand=True, padx=(2, 8))
+        self.conn_vol_slider.bind("<ButtonPress-1>", self._on_slider_press)
+        self.conn_vol_slider.bind("<ButtonRelease-1>", self._on_gain_slider_release)
 
         self.conn_vol_pct_label = tk.Label(
             vol_bar_row, text=f"{int(self.volume_gain_var.get() * 100)}%",
@@ -1039,6 +1054,30 @@ class AirSpeakerApp:
 
         ttk.Button(add_row, text="+ Add to Party", command=self._on_add_party_device_manual).pack(side="left")
 
+        hqf = tk.LabelFrame(
+            self.party_host_frame, text=" 👑 Party Host Stream Quality (Host Only) ",
+            bg=BG, fg=ACCENT_FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=3
+        )
+        hqf.pack(fill="x", **pad)
+        hcb_row = tk.Frame(hqf, bg=BG)
+        hcb_row.pack(fill="x", padx=4, pady=2)
+        tk.Label(hcb_row, text="Codec:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+        tk.Radiobutton(
+            hcb_row, text="Lossless PCM16", variable=self.codec_var, value=CODEC_PCM16,
+            bg=BG, fg=FG, selectcolor=INPUT_BG, font=FONT_MONO_SM, command=self._on_codec_changed
+        ).pack(side="left", padx=(4, 6))
+        tk.Radiobutton(
+            hcb_row, text="Opus", variable=self.codec_var, value=CODEC_OPUS,
+            bg=BG, fg=FG, selectcolor=INPUT_BG, font=FONT_MONO_SM, command=self._on_codec_changed
+        ).pack(side="left", padx=(0, 10))
+        tk.Label(hcb_row, text="Bitrate:", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+        self.bitrate_combo_party_host = ttk.Combobox(
+            hcb_row, textvariable=self.bitrate_var, values=OPUS_BITRATES, width=5, state="readonly", font=FONT_MONO_SM
+        )
+        self.bitrate_combo_party_host.pack(side="left", padx=4)
+        self.bitrate_combo_party_host.bind("<<ComboboxSelected>>", lambda e: self._on_bitrate_changed())
+        tk.Label(hcb_row, text="kbps", bg=BG, fg=FG_MUTED, font=FONT_MONO_SM).pack(side="left")
+
         self._build_target_buffer_card(self.party_host_frame, " Party Host Target Buffer ").pack(fill="x", **pad)
 
         # Live Party Delay Graph for Host
@@ -1148,7 +1187,15 @@ class AirSpeakerApp:
         )
         self.party_join_status_label.pack(fill="x", padx=8, pady=(0, 4))
 
-        self._build_target_buffer_card(self.party_join_frame, " Party Joiner Target Buffer ").pack(fill="x", **pad)
+        j_lock_card = tk.LabelFrame(
+            self.party_join_frame, text=" 🔒 Host-Controlled Stream Quality & Delay ",
+            bg=PANEL_BG, fg=FG_MUTED, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=5
+        )
+        j_lock_card.pack(fill="x", **pad)
+        tk.Label(
+            j_lock_card, textvariable=self.party_join_host_cfg_var,
+            bg=PANEL_BG, fg=PRIMARY, font=FONT_MONO_SM, anchor="w", justify="left", wraplength=480
+        ).pack(fill="x")
 
         # Live Party Delay Graph for Joiner
         dg_pjoin = tk.LabelFrame(self.party_join_frame, text=" Live Party Delay Graph ", bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=8, pady=3)
@@ -1614,6 +1661,8 @@ class AirSpeakerApp:
         if self._udp_sender:
             self._udp_sender.add_party_target(ip, int(port))
         self._refresh_party_ui()
+        if self._party_streaming or self._party_view_state == "HOST":
+            self._send_config_reliable([ip], self._get_current_config())
 
     def _refresh_party_ui(self) -> None:
         now = time.monotonic()
@@ -2277,11 +2326,64 @@ class AirSpeakerApp:
         _, text = self._compute_expected_delay_ms()
         self.expected_delay_var.set(text)
 
+    def _update_party_join_host_cfg_label(self) -> None:
+        codec_str = f"Opus {self.bitrate_var.get()} kbps ({self.frame_ms_var.get()}ms)" if self.codec_var.get() == CODEC_OPUS else "Lossless PCM16 (5ms)"
+        bmode = self.buffer_mode_var.get()
+        bms = self.custom_buffer_var.get()
+        self.party_join_host_cfg_var.set(
+            f"🔒 Controlled by Party Host: {codec_str}  •  Buffer: {bmode} ({bms:.1f} ms)\n"
+            f"Only the Party Host can change bitrate, buffer size, and target delay."
+        )
+
+    def _send_config_reliable(self, targets: List[str], cfg: Dict[str, Any]) -> None:
+        clean_targets = []
+        for t in targets:
+            ip = (t or "").strip()
+            if ip and ip not in ("0.0.0.0", "127.0.0.1") and ip not in clean_targets:
+                clean_targets.append(ip)
+        if not clean_targets:
+            return
+        for tip in clean_targets:
+            send_control_message(tip, cfg, CONTROL_PORT)
+        # Redundant 80ms retry with identical sync_id/rev so single Wi-Fi UDP drops never require a second click
+        def _retry():
+            for tip in clean_targets:
+                send_control_message(tip, cfg, CONTROL_PORT)
+        self.root.after(80, _retry)
+
+    def _on_slider_press(self, event=None) -> None:
+        self._is_dragging_slider = True
+        self._last_local_slider_time = time.monotonic()
+
+    def _on_buffer_slider_release(self, event=None) -> None:
+        self._is_dragging_slider = False
+        self._last_local_slider_time = time.monotonic()
+        if self._buffer_sync_after_id is not None:
+            try:
+                self.root.after_cancel(self._buffer_sync_after_id)
+            except Exception:
+                pass
+            self._buffer_sync_after_id = None
+        self._on_local_setting_changed()
+
+    def _on_gain_slider_release(self, event=None) -> None:
+        self._is_dragging_slider = False
+        self._last_local_slider_time = time.monotonic()
+        if self._gain_sync_after_id is not None:
+            try:
+                self.root.after_cancel(self._gain_sync_after_id)
+            except Exception:
+                pass
+            self._gain_sync_after_id = None
+        self._on_local_setting_changed()
+
     def _get_current_config(self) -> Dict[str, Any]:
-        sync_id = int(time.time() * 1000) & 0x7FFFFFFF
+        sync_id = (int(time.time() * 1000) ^ (self._config_rev << 12) ^ self._session_id) & 0x7FFFFFFF
         self._last_sync_id = sync_id
+        is_host = bool(self._party_streaming or self._party_view_state == "HOST")
         return {
             "type": "CONFIG_SYNC",
+            "session_id": self._session_id,
             "rev": self._config_rev,
             "sync_id": sync_id,
             "direction": self.direction_var.get(),
@@ -2302,7 +2404,9 @@ class AirSpeakerApp:
             "enable_audio_effects": self._phone_audio_fx,
             "exclusive_audio_mode": self._phone_exclusive_mode,
             "stop_on_headset_disconnect": self._phone_headset_disc,
-            "party_mode": self.party_mode_var.get(),
+            "party_mode": is_host,
+            "is_party_host": is_host,
+            "party_host_sync": is_host,
             "party_ips": self._get_all_target_ips(),
         }
 
@@ -2310,6 +2414,12 @@ class AirSpeakerApp:
         if self._suppress_sync:
             return
         self._update_expected_delay_label()
+        self._update_party_join_host_cfg_label()
+
+        # Party Joiners cannot override Host bitrate, buffer size, or target delay
+        if self._party_joined_active:
+            return
+
         self._config_rev += 1
         self.sync_rev_label.config(text=f"SYNC REV: {self._config_rev}")
         cfg = self._get_current_config()
@@ -2332,9 +2442,12 @@ class AirSpeakerApp:
                 self._udp_sender.set_codec_and_bitrate(c, br, f_ms)
                 self._udp_sender.set_routing_and_gain(True, gain, muted)
 
-        # Transmit to all joined phones in party
-        for tip in self._get_all_target_ips():
-            send_control_message(tip, cfg, CONTROL_PORT)
+        targets = self._get_all_target_ips()
+        if not targets and self._last_peer_ip:
+            targets = [self._last_peer_ip]
+        if not targets and not self._party_streaming:
+            targets = ["255.255.255.255"]
+        self._send_config_reliable(targets, cfg)
 
     def _on_audio_profile_selected(self) -> None:
         prof = self.audio_profile_var.get()
@@ -2385,6 +2498,8 @@ class AirSpeakerApp:
             self.bitrate_combo_tab1.config(state=state)
         if hasattr(self, "bitrate_combo_tab2"):
             self.bitrate_combo_tab2.config(state=state)
+        if hasattr(self, "bitrate_combo_party_host"):
+            self.bitrate_combo_party_host.config(state=state)
         if hasattr(self, "frame_combo_tab2"):
             self.frame_combo_tab2.config(state=state)
         if not is_opus and self.frame_ms_var.get() != "5":
@@ -2434,39 +2549,43 @@ class AirSpeakerApp:
         self._on_local_setting_changed()
 
     def _on_buffer_slider_changed(self, val) -> None:
-        if self._suppress_sync:
+        if self._suppress_sync or self._party_joined_active:
             return
+        fval = round(float(val), 1)
+        if getattr(self, "_last_buf_slider_val", None) == fval:
+            return
+        self._last_buf_slider_val = fval
+        self._last_local_slider_time = time.monotonic()
+
         for lbl in getattr(self, "_buffer_val_labels", []):
             try:
-                lbl.config(text=f"{float(val):.1f} ms")
+                lbl.config(text=f"{fval:.1f} ms")
             except Exception:
                 pass
         if hasattr(self, "buffer_val_label"):
-            self.buffer_val_label.config(text=f"{float(val):.1f} ms")
+            self.buffer_val_label.config(text=f"{fval:.1f} ms")
         if hasattr(self, "play_target_var"):
-            self.play_target_var.set(f"{float(val):.1f} ms")
+            self.play_target_var.set(f"{fval:.1f} ms")
         if self._phone_receiver:
-            self._phone_receiver.set_target_buffer_ms(float(val))
-        if self._party_join_receiver:
-            self._party_join_receiver.set_target_buffer_ms(float(val))
+            self._phone_receiver.set_target_buffer_ms(fval)
         self.buffer_mode_var.set("CUSTOM")
         self.audio_profile_var.set("CUSTOM")
+        self._update_expected_delay_label()
         if self._buffer_sync_after_id is not None:
             try:
                 self.root.after_cancel(self._buffer_sync_after_id)
             except Exception:
                 pass
-        self._buffer_sync_after_id = self.root.after(60, self._on_local_setting_changed)
+        self._buffer_sync_after_id = self.root.after(80, self._on_local_setting_changed)
 
     def _on_gain_slider_changed(self, val) -> None:
         if self._suppress_sync:
             return
         gain = round(float(val), 2)
-        self._suppress_sync = True
-        try:
-            self.volume_gain_var.set(gain)
-        finally:
-            self._suppress_sync = False
+        if getattr(self, "_last_gain_slider_val", None) == gain:
+            return
+        self._last_gain_slider_val = gain
+        self._last_local_slider_time = time.monotonic()
 
         pct_text = f"{int(round(gain * 100))}%"
         self.gain_val_label.config(text=pct_text)
@@ -2486,12 +2605,15 @@ class AirSpeakerApp:
             set_system_volume_and_mute(os_target, muted)
             self._last_os_vol = os_target
 
+        if self._party_joined_active:
+            return
+
         if hasattr(self, "_gain_sync_after_id") and self._gain_sync_after_id:
             try:
                 self.root.after_cancel(self._gain_sync_after_id)
             except Exception:
                 pass
-        self._gain_sync_after_id = self.root.after(60, self._on_local_setting_changed)
+        self._gain_sync_after_id = self.root.after(80, self._on_local_setting_changed)
 
     def _toggle_mute(self) -> None:
         m = not self.muted_var.get()
@@ -2536,13 +2658,42 @@ class AirSpeakerApp:
         if not isinstance(msg, dict):
             return
 
+        sender_ip = msg.get("_sender_ip", "")
+        if sender_ip:
+            self._last_peer_ip = sender_ip
+
+        # Party Host Authority: Host rejects all joiner CONFIG_SYNC overrides
+        is_party_host_active = bool(self._party_streaming or self._party_view_state == "HOST")
+        if is_party_host_active:
+            with self._party_lock:
+                is_known_joiner = sender_ip in self._party_devices
+            if is_known_joiner or msg.get("party_join") is True or not msg.get("is_party_host", False):
+                # Still allow iOS force_pcm compatibility downgrade if an iOS joiner requires PCM16
+                dev_name_chk = str(msg.get("device", "")).lower()
+                if (msg.get("force_pcm") is True or msg.get("platform") == "ios" or "iphone" in dev_name_chk or "ipad" in dev_name_chk) and self._is_active_tx_target(sender_ip) and self.codec_var.get() != CODEC_PCM16:
+                    self._suppress_sync = True
+                    try:
+                        self.codec_var.set(CODEC_PCM16)
+                        self._update_codec_ui_state()
+                    finally:
+                        self._suppress_sync = False
+                    self._on_local_setting_changed()
+                return
+
+        # Party Joiner Authority: Joiners ONLY accept CONFIG_SYNC from their active Party Host
+        is_party_host_sync = bool(msg.get("party_host_sync") or msg.get("is_party_host"))
+        if self._party_joined_active:
+            joined_host = self.party_join_host_ip_var.get().strip()
+            if joined_host and sender_ip and sender_ip != joined_host:
+                return
+
         try:
             incoming_rev = int(msg.get("rev", 0))
         except (ValueError, TypeError):
             incoming_rev = 0
 
         incoming_sync_id = msg.get("sync_id")
-        sender_ip = msg.get("_sender_ip", "")
+        incoming_session_id = msg.get("session_id")
         dev_name = msg.get("device", "")
         is_ios_sender = (
             msg.get("force_pcm") is True
@@ -2552,25 +2703,42 @@ class AirSpeakerApp:
         )
         allow_pcm_override = is_ios_sender and self._is_active_tx_target(sender_ip) and (self.codec_var.get() != CODEC_PCM16)
 
+        if incoming_sync_id is not None and incoming_sync_id in self._seen_sync_ids:
+            return
+
+        if incoming_session_id is not None:
+            try:
+                sess_key = int(incoming_session_id)
+            except (ValueError, TypeError):
+                sess_key = 0
+            last_sess_rev = self._last_applied_rev_by_session.get(sess_key, 0)
+            if incoming_rev <= last_sess_rev and not allow_pcm_override:
+                return
+            self._last_applied_rev_by_session[sess_key] = incoming_rev
+        else:
+            if incoming_sync_id is not None:
+                if incoming_rev < self._config_rev and not allow_pcm_override:
+                    return
+            elif incoming_rev <= self._config_rev and not allow_pcm_override:
+                return
+
         if incoming_sync_id is not None:
-            if incoming_sync_id in self._seen_sync_ids:
-                return
-            if incoming_rev < self._config_rev and not allow_pcm_override:
-                return
             self._seen_sync_ids.append(incoming_sync_id)
             self._last_sync_id = incoming_sync_id
-        elif incoming_rev <= self._config_rev and not allow_pcm_override:
-            return
+
+        slider_protected = (not self._party_joined_active) and (
+            self._is_dragging_slider or (time.monotonic() - self._last_local_slider_time) < 0.35
+        )
 
         self._suppress_sync = True
         try:
             self._config_rev = max(self._config_rev, incoming_rev)
             self.sync_rev_label.config(text=f"SYNC REV: {self._config_rev}")
 
-            if dev_name and dev_name != "Android":
+            if dev_name and dev_name != "Android" and not self._party_joined_active:
                 self._connected_phone_name = dev_name
                 self.conn_device_name_var.set(dev_name)
-            if sender_ip:
+            if sender_ip and not self._party_joined_active:
                 if self._manual_ip_override is None and (not self._streaming or not self.ip_var.get().strip()):
                     if not self.ip_var.get().strip():
                         self.ip_var.set(sender_ip)
@@ -2612,65 +2780,70 @@ class AirSpeakerApp:
                 except (ValueError, TypeError):
                     pass
 
-            if "buffer_mode" in msg:
-                bmode = str(msg["buffer_mode"])
-                if bmode in ("LOW", "MEDIUM", "HIGH", "AUTO", "CUSTOM"):
-                    self.buffer_mode_var.set(bmode)
+            if not slider_protected:
+                if "buffer_mode" in msg:
+                    bmode = str(msg["buffer_mode"])
+                    if bmode in ("LOW", "MEDIUM", "HIGH", "AUTO", "CUSTOM"):
+                        self.buffer_mode_var.set(bmode)
 
-            if "custom_buffer_ms" in msg:
-                try:
-                    c = float(msg["custom_buffer_ms"])
-                    if math.isfinite(c):
-                        c = max(10.0, min(200.0, c))
-                        self.custom_buffer_var.set(c)
-                        for lbl in getattr(self, "_buffer_val_labels", []):
-                            try:
-                                lbl.config(text=f"{c:.1f} ms")
-                            except Exception:
-                                pass
-                        if hasattr(self, "buffer_val_label"):
-                            self.buffer_val_label.config(text=f"{c:.1f} ms")
-                        if hasattr(self, "play_target_var"):
-                            self.play_target_var.set(f"{c:.1f} ms")
-                        if self._phone_receiver:
-                            self._phone_receiver.set_target_buffer_ms(c)
-                        if self._party_join_receiver:
-                            self._party_join_receiver.set_target_buffer_ms(c)
-                except (ValueError, TypeError):
-                    pass
+                if "custom_buffer_ms" in msg:
+                    try:
+                        c = float(msg["custom_buffer_ms"])
+                        if math.isfinite(c):
+                            c = max(10.0, min(200.0, c))
+                            self._last_buf_slider_val = round(c, 1)
+                            self.custom_buffer_var.set(c)
+                            for lbl in getattr(self, "_buffer_val_labels", []):
+                                try:
+                                    lbl.config(text=f"{c:.1f} ms")
+                                except Exception:
+                                    pass
+                            if hasattr(self, "buffer_val_label"):
+                                self.buffer_val_label.config(text=f"{c:.1f} ms")
+                            if hasattr(self, "play_target_var"):
+                                self.play_target_var.set(f"{c:.1f} ms")
+                            if self._phone_receiver:
+                                self._phone_receiver.set_target_buffer_ms(c)
+                            if self._party_join_receiver:
+                                self._party_join_receiver.set_target_buffer_ms(c)
+                    except (ValueError, TypeError):
+                        pass
 
-            if "volume_gain" in msg:
-                try:
-                    g = float(msg["volume_gain"])
-                    if math.isfinite(g):
-                        g = max(0.0, min(2.0, g))
-                        self.volume_gain_var.set(g)
-                        self.gain_val_label.config(text=f"{int(round(g * 100))}%")
-                        if hasattr(self, "conn_vol_pct_label"):
-                            self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
+                # In Party Joiner mode, preserve each joiner's own local volume & mute
+                if not (self._party_joined_active and is_party_host_sync):
+                    if "volume_gain" in msg:
+                        try:
+                            g = float(msg["volume_gain"])
+                            if math.isfinite(g):
+                                g = max(0.0, min(2.0, g))
+                                self._last_gain_slider_val = round(g, 2)
+                                self.volume_gain_var.set(g)
+                                self.gain_val_label.config(text=f"{int(round(g * 100))}%")
+                                if hasattr(self, "conn_vol_pct_label"):
+                                    self.conn_vol_pct_label.config(text=f"{int(round(g * 100))}%")
+                                if self._udp_sender:
+                                    self._udp_sender.set_volume_gain(g)
+                                if self._phone_receiver:
+                                    self._phone_receiver.set_volume_gain(g)
+                                if self._party_join_receiver:
+                                    self._party_join_receiver.set_volume_gain(g)
+                        except (ValueError, TypeError):
+                            pass
+
+                    if "muted" in msg:
+                        m = bool(msg["muted"])
+                        self.muted_var.set(m)
+                        self.mute_btn.config(bg=ERROR_BG if m else INPUT_BG, text="MUTED" if m else "MUTE")
+                        if hasattr(self, "conn_mute_icon_btn"):
+                            self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
                         if self._udp_sender:
-                            self._udp_sender.set_volume_gain(g)
+                            self._udp_sender.set_muted(m)
                         if self._phone_receiver:
-                            self._phone_receiver.set_volume_gain(g)
+                            self._phone_receiver.set_muted(m)
                         if self._party_join_receiver:
-                            self._party_join_receiver.set_volume_gain(g)
-                except (ValueError, TypeError):
-                    pass
+                            self._party_join_receiver.set_muted(m)
 
-            if "muted" in msg:
-                m = bool(msg["muted"])
-                self.muted_var.set(m)
-                self.mute_btn.config(bg=ERROR_BG if m else INPUT_BG, text="MUTED" if m else "MUTE")
-                if hasattr(self, "conn_mute_icon_btn"):
-                    self.conn_mute_icon_btn.config(text="🔇" if m else "🔊")
-                if self._udp_sender:
-                    self._udp_sender.set_muted(m)
-                if self._phone_receiver:
-                    self._phone_receiver.set_muted(m)
-                if self._party_join_receiver:
-                    self._party_join_receiver.set_muted(m)
-
-            if "direction" in msg:
+            if "direction" in msg and not self._party_joined_active:
                 d = str(msg["direction"])
                 if d in ("PC_TO_PHONE", "PHONE_TO_PC", "FULL_DUPLEX"):
                     self.direction_var.set(d)
@@ -2686,6 +2859,7 @@ class AirSpeakerApp:
 
             self._update_codec_ui_state()
             self._update_expected_delay_label()
+            self._update_party_join_host_cfg_label()
 
             if self._streaming:
                 c = self.codec_var.get()
@@ -2705,7 +2879,7 @@ class AirSpeakerApp:
                     self._udp_sender.set_routing_and_gain(True, gain, muted)
 
             self._schedule_save_config(250)
-            logger.info("Applied incoming CONFIG_SYNC rev %d (sync_id=%s) from phone", incoming_rev, incoming_sync_id)
+            logger.info("Applied incoming CONFIG_SYNC rev %d (session=%s, sync_id=%s)", incoming_rev, incoming_session_id, incoming_sync_id)
         finally:
             self._suppress_sync = False
 
@@ -3307,6 +3481,8 @@ class AirSpeakerApp:
                     elif kind == "beacon":
                         msg = data
                         sender_ip = msg.get("_sender_ip")
+                        if sender_ip:
+                            self._last_peer_ip = sender_ip
                         ips = msg.get("ips", [])
                         candidates = []
                         if sender_ip and sender_ip not in candidates:
@@ -3450,6 +3626,8 @@ class AirSpeakerApp:
                             self._on_local_setting_changed()
                         cur_ip = self.ip_var.get().strip()
                         sender_ip = s.get("_sender_ip") or cur_ip
+                        if sender_ip:
+                            self._last_peer_ip = sender_ip
                         rx_pps_phone = int(s.get("rx_pps", 0) or 0)
                         is_playing = bool(s.get("playing", False)) or rx_pps_phone > 0
                         is_serving = bool(s.get("serving", False)) or int(s.get("serve_pps", 0) or 0) > 0

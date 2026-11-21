@@ -125,9 +125,9 @@ class ControlChannel(
         }
     }
 
-    fun sendConfigSync(json: JSONObject, targetIp: String? = null) {
+    fun sendConfigSync(json: JSONObject, targetIp: String? = null, extraTargets: List<String> = emptyList()) {
         val dest = targetIp?.takeIf { !isOwnLocalIp(it) } ?: activePcIp
-        val senderIp = AudioNative.nativeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }
+        val senderIp = AudioNative.safeGetSenderIp()?.takeIf { !isOwnLocalIp(it) }
         thread(name = "ConfigSyncSender", isDaemon = true) {
             try {
                 val data = json.toString().toByteArray(Charsets.UTF_8)
@@ -135,20 +135,31 @@ class ControlChannel(
                 val targetList = mutableSetOf<String>()
                 if (!dest.isNullOrBlank()) targetList.add(dest)
                 if (!senderIp.isNullOrBlank()) targetList.add(senderIp)
-                targetList.add("255.255.255.255")
-
-                val localIps = getLocalIpv4Addresses()
-                for (ip in localIps) {
-                    val parts = ip.split(".")
-                    if (parts.size == 4) {
-                        targetList.add("${parts[0]}.${parts[1]}.${parts[2]}.255")
+                for (et in extraTargets) {
+                    val clean = et.trim()
+                    if (clean.isNotEmpty() && !isOwnLocalIp(clean)) {
+                        targetList.add(clean)
+                    }
+                }
+                if (extraTargets.isEmpty()) {
+                    targetList.add("255.255.255.255")
+                    val localIps = getLocalIpv4Addresses()
+                    for (ip in localIps) {
+                        val parts = ip.split(".")
+                        if (parts.size == 4) {
+                            targetList.add("${parts[0]}.${parts[1]}.${parts[2]}.255")
+                        }
                     }
                 }
 
-                for (tIp in targetList) {
-                    try {
-                        sock.send(DatagramPacket(data, data.size, InetAddress.getByName(tIp), controlPort))
-                    } catch (_: Exception) {}
+                // 2-shot reliable UDP send (immediate + 80ms retry with identical sync_id)
+                for (attempt in 0..1) {
+                    if (attempt == 1) Thread.sleep(80)
+                    for (tIp in targetList) {
+                        try {
+                            sock.send(DatagramPacket(data, data.size, InetAddress.getByName(tIp), controlPort))
+                        } catch (_: Exception) {}
+                    }
                 }
                 sock.close()
             } catch (e: Exception) {
@@ -222,6 +233,7 @@ class ControlChannel(
                                         if (partyPeerIps.add(senderIp)) {
                                             AudioNative.nativeSetPartyPeers(partyPeerIps.toTypedArray())
                                             onPartyHostDiscovered?.invoke()
+                                            onPartyPeerJoined?.invoke(senderIp)
                                             Log.i(TAG, "Party Mode: registered downstream peer $senderIp (total=${partyPeerIps.size})")
                                         }
                                     } else if (explicitLeave && addressedToThisHost) {
@@ -288,6 +300,7 @@ class ControlChannel(
                                     lastKnownPcName = pcName
                                 }
                             }
+                            json.put("_sender_ip", senderIp)
                             onConfigSyncReceived?.invoke(json)
                         } else if (msgType == "PARTY_KICK") {
                             val targetIp = json.optString("target_ip", "").trim()
@@ -467,6 +480,7 @@ class ControlChannel(
         val partyPeerLastSeen = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val discoveredPartyHosts = java.util.concurrent.ConcurrentHashMap<String, DiscoveredPartyHost>()
         var onPartyHostDiscovered: (() -> Unit)? = null
+        @Volatile var onPartyPeerJoined: ((String) -> Unit)? = null
         @Volatile var onPartyKicked: ((String) -> Unit)? = null
 
         fun prunePartyHostsAndPeers() {

@@ -501,6 +501,18 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     private var lastSyncId: Int = Int(Date().timeIntervalSince1970 * 1000) & 0x7FFFFFFF
     private var seenSyncIds: [Int] = []
     private var suppressSync: Bool = false
+    private let localSessionId: Int = Int.random(in: 1...0x7FFFFFFE)
+    private var lastAppliedRevBySession: [Int: Int] = [:]
+    private var lastLocalSliderReleaseTime: TimeInterval = 0
+
+    public func markSliderEditingChanged(_ isEditing: Bool) {
+        isUserDraggingSlider = isEditing
+        if !isEditing {
+            lastLocalSliderReleaseTime = ProcessInfo.processInfo.systemUptime
+            configSyncDebounceWorkItem?.cancel()
+            sendConfigSync()
+        }
+    }
 
     // Thread-safe snapshots read by background audio/network threads
     private var atomicVolume: Float = 1.0
@@ -1782,9 +1794,12 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     let isPartyLeave = payload["party_leave"] as? Bool ?? false
                     if isPartyJoin == true && !isHost {
                         peersLock.lock()
-                        partyPeerIps.insert(senderIp)
+                        let isNewPeer = partyPeerIps.insert(senderIp).inserted
                         peersLock.unlock()
                         updatePartyMember(name: dev, ip: senderIp)
+                        if isNewPeer && isPartyHost && isPartyHostBroadcasting {
+                            sendConfigSync(targetIp: senderIp)
+                        }
                     } else if isPartyLeave {
                         peersLock.lock()
                         partyPeerIps.remove(senderIp)
@@ -1795,28 +1810,61 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             }
 
         case "CONFIG_SYNC":
+            // Party Host Authority: ignore CONFIG_SYNC from party joiners
+            if isPartyHost && isPartyHostBroadcasting {
+                peersLock.lock()
+                let isKnownPeer = partyPeerIps.contains(senderIp)
+                peersLock.unlock()
+                let fromHost = payload["is_party_host"] as? Bool ?? false
+                if isKnownPeer || (payload["party_join"] as? Bool == true) || !fromHost {
+                    return
+                }
+            }
+            // Party Joiner Authority: only accept CONFIG_SYNC from joined Party Host
+            if isPartyJoined && !currentPartyHostIp.isEmpty && senderIp != currentPartyHostIp {
+                return
+            }
+
             let inSyncId = (payload["sync_id"] as? NSNumber)?.intValue
+            let inSessionId = (payload["session_id"] as? NSNumber)?.intValue
             let inRev = (payload["rev"] as? NSNumber)?.intValue ?? 0
-            if let sid = inSyncId {
-                if seenSyncIds.contains(sid) { return }
+
+            if let sid = inSyncId, seenSyncIds.contains(sid) {
+                return
+            }
+            if let sessId = inSessionId {
+                let lastSessRev = lastAppliedRevBySession[sessId] ?? 0
+                if inRev <= lastSessRev { return }
+                lastAppliedRevBySession[sessId] = inRev
+            } else if let _ = inSyncId {
                 if inRev < localRev { return }
-                if seenSyncIds.count >= 32 { seenSyncIds.removeFirst() }
-                seenSyncIds.append(sid)
-                lastSyncId = sid
             } else if inRev <= localRev {
                 return
             }
-            localRev = max(localRev, inRev) + 1
+            if let sid = inSyncId {
+                if seenSyncIds.count >= 32 { seenSyncIds.removeFirst() }
+                seenSyncIds.append(sid)
+                lastSyncId = sid
+            }
+
+            localRev = max(localRev, inRev)
             localSyncRev = localRev
             suppressSync = true
             defer { suppressSync = false }
 
-            if !isUserDraggingSlider {
-                if let vol = (payload["volume_gain"] as? NSNumber)?.floatValue {
-                    volume = min(2.0, max(0.0, vol))
-                }
-                if let mute = payload["muted"] as? Bool {
-                    isMuted = mute
+            let isHostSync = (payload["party_host_sync"] as? Bool ?? false) || (payload["is_party_host"] as? Bool ?? false)
+            let sliderProtected = !isPartyJoined && (
+                isUserDraggingSlider || (ProcessInfo.processInfo.systemUptime - lastLocalSliderReleaseTime) < 0.35
+            )
+
+            if !sliderProtected {
+                if !(isPartyJoined && isHostSync) {
+                    if let vol = (payload["volume_gain"] as? NSNumber)?.floatValue {
+                        volume = min(2.0, max(0.0, vol))
+                    }
+                    if let mute = payload["muted"] as? Bool {
+                        isMuted = mute
+                    }
                 }
                 if let profile = payload["audio_profile"] as? String {
                     soundMode = profile
@@ -1828,7 +1876,10 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
                     bufferTargetMs = min(200, max(10, targetMs))
                 }
             }
-            if let role = payload["direction"] as? String {
+            if let c = (payload["codec"] as? NSNumber)?.intValue {
+                activeCodecName = (c == 1) ? "Opus" : "PCM16"
+            }
+            if let role = payload["direction"] as? String, !isPartyJoined {
                 serverRole = role
             }
             if let bRate = (payload["opus_bitrate_kbps"] as? NSNumber)?.intValue {
@@ -1862,17 +1913,23 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
     }
 
     public func sendConfigSync(forcePcm: Bool = false, targetIp: String? = nil) {
+        // Party Joiners cannot override Host bitrate, buffer size, or target delay
+        if isPartyJoined && !forcePcm {
+            return
+        }
         if forcePcm {
-            localRev += 10
+            localRev += 1
         } else {
             guard !suppressSync else { return }
             localRev += 1
         }
         localSyncRev = localRev
-        let syncId = Int(Date().timeIntervalSince1970 * 1000) & 0x7FFFFFFF
+        let syncId = ((Int(Date().timeIntervalSince1970 * 1000) ^ (localRev << 12) ^ localSessionId) & 0x7FFFFFFF)
         lastSyncId = syncId
+        let isHost = isPartyHost && isPartyHostBroadcasting
         let cfg: [String: Any] = [
             "type": "CONFIG_SYNC",
+            "session_id": localSessionId,
             "rev": localRev,
             "sync_id": syncId,
             "direction": isInternalAudioServing && isAudioPlaying ? "FULL_DUPLEX" : (isInternalAudioServing ? "PHONE_TO_PC" : "PC_TO_PHONE"),
@@ -1888,17 +1945,41 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
             "volume_gain": Double(volume),
             "muted": isMuted,
             "device": deviceName,
-            "party_mode": isPartyHost || isPartyExtending,
+            "party_mode": isHost || isPartyExtending,
+            "is_party_host": isHost,
+            "party_host_sync": isHost,
             "audio_output_engine": outputEngineMode,
             "enable_audio_effects": enableAudioEffects,
             "exclusive_audio_mode": exclusiveAudioMode,
             "stop_on_headset_disconnect": stopOnHeadsetDisconnect
         ]
-        let dest = targetIp ?? connectedServerIp
-        if !dest.isEmpty && dest != "255.255.255.255" {
-            sendControlMessage(cfg, toIp: dest)
-        } else {
-            broadcastControlMessage(cfg)
+
+        let sendOnce = { [weak self] in
+            guard let self = self else { return }
+            if let explicit = targetIp, !explicit.isEmpty, explicit != "255.255.255.255" {
+                self.sendControlMessage(cfg, toIp: explicit)
+                return
+            }
+            if isHost {
+                self.peersLock.lock()
+                let peers = Array(self.partyPeerIps)
+                self.peersLock.unlock()
+                for peer in peers {
+                    self.sendControlMessage(cfg, toIp: peer)
+                }
+                return
+            }
+            if !self.connectedServerIp.isEmpty && self.connectedServerIp != "255.255.255.255" {
+                self.sendControlMessage(cfg, toIp: self.connectedServerIp)
+            } else {
+                self.broadcastControlMessage(cfg)
+            }
+        }
+
+        sendOnce()
+        // Redundant 80ms retry with identical sync_id/rev for 100% first-try Wi-Fi reliability
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            sendOnce()
         }
     }
 

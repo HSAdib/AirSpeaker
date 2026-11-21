@@ -242,13 +242,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val localSessionId = java.util.Random().nextInt(0x7FFFFFFE) + 1
     private var localRev = 1
+    private val lastAppliedRevBySession = HashMap<Int, Int>()
     private var lastSyncId = (System.currentTimeMillis() and 0x7FFFFFFF).toInt()
     private val seenSyncIds = ArrayDeque<Int>(32)
     private var suppressSync = false
     private var suppressUnivEqCb = false
     private var currentFrameMs = 5
-    private var expectedBitratePos = 7 // Tracks programmatic Spinner selection to prevent async CONFIG_SYNC bounce
+    private val spinnerProgrammaticTarget = HashMap<Int, Int>()
+    private var isUserDraggingSlider = false
+    private var lastLocalSliderReleaseMs = 0L
+    private val debouncedSyncRunnable = Runnable { onLocalSettingChanged() }
     private var userEditedPcIp: String? = null
     private var lastAppliedDiscoveredPcIp: String? = null
     private var lastAdvLogTime: Long = 0L
@@ -289,6 +294,69 @@ class MainActivity : AppCompatActivity() {
     private fun updateExpectedDelayUI() {
         val (_, text) = computeExpectedDelayMs()
         binding.tvExpectedDelay.text = text
+    }
+
+    private fun scheduleDebouncedConfigSync(delayMs: Long = 80L) {
+        handler.removeCallbacks(debouncedSyncRunnable)
+        handler.postDelayed(debouncedSyncRunnable, delayMs)
+    }
+
+    private fun flushDebouncedConfigSync() {
+        handler.removeCallbacks(debouncedSyncRunnable)
+        onLocalSettingChanged()
+    }
+
+    private fun setBitrateSpinnerProgrammatically(spinner: Spinner, pos: Int) {
+        if (spinner.adapter == null) return
+        val clamped = pos.coerceIn(0, bitrateValues.size - 1)
+        if (spinner.selectedItemPosition != clamped) {
+            spinnerProgrammaticTarget[spinner.id] = clamped
+            spinner.setSelection(clamped, false)
+        }
+    }
+
+    private fun setAllBitrateSpinnersProgrammatically(pos: Int) {
+        setBitrateSpinnerProgrammatically(binding.spinnerBitrate, pos)
+        setBitrateSpinnerProgrammatically(binding.spPlayerBitrate, pos)
+        setBitrateSpinnerProgrammatically(binding.spinnerPartyHostBitrate, pos)
+    }
+
+    private fun syncServeAndPlaySoundMode(profile: String) {
+        when (profile) {
+            "QUALITY" -> {
+                if (!binding.rbProfileQuality.isChecked) binding.rbProfileQuality.isChecked = true
+                if (!binding.rbServeQuality.isChecked) binding.rbServeQuality.isChecked = true
+            }
+            "GAMING" -> {
+                if (!binding.rbProfileGaming.isChecked) binding.rbProfileGaming.isChecked = true
+                if (!binding.rbServeGaming.isChecked) binding.rbServeGaming.isChecked = true
+            }
+            "BALANCED" -> {
+                if (!binding.rbProfileBalanced.isChecked) binding.rbProfileBalanced.isChecked = true
+                if (!binding.rbServeBalanced.isChecked) binding.rbServeBalanced.isChecked = true
+            }
+            else -> {
+                if (!binding.rbProfileCustom.isChecked) binding.rbProfileCustom.isChecked = true
+                if (!binding.rbServeCustom.isChecked) binding.rbServeCustom.isChecked = true
+            }
+        }
+    }
+
+    private fun updatePartyJoinHostSettingsCard() {
+        val isOpus = binding.rbCodecOpus.isChecked || binding.rbPlayerCodecOpus.isChecked
+        val kbps = bitrateValues.getOrElse(binding.spinnerBitrate.selectedItemPosition) { "192" }
+        val codecLabel = if (isOpus) "Opus ($kbps kbps,${currentFrameMs}ms)" else "Lossless PCM16 (5ms)"
+        val bufMode = when (binding.rgBufferMode.checkedRadioButtonId) {
+            R.id.rbBufLow -> "LOW (20ms)"
+            R.id.rbBufMed -> "MEDIUM (40ms)"
+            R.id.rbBufHigh -> "HIGH (80ms)"
+            R.id.rbBufAuto -> "AUTO"
+            else -> "CUSTOM"
+        }
+        val bufVal = quantizeTarget(binding.sliderTargetBuffer.value)
+        val bufStr = if (bufVal % 1f == 0f) "${bufVal.toInt()} ms" else String.format(java.util.Locale.US, "%.1f ms", bufVal)
+        binding.tvPartyJoinHostCodecBitrate.text = "Codec: $codecLabel"
+        binding.tvPartyJoinHostBufferDelay.text = "Buffer: $bufMode  •  Target Delay: $bufStr"
     }
 
     private fun showHelpDialog() {
@@ -923,6 +991,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        ControlChannel.onPartyPeerJoined = { peerIp ->
+            runOnUiThread {
+                if (isPartyHostBroadcastActive || partyModeScreen == "HOST") {
+                    pushConfigSyncToPeers(listOf(peerIp))
+                }
+            }
+        }
+
         ControlChannel.onPartyKicked = { reason ->
             runOnUiThread {
                 if (isPartyJoinedActive) {
@@ -1009,6 +1085,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         ControlChannel.onPartyHostDiscovered = null
+        ControlChannel.onPartyPeerJoined = null
         ControlChannel.onPartyKicked = null
         stopPreStreamDiscovery()
     }
@@ -1326,75 +1403,80 @@ class MainActivity : AppCompatActivity() {
         binding.spPlayerBitrate.adapter = playerBitrateAdapter
         binding.spPlayerBitrate.setSelection(7)
 
-        fun setAllBitrateSpinnersProgrammatically(pos: Int) {
-            expectedBitratePos = pos
-            if (binding.spinnerBitrate.selectedItemPosition != pos) {
-                binding.spinnerBitrate.setSelection(pos, false)
-            }
-            if (binding.spPlayerBitrate.selectedItemPosition != pos) {
-                binding.spPlayerBitrate.setSelection(pos, false)
-            }
-            if (binding.spinnerPartyHostBitrate.adapter != null && binding.spinnerPartyHostBitrate.selectedItemPosition != pos) {
-                binding.spinnerPartyHostBitrate.setSelection(pos, false)
-            }
-        }
-
-        val handleUserBitrateSelection: (Int) -> Unit = { position ->
-            if (!suppressSync && position != expectedBitratePos) {
-                expectedBitratePos = position
-                val selectedKbps = bitrateValues.getOrElse(position) { "128" }
-                val expectedKbps = when {
-                    binding.rbProfileQuality.isChecked -> "256"
-                    binding.rbProfileGaming.isChecked -> "128"
-                    binding.rbProfileBalanced.isChecked -> "192"
-                    else -> ""
+        val makeBitrateListener = { spinner: Spinner ->
+            object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    val expected = spinnerProgrammaticTarget.remove(spinner.id)
+                    if (expected != null && expected == position) return
+                    if (suppressSync || isPartyJoinedActive) return
+                    suppressSync = true
+                    try {
+                        val selectedKbps = bitrateValues.getOrElse(position) { "192" }
+                        val expectedKbps = when {
+                            binding.rbProfileQuality.isChecked -> "256"
+                            binding.rbProfileGaming.isChecked -> "128"
+                            binding.rbProfileBalanced.isChecked -> "192"
+                            else -> ""
+                        }
+                        if (expectedKbps.isNotEmpty() && selectedKbps != expectedKbps) {
+                            syncServeAndPlaySoundMode("CUSTOM")
+                        }
+                        setAllBitrateSpinnersProgrammatically(position)
+                    } finally {
+                        suppressSync = false
+                    }
+                    onLocalSettingChanged()
                 }
-                if (expectedKbps.isNotEmpty() && selectedKbps != expectedKbps) {
-                    binding.rbProfileCustom.isChecked = true
-                }
-                setAllBitrateSpinnersProgrammatically(position)
-                onLocalSettingChanged()
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
             }
         }
-
-        binding.spinnerBitrate.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                handleUserBitrateSelection(position)
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-        }
-
-        binding.spPlayerBitrate.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                handleUserBitrateSelection(position)
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-        }
+        binding.spinnerBitrate.onItemSelectedListener = makeBitrateListener(binding.spinnerBitrate)
+        binding.spPlayerBitrate.onItemSelectedListener = makeBitrateListener(binding.spPlayerBitrate)
 
         // Buffer target sliders (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
         val initialTarget = quantizeTarget(AudioNative.safeGetTargetBufferMs())
         syncAllTargetBufferSliders(initialTarget)
 
-        val onBufferSliderChanged: (com.google.android.material.slider.Slider, Float, Boolean) -> Unit = { s, value, fromUser ->
-            if (fromUser) {
-                val qVal = quantizeTarget(value)
-                AudioNative.safeSetTargetBufferMs(qVal)
-                syncAllTargetBufferSliders(qVal, fromSlider = s)
-                syncAllBufferModeRadioGroups("CUSTOM")
-                if (!suppressSync) binding.rbProfileCustom.isChecked = true
-                onLocalSettingChanged()
+        val sliderTouchListener = object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                isUserDraggingSlider = true
+            }
+            override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                isUserDraggingSlider = false
+                lastLocalSliderReleaseMs = SystemClock.elapsedRealtime()
+                flushDebouncedConfigSync()
             }
         }
-        binding.sliderTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
-        binding.sliderServeTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
-        binding.sliderPartyHostTargetBuffer.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
-        binding.sliderTargetBufferPartyJoin.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
+
+        val onBufferSliderChanged: (com.google.android.material.slider.Slider, Float, Boolean) -> Unit = { s, value, fromUser ->
+            if (fromUser && !suppressSync && !isPartyJoinedActive) {
+                val qVal = quantizeTarget(value)
+                AudioNative.safeSetTargetBufferMs(qVal)
+                AudioNative.safeSetAutoMode(false)
+                suppressSync = true
+                try {
+                    syncAllTargetBufferSliders(qVal, fromSlider = s)
+                    syncAllBufferModeRadioGroups("CUSTOM")
+                    syncServeAndPlaySoundMode("CUSTOM")
+                } finally {
+                    suppressSync = false
+                }
+                updateExpectedDelayUI()
+                updatePartyJoinHostSettingsCard()
+                scheduleDebouncedConfigSync(80L)
+            }
+        }
+        listOf(binding.sliderTargetBuffer, binding.sliderServeTargetBuffer, binding.sliderPartyHostTargetBuffer).forEach { sl ->
+            sl.addOnChangeListener { slider, value, fromUser -> onBufferSliderChanged(slider, value, fromUser) }
+            sl.addOnSliderTouchListener(sliderTouchListener)
+        }
 
         // Buffer presets radio groups (synchronized across PLAY, SERVE, PARTY HOST, and PARTY JOIN)
         var updatingBufferGroups = false
         val setupBufferGroup: (android.widget.RadioGroup, Int, Int, Int, Int, Int) -> Unit = { group, lowId, medId, highId, autoId, customId ->
             group.setOnCheckedChangeListener { _, checkedId ->
                 if (updatingBufferGroups) return@setOnCheckedChangeListener
+                if (isPartyJoinedActive) return@setOnCheckedChangeListener
                 updatingBufferGroups = true
                 try {
                     val mode = when (checkedId) {
@@ -1425,7 +1507,12 @@ class MainActivity : AppCompatActivity() {
                             "AUTO" -> AudioNative.safeSetAutoMode(true)
                             "CUSTOM" -> AudioNative.safeSetAutoMode(false)
                         }
-                        binding.rbProfileCustom.isChecked = true
+                        suppressSync = true
+                        try {
+                            syncServeAndPlaySoundMode("CUSTOM")
+                        } finally {
+                            suppressSync = false
+                        }
                         onLocalSettingChanged()
                     }
                 } finally {
@@ -1437,18 +1524,20 @@ class MainActivity : AppCompatActivity() {
         setupBufferGroup(binding.rgBufferMode, R.id.rbBufLow, R.id.rbBufMed, R.id.rbBufHigh, R.id.rbBufAuto, R.id.rbBufCustom)
         setupBufferGroup(binding.rgServeBufferMode, R.id.rbServeBufLow, R.id.rbServeBufMed, R.id.rbServeBufHigh, R.id.rbServeBufAuto, R.id.rbServeBufCustom)
         setupBufferGroup(binding.rgPartyHostBufferMode, R.id.rbPartyHostBufLow, R.id.rbPartyHostBufMed, R.id.rbPartyHostBufHigh, R.id.rbPartyHostBufAuto, R.id.rbPartyHostBufCustom)
-        setupBufferGroup(binding.rgBufferModePartyJoin, R.id.rbPartyJoinLow, R.id.rbPartyJoinMed, R.id.rbPartyJoinHigh, R.id.rbPartyJoinAuto, R.id.rbPartyJoinCustom)
 
         // Audio Profile / Focus radio group
         binding.rgAudioProfile.setOnCheckedChangeListener { _, checkedId ->
-            if (suppressSync) return@setOnCheckedChangeListener
+            if (suppressSync || isPartyJoinedActive) return@setOnCheckedChangeListener
             when (checkedId) {
                 R.id.rbProfileQuality -> {
                     suppressSync = true
                     try {
+                        syncServeAndPlaySoundMode("QUALITY")
                         currentFrameMs = 10
                         binding.rbCodecOpus.isChecked = true
                         binding.rbPlayerCodecOpus.isChecked = true
+                        binding.rbPartyHostCodecOpus.isChecked = true
+                        binding.layoutPartyHostBitrate.visibility = View.VISIBLE
                         val idx = bitrateValues.indexOf("256")
                         if (idx >= 0) {
                             setAllBitrateSpinnersProgrammatically(idx)
@@ -1464,9 +1553,12 @@ class MainActivity : AppCompatActivity() {
                 R.id.rbProfileGaming -> {
                     suppressSync = true
                     try {
+                        syncServeAndPlaySoundMode("GAMING")
                         currentFrameMs = 5
                         binding.rbCodecOpus.isChecked = true
                         binding.rbPlayerCodecOpus.isChecked = true
+                        binding.rbPartyHostCodecOpus.isChecked = true
+                        binding.layoutPartyHostBitrate.visibility = View.VISIBLE
                         val idx = bitrateValues.indexOf("128")
                         if (idx >= 0) {
                             setAllBitrateSpinnersProgrammatically(idx)
@@ -1482,9 +1574,12 @@ class MainActivity : AppCompatActivity() {
                 R.id.rbProfileBalanced -> {
                     suppressSync = true
                     try {
+                        syncServeAndPlaySoundMode("BALANCED")
                         currentFrameMs = 5
                         binding.rbCodecOpus.isChecked = true
                         binding.rbPlayerCodecOpus.isChecked = true
+                        binding.rbPartyHostCodecOpus.isChecked = true
+                        binding.layoutPartyHostBitrate.visibility = View.VISIBLE
                         val idx = bitrateValues.indexOf("192")
                         if (idx >= 0) {
                             setAllBitrateSpinnersProgrammatically(idx)
@@ -1493,6 +1588,14 @@ class MainActivity : AppCompatActivity() {
                         syncAllTargetBufferSliders(30f)
                         AudioNative.safeSetTargetBufferMs(30f)
                         AudioNative.safeSetAutoMode(true)
+                    } finally {
+                        suppressSync = false
+                    }
+                }
+                else -> {
+                    suppressSync = true
+                    try {
+                        syncServeAndPlaySoundMode("CUSTOM")
                     } finally {
                         suppressSync = false
                     }
@@ -1537,12 +1640,26 @@ class MainActivity : AppCompatActivity() {
             binding.tvGainValue.text = "${(binding.sliderGain.value * 100).toInt()}%"
         } catch (_: Exception) {}
         binding.sliderGain.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) {
+            if (fromUser && !suppressSync) {
                 AudioStreamService.setUserVolumeGain(value)
                 binding.tvGainValue.text = "${(value * 100).toInt()}%"
-                onLocalSettingChanged()
+                if (!isPartyJoinedActive) {
+                    scheduleDebouncedConfigSync(80L)
+                }
             }
         }
+        binding.sliderGain.addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                isUserDraggingSlider = true
+            }
+            override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                isUserDraggingSlider = false
+                lastLocalSliderReleaseMs = SystemClock.elapsedRealtime()
+                if (!isPartyJoinedActive) {
+                    flushDebouncedConfigSync()
+                }
+            }
+        })
 
         binding.btnMuteToggle.setOnClickListener {
             val muted = !AudioStreamService.isUserMuted
@@ -1551,35 +1668,37 @@ class MainActivity : AppCompatActivity() {
             onLocalSettingChanged()
         }
 
-        // Codec selection synced across Player tab and Settings tab
-        binding.rgPlayerCodec.setOnCheckedChangeListener { _, checkedId ->
-            if (suppressSync) return@setOnCheckedChangeListener
-            binding.rbProfileCustom.isChecked = true
+        val applyCodecSelection: (Boolean) -> Unit = { isOpus ->
             suppressSync = true
-            val isOpus = (checkedId == R.id.rbPlayerCodecOpus)
-            if (isOpus) {
-                binding.rbCodecOpus.isChecked = true
-            } else {
-                binding.rbCodecPcm.isChecked = true
+            try {
+                syncServeAndPlaySoundMode("CUSTOM")
+                binding.rbCodecOpus.isChecked = isOpus
+                binding.rbCodecPcm.isChecked = !isOpus
+                binding.rbPlayerCodecOpus.isChecked = isOpus
+                binding.rbPlayerCodecPcm.isChecked = !isOpus
+                binding.rbPartyHostCodecOpus.isChecked = isOpus
+                binding.rbPartyHostCodecPcm.isChecked = !isOpus
+                binding.layoutPartyHostBitrate.visibility = if (isOpus) View.VISIBLE else View.GONE
+                updateCodecBitrateUiState(isOpus)
+            } finally {
+                suppressSync = false
             }
-            updateCodecBitrateUiState(isOpus)
-            suppressSync = false
             onLocalSettingChanged()
         }
 
+        binding.rgPlayerCodec.setOnCheckedChangeListener { _, checkedId ->
+            if (suppressSync || isPartyJoinedActive) return@setOnCheckedChangeListener
+            applyCodecSelection(checkedId == R.id.rbPlayerCodecOpus)
+        }
         binding.rgCodec.setOnCheckedChangeListener { _, checkedId ->
-            if (suppressSync) return@setOnCheckedChangeListener
-            binding.rbProfileCustom.isChecked = true
-            suppressSync = true
-            val isOpus = (checkedId == R.id.rbCodecOpus)
-            if (isOpus) {
-                binding.rbPlayerCodecOpus.isChecked = true
-            } else {
-                binding.rbPlayerCodecPcm.isChecked = true
-            }
-            updateCodecBitrateUiState(isOpus)
-            suppressSync = false
-            onLocalSettingChanged()
+            if (suppressSync || isPartyJoinedActive) return@setOnCheckedChangeListener
+            applyCodecSelection(checkedId == R.id.rbCodecOpus)
+        }
+        binding.rgPartyHostCodec.setOnCheckedChangeListener { _, checkedId ->
+            val isOpus = (checkedId == binding.rbPartyHostCodecOpus.id)
+            binding.layoutPartyHostBitrate.visibility = if (isOpus) View.VISIBLE else View.GONE
+            if (suppressSync || isPartyJoinedActive) return@setOnCheckedChangeListener
+            applyCodecSelection(isOpus)
         }
 
         // Serve tab settings & listeners: locked to PCM16
@@ -1590,26 +1709,40 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerServeBitrate.alpha = 0.45f
 
         binding.rgServeSoundMode.setOnCheckedChangeListener { _, checkedId ->
-            if (checkedId == R.id.rbServeCustom) return@setOnCheckedChangeListener
-            val (frameMs, targetBufferMs, bufMode) = when (checkedId) {
-                R.id.rbServeGaming -> Triple(5, 20, "LOW")
-                R.id.rbServeBalanced -> Triple(5, 40, "MEDIUM")
-                else -> Triple(5, 80, "HIGH")
+            if (suppressSync || isPartyJoinedActive) return@setOnCheckedChangeListener
+            if (checkedId == R.id.rbServeCustom) {
+                suppressSync = true
+                try { syncServeAndPlaySoundMode("CUSTOM") } finally { suppressSync = false }
+                onLocalSettingChanged()
+                return@setOnCheckedChangeListener
             }
+            val (profile, targetBufferMs, bufMode, autoBuf) = when (checkedId) {
+                R.id.rbServeGaming -> listOf("GAMING", 20, "LOW", false)
+                R.id.rbServeBalanced -> listOf("BALANCED", 30, "AUTO", true)
+                else -> listOf("QUALITY", 80, "HIGH", false)
+            }
+            val tMs = targetBufferMs as Int
+            val bMode = bufMode as String
+            val isAuto = autoBuf as Boolean
             getSharedPreferences("AirSpeakerPrefs", MODE_PRIVATE).edit()
-                .putInt("serve_frame_ms", frameMs)
-                .putInt("target_buffer_ms", targetBufferMs)
+                .putInt("serve_frame_ms", 5)
+                .putInt("target_buffer_ms", tMs)
                 .apply()
             getSharedPreferences("airspeaker_prefs", MODE_PRIVATE).edit()
-                .putInt("serve_frame_ms", frameMs)
-                .putInt("target_buffer_ms", targetBufferMs)
+                .putInt("serve_frame_ms", 5)
+                .putInt("target_buffer_ms", tMs)
                 .apply()
-            AudioNative.safeSetTargetBufferMs(targetBufferMs.toFloat())
-            syncAllTargetBufferSliders(targetBufferMs.toFloat())
-            syncAllBufferModeRadioGroups(bufMode)
-            if (!suppressSync) {
-                onLocalSettingChanged()
+            suppressSync = true
+            try {
+                syncServeAndPlaySoundMode(profile as String)
+                AudioNative.safeSetTargetBufferMs(tMs.toFloat())
+                AudioNative.safeSetAutoMode(isAuto)
+                syncAllTargetBufferSliders(tMs.toFloat())
+                syncAllBufferModeRadioGroups(bMode)
+            } finally {
+                suppressSync = false
             }
+            onLocalSettingChanged()
         }
         val serveBitrates = listOf("64", "96", "128", "192", "256", "320")
         binding.spinnerServeBitrate.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, serveBitrates)
@@ -1973,14 +2106,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.spinnerPartyHostBitrate.adapter = hostBitrateAdapter
-        val currentBitratePos = binding.spinnerBitrate.selectedItemPosition.coerceAtLeast(0)
-        binding.spinnerPartyHostBitrate.setSelection(currentBitratePos)
-        binding.spinnerPartyHostBitrate.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p0: android.widget.AdapterView<*>?, p1: View?, position: Int, p3: Long) {
-                handleUserBitrateSelection(position)
-            }
-            override fun onNothingSelected(p0: android.widget.AdapterView<*>?) {}
-        }
+        setAllBitrateSpinnersProgrammatically(7)
+        binding.spinnerPartyHostBitrate.onItemSelectedListener = makeBitrateListener(binding.spinnerPartyHostBitrate)
 
         binding.btnAddPartyPeer.setOnClickListener {
             val raw = binding.etPartyPeerIp.text?.toString()?.trim().orEmpty()
@@ -2229,18 +2356,15 @@ class MainActivity : AppCompatActivity() {
     // Settings Synchronization (Two-Way)
     // ------------------------------------------------------------------
 
-    private fun onLocalSettingChanged() {
-        if (suppressSync) return
+    private fun buildCurrentConfigJson(): JSONObject {
         localRev++
-        val syncId = (System.currentTimeMillis() and 0x7FFFFFFF).toInt()
+        val syncId = ((System.currentTimeMillis() xor (localRev.toLong() shl 12) xor localSessionId.toLong()) and 0x7FFFFFFFL).toInt()
         lastSyncId = syncId
         binding.tvSyncRev.text = "REV: $localRev"
-        updateExpectedDelayUI()
-
-        val userMuted = AudioStreamService.isUserMuted
-
-        val json = JSONObject().apply {
+        val isHost = isPartyHostBroadcastActive || (partyModeScreen == "HOST")
+        return JSONObject().apply {
             put("type", "CONFIG_SYNC")
+            put("session_id", localSessionId)
             put("rev", localRev)
             put("sync_id", syncId)
             put("direction", if (AudioStreamService.isServing) "PHONE_TO_PC" else "PC_TO_PHONE")
@@ -2253,7 +2377,7 @@ class MainActivity : AppCompatActivity() {
                 else -> "CUSTOM"
             })
             put("codec", if (binding.rbCodecOpus.isChecked || binding.rbPlayerCodecOpus.isChecked) 1 else 0)
-            put("opus_bitrate_kbps", bitrateValues.getOrElse(binding.spinnerBitrate.selectedItemPosition) { "128" }.toInt())
+            put("opus_bitrate_kbps", bitrateValues.getOrElse(binding.spinnerBitrate.selectedItemPosition) { "192" }.toInt())
             put("frame_ms", currentFrameMs)
             put("buffer_mode", when (binding.rgBufferMode.checkedRadioButtonId) {
                 R.id.rbBufLow -> "LOW"
@@ -2265,7 +2389,7 @@ class MainActivity : AppCompatActivity() {
             put("custom_buffer_ms", binding.sliderTargetBuffer.value.toDouble())
             put("auto_buffer", binding.rbBufAuto.isChecked)
             put("volume_gain", binding.sliderGain.value.toDouble())
-            put("muted", userMuted)
+            put("muted", AudioStreamService.isUserMuted)
             put("device", ControlChannel.getPhoneModelName())
             put("audio_output_engine", if (binding.rbEngineAudioTrack.isChecked) "AUDIOTRACK_STANDARD" else "OBOE_LOW_LATENCY")
             put("enable_audio_effects", binding.switchAudioFx.isChecked)
@@ -2275,103 +2399,176 @@ class MainActivity : AppCompatActivity() {
                 else -> "MIX_WITH_OTHERS"
             })
             put("stop_on_headset_disconnect", binding.switchHeadsetDisconnect.isChecked)
-            put("party_mode", (partyModeScreen == "HOST") || isPartyExtendedActive)
+            put("party_mode", isHost || isPartyExtendedActive)
+            put("is_party_host", isHost)
+            put("party_host_sync", isHost)
         }
+    }
 
-        AudioStreamService.markLocalConfigSent(localRev, syncId, json)
-
-        val lowLatency = binding.rbEngineOboe.isChecked && !binding.switchAudioFx.isChecked
-        AudioNative.safeSetLowLatencyMode(lowLatency)
-
-        val destIp = userEditedPcIp ?: binding.etPcIp.text.toString().trim().ifEmpty { null }
+    private fun pushConfigSyncToPeers(peers: List<String>) {
+        if (peers.isEmpty()) return
+        val json = buildCurrentConfigJson()
+        AudioStreamService.markLocalConfigSent(localRev, lastSyncId, json)
         val ch = AudioStreamService.activeControlChannel ?: preStreamDiscoveryChannel
         if (ch != null) {
-            ch.sendConfigSync(json, destIp)
-        } else if (destIp != null) {
-            // Fallback: send CONFIG_SYNC directly via background thread so setting change is never dropped
+            ch.sendConfigSync(json, targetIp = null, extraTargets = peers)
+        } else {
             val payload = json.toString().toByteArray(Charsets.UTF_8)
             Thread({
                 try {
                     java.net.DatagramSocket().use { sock ->
-                        val pkt = java.net.DatagramPacket(payload, payload.size, java.net.InetAddress.getByName(destIp), 5005)
-                        sock.send(pkt)
+                        for (attempt in 0..1) {
+                            if (attempt == 1) Thread.sleep(80)
+                            for (p in peers) {
+                                try {
+                                    sock.send(java.net.DatagramPacket(payload, payload.size, java.net.InetAddress.getByName(p), 5005))
+                                } catch (_: Exception) {}
+                            }
+                        }
                     }
-                } catch (e: Exception) {
-                    Log.w("MainActivity", "Fallback sendConfigSync error: ${e.message}")
-                }
-            }, "FallbackConfigSyncSender").start()
+                } catch (_: Exception) {}
+            }, "PartyHostConfigSyncSender").start()
+        }
+    }
+
+    private fun onLocalSettingChanged() {
+        if (suppressSync) return
+        updateExpectedDelayUI()
+        updatePartyJoinHostSettingsCard()
+
+        // Party Joiners cannot change Host bitrate, buffer size, or target delay
+        if (isPartyJoinedActive) return
+
+        val json = buildCurrentConfigJson()
+        AudioStreamService.markLocalConfigSent(localRev, lastSyncId, json)
+
+        val lowLatency = binding.rbEngineOboe.isChecked && !binding.switchAudioFx.isChecked
+        AudioNative.safeSetLowLatencyMode(lowLatency)
+
+        val isHost = isPartyHostBroadcastActive || (partyModeScreen == "HOST")
+        val extraPeers = if (isHost) ControlChannel.partyPeerIps.toList() else emptyList()
+        val destIp = userEditedPcIp ?: binding.etPcIp.text.toString().trim().ifEmpty { null }
+        val ch = AudioStreamService.activeControlChannel ?: preStreamDiscoveryChannel
+        if (ch != null) {
+            ch.sendConfigSync(json, destIp, extraPeers)
+        } else {
+            val targets = (listOfNotNull(destIp) + extraPeers).distinct()
+            if (targets.isNotEmpty()) {
+                val payload = json.toString().toByteArray(Charsets.UTF_8)
+                Thread({
+                    try {
+                        java.net.DatagramSocket().use { sock ->
+                            for (attempt in 0..1) {
+                                if (attempt == 1) Thread.sleep(80)
+                                for (t in targets) {
+                                    try {
+                                        sock.send(java.net.DatagramPacket(payload, payload.size, java.net.InetAddress.getByName(t), 5005))
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "Fallback sendConfigSync error: ${e.message}")
+                    }
+                }, "FallbackConfigSyncSender").start()
+            }
         }
     }
 
     private fun applyIncomingConfigSync(json: JSONObject, fromCache: Boolean = false) {
-        val incomingRev = json.optInt("rev", 0)
-        val incomingSyncId = if (json.has("sync_id")) json.getInt("sync_id") else null
-
+        val senderIp = json.optString("_sender_ip", "")
         if (!fromCache) {
-            if (incomingSyncId != null) {
-                if (seenSyncIds.contains(incomingSyncId)) {
+            // Party Host ignores joiner CONFIG_SYNC overrides
+            if (isPartyHostBroadcastActive) {
+                if (ControlChannel.partyPeerIps.contains(senderIp) || json.optBoolean("party_join", false) || !json.optBoolean("is_party_host", false)) {
                     return
                 }
-                if (incomingRev < localRev) {
-                    return
-                }
-                if (seenSyncIds.size >= 32) {
-                    seenSyncIds.removeFirst()
-                }
-                seenSyncIds.addLast(incomingSyncId)
-                lastSyncId = incomingSyncId
-            } else if (incomingRev <= localRev) {
+            }
+            // Party Joiner only accepts CONFIG_SYNC from its joined Host
+            if (isPartyJoinedActive && joinedHostIp.isNotEmpty() && senderIp.isNotEmpty() && senderIp != joinedHostIp) {
                 return
             }
         }
+
+        val incomingRev = json.optInt("rev", 0)
+        val incomingSyncId = if (json.has("sync_id")) json.getInt("sync_id") else null
+        val incomingSessionId = if (json.has("session_id")) json.getInt("session_id") else null
+
+        if (!fromCache) {
+            if (incomingSyncId != null && seenSyncIds.contains(incomingSyncId)) {
+                return
+            }
+            if (incomingSessionId != null) {
+                val lastSessRev = lastAppliedRevBySession[incomingSessionId] ?: 0
+                if (incomingRev <= lastSessRev) return
+                lastAppliedRevBySession[incomingSessionId] = incomingRev
+            } else if (incomingSyncId != null) {
+                if (incomingRev < localRev) return
+            } else if (incomingRev <= localRev) {
+                return
+            }
+            if (incomingSyncId != null) {
+                if (seenSyncIds.size >= 32) seenSyncIds.removeFirst()
+                seenSyncIds.addLast(incomingSyncId)
+                lastSyncId = incomingSyncId
+            }
+        }
+
+        val isHostSync = json.optBoolean("party_host_sync", false) || json.optBoolean("is_party_host", false)
+        val sliderProtected = !isPartyJoinedActive && (
+            isUserDraggingSlider ||
+                binding.sliderTargetBuffer.isPressed ||
+                binding.sliderServeTargetBuffer.isPressed ||
+                binding.sliderPartyHostTargetBuffer.isPressed ||
+                binding.sliderGain.isPressed ||
+                (SystemClock.elapsedRealtime() - lastLocalSliderReleaseMs) < 350L
+        )
 
         suppressSync = true
         try {
             localRev = maxOf(localRev, incomingRev)
             binding.tvSyncRev.text = "REV: $localRev"
 
-            if (json.has("custom_buffer_ms")) {
-                val buf = quantizeTarget(json.getDouble("custom_buffer_ms").toFloat())
-                if (!binding.sliderTargetBuffer.isPressed) {
+            if (!sliderProtected) {
+                if (json.has("custom_buffer_ms")) {
+                    val buf = quantizeTarget(json.getDouble("custom_buffer_ms").toFloat())
                     syncAllTargetBufferSliders(buf)
+                    AudioNative.safeSetTargetBufferMs(buf)
                 }
-                AudioNative.safeSetTargetBufferMs(buf)
-            }
-            if (json.has("buffer_mode")) {
-                val mode = when (json.getString("buffer_mode")) {
-                    "LOW" -> "LOW"
-                    "MEDIUM" -> "MEDIUM"
-                    "HIGH" -> "HIGH"
-                    "AUTO" -> "AUTO"
-                    else -> "CUSTOM"
+                if (json.has("buffer_mode")) {
+                    val mode = when (json.getString("buffer_mode")) {
+                        "LOW" -> "LOW"
+                        "MEDIUM" -> "MEDIUM"
+                        "HIGH" -> "HIGH"
+                        "AUTO" -> "AUTO"
+                        else -> "CUSTOM"
+                    }
+                    syncAllBufferModeRadioGroups(mode)
                 }
-                syncAllBufferModeRadioGroups(mode)
-            }
-            if (json.has("auto_buffer")) {
-                AudioNative.safeSetAutoMode(json.getBoolean("auto_buffer"))
-            }
-            if (json.has("volume_gain")) {
-                val g = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
-                try {
-                    binding.sliderGain.value = quantizeGain(g)
-                    binding.tvGainValue.text = "${(g * 100).toInt()}%"
-                } catch (e: Exception) {
-                    Log.w("AirSpeaker", "Could not set sliderGain value: ${e.message}")
+                if (json.has("auto_buffer")) {
+                    AudioNative.safeSetAutoMode(json.getBoolean("auto_buffer"))
                 }
-                AudioStreamService.setUserVolumeGain(g)
-            }
-            if (json.has("muted")) {
-                val m = json.getBoolean("muted")
-                AudioStreamService.setUserMuted(m)
-                binding.btnMuteToggle.text = if (m) "MUTED" else "MUTE"
+                // Party Joiners keep their own local volume & mute independent from Host
+                if (!(isPartyJoinedActive && isHostSync)) {
+                    if (json.has("volume_gain")) {
+                        val g = json.getDouble("volume_gain").toFloat().coerceIn(0f, 2f)
+                        try {
+                            binding.sliderGain.value = quantizeGain(g)
+                            binding.tvGainValue.text = "${(g * 100).toInt()}%"
+                        } catch (e: Exception) {
+                            Log.w("AirSpeaker", "Could not set sliderGain value: ${e.message}")
+                        }
+                        AudioStreamService.setUserVolumeGain(g)
+                    }
+                    if (json.has("muted")) {
+                        val m = json.getBoolean("muted")
+                        AudioStreamService.setUserMuted(m)
+                        binding.btnMuteToggle.text = if (m) "MUTED" else "MUTE"
+                    }
+                }
             }
             if (json.has("audio_profile")) {
-                when (json.getString("audio_profile")) {
-                    "QUALITY" -> binding.rbProfileQuality.isChecked = true
-                    "GAMING" -> binding.rbProfileGaming.isChecked = true
-                    "BALANCED" -> binding.rbProfileBalanced.isChecked = true
-                    else -> binding.rbProfileCustom.isChecked = true
-                }
+                syncServeAndPlaySoundMode(json.getString("audio_profile"))
             }
             if (json.has("codec")) {
                 val isOpus = (json.getInt("codec") == 1)
@@ -2379,17 +2576,15 @@ class MainActivity : AppCompatActivity() {
                 binding.rbCodecPcm.isChecked = !isOpus
                 binding.rbPlayerCodecOpus.isChecked = isOpus
                 binding.rbPlayerCodecPcm.isChecked = !isOpus
+                binding.rbPartyHostCodecOpus.isChecked = isOpus
+                binding.rbPartyHostCodecPcm.isChecked = !isOpus
+                binding.layoutPartyHostBitrate.visibility = if (isOpus) View.VISIBLE else View.GONE
             }
             if (json.has("opus_bitrate_kbps")) {
                 val kbps = json.getInt("opus_bitrate_kbps").toString()
                 val idx = bitrateValues.indexOf(kbps)
                 if (idx >= 0) {
-                    expectedBitratePos = idx
-                    binding.spinnerBitrate.setSelection(idx)
-                    binding.spPlayerBitrate.setSelection(idx)
-                    if (binding.spinnerPartyHostBitrate.adapter != null && binding.spinnerPartyHostBitrate.selectedItemPosition != idx) {
-                        binding.spinnerPartyHostBitrate.setSelection(idx, false)
-                    }
+                    setAllBitrateSpinnersProgrammatically(idx)
                 }
             }
             if (json.has("frame_ms")) {
@@ -2397,8 +2592,9 @@ class MainActivity : AppCompatActivity() {
             }
             updateCodecBitrateUiState(binding.rbCodecOpus.isChecked)
             updateExpectedDelayUI()
+            updatePartyJoinHostSettingsCard()
 
-            if (json.has("direction")) {
+            if (json.has("direction") && !isPartyJoinedActive) {
                 val dir = json.getString("direction")
                 if (dir == "PHONE_TO_PC" && !AudioStreamService.isServing) {
                     selectTab(1)

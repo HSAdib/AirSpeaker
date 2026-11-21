@@ -433,15 +433,12 @@ struct PlayerStudioTab: View {
                                 get: { Double(engine.volume) },
                                 set: { newVal in
                                     engine.volume = Float(newVal)
-                                    engine.scheduleConfigSync()
+                                    engine.scheduleConfigSync(delaySeconds: 0.08)
                                 }
                             ),
                             in: 0.0...2.0,
                             onEditingChanged: { isEditing in
-                                engine.isUserDraggingSlider = isEditing
-                                if !isEditing {
-                                    engine.sendConfigSync()
-                                }
+                                engine.markSliderEditingChanged(isEditing)
                             }
                         )
                         .accentColor(.white)
@@ -582,14 +579,20 @@ struct ServeStudioTab: View {
                     HStack(spacing: 4) {
                         RadioChip(title: "Balanced", isSelected: engine.soundMode == "BALANCED") {
                             engine.soundMode = "BALANCED"
+                            engine.bufferMode = "AUTO"
+                            engine.bufferTargetMs = 30
                             engine.sendConfigSync()
                         }
                         RadioChip(title: "Gaming", isSelected: engine.soundMode == "GAMING") {
                             engine.soundMode = "GAMING"
+                            engine.bufferMode = "LOW"
+                            engine.bufferTargetMs = 20
                             engine.sendConfigSync()
                         }
                         RadioChip(title: "Quality", isSelected: engine.soundMode == "QUALITY") {
                             engine.soundMode = "QUALITY"
+                            engine.bufferMode = "HIGH"
+                            engine.bufferTargetMs = 80
                             engine.sendConfigSync()
                         }
                         RadioChip(title: "Custom", isSelected: engine.soundMode == "CUSTOM") {
@@ -1063,8 +1066,25 @@ struct PartyStudioTab: View {
                         .background(Color(red: 0.05, green: 0.05, blue: 0.07))
                         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
-                        // Target Buffer Control in Party Join
-                        TargetBufferControlSection(engine: engine)
+                        // Read-Only Host-Controlled Stream Settings (Joiners Cannot Edit)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("🔒 HOST-CONTROLLED STREAM SETTINGS:")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(M3.primary)
+                            Text("Codec: \(engine.activeCodecName) • Bitrate: \(engine.opusBitrateKbps) kbps")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white)
+                            Text("Buffer: \(engine.bufferMode) • Target Delay: \(engine.bufferTargetMs) ms")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(M3.tertiary)
+                            Text("Only the Party Host can change bitrate, buffer size, and target delay.")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(Color(white: 0.55))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.07))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(white: 0.2), lineWidth: 1))
 
                         // Live Delay Graph in Party Join
                         VStack(alignment: .leading, spacing: 4) {
@@ -1597,16 +1617,13 @@ struct TargetBufferControlSection: View {
                     set: { newVal in
                         engine.bufferTargetMs = Int(round(newVal))
                         engine.bufferMode = "CUSTOM"
-                        engine.scheduleConfigSync()
+                        engine.scheduleConfigSync(delaySeconds: 0.08)
                     }
                 ),
                 in: 10.0...200.0,
                 step: 5.0,
                 onEditingChanged: { isEditing in
-                    engine.isUserDraggingSlider = isEditing
-                    if !isEditing {
-                        engine.sendConfigSync()
-                    }
+                    engine.markSliderEditingChanged(isEditing)
                 }
             )
             .accentColor(.white)

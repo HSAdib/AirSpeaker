@@ -147,7 +147,7 @@ class OpusEncoder:
         ]
 
         lib.opus_encoder_ctl.restype = ctypes.c_int
-        lib.opus_encoder_ctl.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.opus_encoder_ctl.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
 
         lib.opus_encoder_destroy.restype = None
         lib.opus_encoder_destroy.argtypes = [ctypes.c_void_p]

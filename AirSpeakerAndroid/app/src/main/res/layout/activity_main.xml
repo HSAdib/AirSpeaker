@@ -1633,81 +1633,28 @@
                     app:strokeWidth="1dp"
                     app:cornerRadius="20dp" />
 
-                <!-- Party Join Buffer Mode & EQ Controls -->
-                <RadioGroup
-                    android:id="@+id/rgBufferModePartyJoin"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="8dp">
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinLow"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="sans-serif"
-                        android:text="20ms"
-                        android:textColor="@color/m3_on_surface"
-                        android:textSize="11sp" />
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinMed"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="sans-serif"
-                        android:text="40ms"
-                        android:textColor="@color/m3_on_surface"
-                        android:textSize="11sp" />
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinHigh"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="sans-serif"
-                        android:text="80ms"
-                        android:textColor="@color/m3_on_surface"
-                        android:textSize="11sp" />
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinAuto"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:checked="true"
-                        android:fontFamily="sans-serif"
-                        android:text="Auto"
-                        android:textColor="@color/m3_on_surface"
-                        android:textSize="11sp" />
-                    <RadioButton
-                        android:id="@+id/rbPartyJoinCustom"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1.2"
-                        android:fontFamily="sans-serif"
-                        android:text="Custom"
-                        android:textColor="@color/m3_on_surface"
-                        android:textSize="11sp" />
+                <!-- Read-Only Host-Controlled Stream Settings (Joiners Cannot Edit) -->
+                <LinearLayout android:background="@drawable/bg_m3_input" android:id="@+id/cardPartyJoinHostSettings" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_width="match_parent" android:orientation="vertical" android:padding="10dp">
+
+                    <TextView android:fontFamily="sans-serif" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="🔒 STREAM QUALITY &amp; DELAY (HOST-CONTROLLED):" android:textColor="@color/m3_primary" android:textSize="11sp" android:textStyle="bold"/>
+
+                    <TextView android:fontFamily="monospace" android:id="@+id/tvPartyJoinHostCodecBitrate" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_width="match_parent" android:text="Codec: Lossless PCM16  •  Bitrate: 192 kbps" android:textColor="@color/m3_on_surface" android:textSize="12sp"/>
+
+                    <TextView android:fontFamily="monospace" android:id="@+id/tvPartyJoinHostBufferDelay" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:layout_width="match_parent" android:text="Buffer: AUTO  •  Target Delay: 30 ms" android:textColor="@color/m3_tertiary" android:textSize="12sp"/>
+
+                    <TextView android:fontFamily="sans-serif" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_width="match_parent" android:text="Only the Party Host can change bitrate, buffer size, and target delay." android:textColor="@color/m3_on_surface_variant" android:textSize="10sp"/>
+                </LinearLayout>
+
+                <!-- Hidden disabled joiner buffer controls for binding compatibility -->
+                <RadioGroup android:enabled="false" android:id="@+id/rgBufferModePartyJoin" android:layout_height="wrap_content" android:layout_width="match_parent" android:orientation="horizontal" android:visibility="gone">
+                    <RadioButton android:enabled="false" android:id="@+id/rbPartyJoinLow" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="20ms"/>
+                    <RadioButton android:enabled="false" android:id="@+id/rbPartyJoinMed" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="40ms"/>
+                    <RadioButton android:enabled="false" android:id="@+id/rbPartyJoinHigh" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="80ms"/>
+                    <RadioButton android:checked="true" android:enabled="false" android:id="@+id/rbPartyJoinAuto" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="Auto"/>
+                    <RadioButton android:enabled="false" android:id="@+id/rbPartyJoinCustom" android:layout_height="wrap_content" android:layout_weight="1" android:layout_width="0dp" android:text="Custom"/>
                 </RadioGroup>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="4dp">
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="TARGET BUFFER:"
-                        android:textColor="@color/m3_on_surface_variant"
-                        android:fontFamily="sans-serif" />
-                    <TextView
-                        android:id="@+id/tvTargetBufferPartyJoin"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="30 ms"
-                        android:textColor="@color/m3_on_surface"
-                        android:fontFamily="sans-serif" />
-                </LinearLayout>
+                <TextView android:id="@+id/tvTargetBufferPartyJoin" android:layout_height="wrap_content" android:layout_width="wrap_content" android:text="30 ms" android:visibility="gone"/>
 
                 <com.google.android.material.slider.Slider
                     android:id="@+id/sliderTargetBufferPartyJoin"
@@ -1717,10 +1664,8 @@
                     android:valueTo="200.0"
                     android:stepSize="2.5"
                     android:value="30.0"
-                    app:thumbColor="@color/m3_primary"
-                    app:trackColorActive="@color/m3_primary"
-                    app:trackColorInactive="@color/m3_surface_highest"
-                    app:haloColor="@color/m3_primary_halo" />
+                    android:enabled="false"
+                    android:visibility="gone" />
 
                 <com.hasan.airspeaker.LatencyGraphView
                     android:id="@+id/latencyGraphPartyJoin"
