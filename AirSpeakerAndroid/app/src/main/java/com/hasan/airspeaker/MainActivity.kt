@@ -628,9 +628,9 @@ class MainActivity : AppCompatActivity() {
                 valueTo = 12f
                 stepSize = 0.5f
                 value = currentBands[i].coerceIn(-12f, 12f)
-                thumbTintList = ColorStateList.valueOf(Color.WHITE)
-                trackActiveTintList = ColorStateList.valueOf(Color.parseColor("#7BDCA8"))
-                trackInactiveTintList = ColorStateList.valueOf(Color.parseColor("#444444"))
+                thumbTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.m3_primary))
+                trackActiveTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.m3_primary))
+                trackInactiveTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.m3_surface_highest))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 3f)
             }
             val lblVal = TextView(this).apply {
@@ -1614,10 +1614,6 @@ class MainActivity : AppCompatActivity() {
                 ControlChannel.isExtendingParty = false
                 AudioNative.nativeSetPartyRelay(false)
                 ControlChannel.sendPartyHostStopAnnouncement()
-                binding.btnTogglePartyHost.text = "Start Party Broadcast"
-                binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#002B00"))
-                binding.btnTogglePartyHost.setTextColor(Color.parseColor("#00FF00"))
-                binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#00FF00"))
             }
             if (AudioStreamService.isStreaming && (partyModeScreen == "HOST" || binding.rbPartyHost.isChecked)) {
                 val intent = Intent(this, AudioStreamService::class.java).apply {
@@ -1631,6 +1627,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 startService(intent)
             }
+            refreshServiceButtonState()
             showPartyScreen("CHOOSER")
         }
 
@@ -1676,7 +1673,7 @@ class MainActivity : AppCompatActivity() {
                 AudioNative.nativeSetPartyPeers(ControlChannel.partyPeerIps.toTypedArray())
                 updateExtendedQrCode()
                 binding.layoutExtendDetails.visibility = View.VISIBLE
-                binding.btnToggleExtendParty.text = "[ ■ STOP EXTENDING PARTY ]"
+                binding.btnToggleExtendParty.text = "Stop Extending Party"
                 binding.btnToggleExtendParty.setTextColor(ContextCompat.getColor(this, R.color.m3_error))
                 binding.btnToggleExtendParty.strokeColor = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.m3_error))
             } else {
@@ -1729,10 +1726,6 @@ class MainActivity : AppCompatActivity() {
                     }
                     startService(intent)
                 }
-                binding.btnTogglePartyHost.text = "Start Party Broadcast"
-                binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#002B00"))
-                binding.btnTogglePartyHost.setTextColor(Color.parseColor("#00FF00"))
-                binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#00FF00"))
             } else {
                 isPartyHostBroadcastActive = true
                 ControlChannel.isHostingOrExtendingParty = true
@@ -1758,10 +1751,6 @@ class MainActivity : AppCompatActivity() {
                         startService(intent)
                     }
                 }
-                binding.btnTogglePartyHost.text = "Stop Party Broadcast"
-                binding.btnTogglePartyHost.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#330000"))
-                binding.btnTogglePartyHost.setTextColor(Color.parseColor("#FF4444"))
-                binding.btnTogglePartyHost.strokeColor = ColorStateList.valueOf(Color.parseColor("#FF4444"))
             }
             applyEffectiveEqualizerState()
             refreshServiceButtonState()

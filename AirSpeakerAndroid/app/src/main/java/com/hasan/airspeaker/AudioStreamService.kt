@@ -300,17 +300,20 @@ class AudioStreamService : Service() {
             else -> "Oboe"
         }
 
-        if (force || lastReportedBtRoute != btConnected || (isStreaming && audioTrackRunning != wantAudioTrack)) {
+        val routeChanged = (lastReportedBtRoute != btConnected)
+        val backendMismatch = (isStreaming && audioTrackRunning != wantAudioTrack)
+
+        if (force || routeChanged || backendMismatch) {
             lastReportedBtRoute = btConnected
-            Log.i(TAG, "Audio route sync: bluetooth=$btConnected wantAudioTrack=$wantAudioTrack streaming=$isStreaming")
+            Log.i(TAG, "Audio route sync: bluetooth=$btConnected wantAudioTrack=$wantAudioTrack streaming=$isStreaming (force=$force, routeChanged=$routeChanged, backendMismatch=$backendMismatch)")
             if (isStreaming) {
                 if (wantAudioTrack) {
-                    // 1. Switch native engine to external output FIRST so route change doesn't spawn an Oboe reopen
                     AudioNative.nativeSetUseExternalOutput(true)
-                    AudioNative.nativeOnAudioRouteChanged(btConnected)
+                    if (routeChanged || backendMismatch || force) {
+                        AudioNative.nativeOnAudioRouteChanged(btConnected)
+                    }
                     startAudioTrackOutput()
                 } else {
-                    // 1. Stop & join AudioTrack thread FIRST before letting Oboe reopen
                     stopAudioTrackOutput()
                     AudioNative.nativeOnAudioRouteChanged(false)
                     AudioNative.nativeSetUseExternalOutput(false)
@@ -331,8 +334,9 @@ class AudioStreamService : Service() {
                 pausedByHeadset = false
                 applyEffectiveMuteAndGain()
             }
-            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = hasBt) }, 150L)
-            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = hasBt) }, 700L)
+            // Pass force=false so the 700ms retry only acts if the route wasn't already switched at 150ms
+            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = false) }, 150L)
+            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = false) }, 700L)
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
@@ -342,7 +346,7 @@ class AudioStreamService : Service() {
                 applyEffectiveMuteAndGain()
                 notifyStateChanged()
             }
-            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = removedBt) }, 150L)
+            serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = false) }, 150L)
         }
     }
 
@@ -367,8 +371,8 @@ class AudioStreamService : Service() {
                 }
                 "android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" -> {
                     Log.i(TAG, "Bluetooth A2DP connection state changed")
-                    serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = true) }, 200L)
-                    serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = true) }, 800L)
+                    serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = false) }, 200L)
+                    serviceHandler.postDelayed({ syncBluetoothRouteToNative(force = false) }, 800L)
                 }
             }
         }
@@ -791,13 +795,13 @@ class AudioStreamService : Service() {
             if (json.has("enable_audio_effects")) {
                 enableAudioEffects = json.getBoolean("enable_audio_effects")
             }
-            val lowLatency = (audioOutputEngine == "OBOE_LOW_LATENCY" && !enableAudioEffects)
-            AudioNative.nativeSetLowLatencyMode(lowLatency)
-            AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
-            if (isStreaming) {
-                updateOutputEngineLive(audioOutputEngine, enableAudioEffects)
-            }
             if (oldEngine != audioOutputEngine || oldFx != enableAudioEffects) {
+                val lowLatency = (audioOutputEngine == "OBOE_LOW_LATENCY" && !enableAudioEffects)
+                AudioNative.nativeSetLowLatencyMode(lowLatency)
+                AudioNative.nativeSetEnableAudioEffects(enableAudioEffects)
+                if (isStreaming) {
+                    updateOutputEngineLive(audioOutputEngine, enableAudioEffects)
+                }
                 updateAudioEffects()
                 serviceHandler.postDelayed({ updateAudioEffects() }, 280L)
             }
