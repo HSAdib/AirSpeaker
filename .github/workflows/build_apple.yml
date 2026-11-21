@@ -444,6 +444,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
+            TAG_NAME="v1.0.2"
+          fi
+          APP_VER="${TAG_NAME#v}"
+
           echo "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           PKG_REF="ghcr.io/${OWNER_LC}/airspeaker"
@@ -455,10 +461,6 @@ jobs:
           done
 
           if [ ${#ORAS_FILES[@]} -gt 0 ]; then
-            APP_VER="1.0.2"
-            if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-              APP_VER="${GITHUB_REF_NAME#v}"
-            fi
             echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF (version ${APP_VER})..."
             oras push --disable-path-validation "${PKG_REF}:latest" \
               --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \

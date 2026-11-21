@@ -294,7 +294,8 @@ object UpdateChecker {
                 }
 
                 val totalBytes = conn.contentLength.toLong()
-                inputStream = conn.inputStream
+                val stream = conn.inputStream
+                inputStream = stream
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val resolver = context.contentResolver
@@ -317,7 +318,7 @@ object UpdateChecker {
                             var lastProgressBytes: Long = 0
                             var emaSpeed = 0.0
 
-                            while (inputStream.read(buf).also { read = it } != -1) {
+                            while (stream.read(buf).also { read = it } != -1) {
                                 if (cancelFlag.get()) {
                                     throw InterruptedException("Download cancelled by user")
                                 }
@@ -363,7 +364,7 @@ object UpdateChecker {
                         var lastProgressBytes: Long = 0
                         var emaSpeed = 0.0
 
-                        while (inputStream.read(buf).also { read = it } != -1) {
+                        while (stream.read(buf).also { read = it } != -1) {
                             if (cancelFlag.get()) {
                                 throw InterruptedException("Download cancelled by user")
                             }
