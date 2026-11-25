@@ -542,8 +542,9 @@ jobs:
 
       - name: Publish Installers to GitHub Packages (GHCR OCI Registry)
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           TAG_NAME="${GITHUB_REF_NAME}"
           if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
@@ -563,11 +564,14 @@ jobs:
 
           if [ ${#ORAS_FILES[@]} -gt 0 ]; then
             echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF (version ${APP_VER})..."
-            oras push --disable-path-validation "${PKG_REF}:latest" \
+            if oras push --disable-path-validation "${PKG_REF}:latest" \
               --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
               --annotation "org.opencontainers.image.description=AirSpeaker Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
               --annotation "org.opencontainers.image.version=${APP_VER}" \
-              "${ORAS_FILES[@]}"
-
-            oras tag "${PKG_REF}:latest" "${APP_VER}"
+              "${ORAS_FILES[@]}"; then
+              oras tag "${PKG_REF}:latest" "${APP_VER}"
+            else
+              echo "::warning::GHCR push failed (ensure ghcr.io/${OWNER_LC}/airspeaker has Actions Write access for ${GITHUB_REPOSITORY} in Package Settings, or configure GHCR_TOKEN secret). GitHub Releases deliverables are unaffected."
+              exit 0
+            fi
           fi
