@@ -393,7 +393,7 @@ def install_downloaded_update(saved_path: str, is_win_installed: bool = False) -
                 shutil.rmtree(backup_dir, ignore_errors=True)
                 new_bin = app_dir / "AirSpeaker"
                 new_bin.chmod(new_bin.stat().st_mode | 0o755)
-                subprocess.Popen([str(new_bin)], start_new_session=True)
+                subprocess.Popen([str(new_bin)], start_new_session=True, env=clean_subprocess_env())
                 return True, "Update installed! Restarting AirSpeaker...", True
             except Exception as exc:
                 shutil.rmtree(staging, ignore_errors=True)

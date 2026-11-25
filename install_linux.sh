@@ -57,7 +57,7 @@ mkdir -p "$BIN_DIR" "$INSTALL_BASE" "$ICON_DIR" "$DESKTOP_DIR"
 echo "Checking and installing audio & runtime system dependencies..."
 if command -v pacman >/dev/null 2>&1; then
     echo "[Arch Linux detected] Installing dependencies via pacman..."
-    sudo pacman -S --needed --noconfirm opus libpulse portaudio pulseaudio-utils python tk python-pip python-pillow python-numpy 2>/dev/null || true
+    sudo pacman -S --needed --noconfirm opus libpulse portaudio python tk python-pip python-pillow python-numpy || true
 elif command -v apt-get >/dev/null 2>&1; then
     echo "[Debian/Ubuntu/Mint detected] Installing dependencies via apt..."
     sudo apt-get update -qq 2>/dev/null || true
