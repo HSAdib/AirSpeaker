@@ -88,6 +88,7 @@ object UpdateChecker {
     fun checkForUpdates(
         context: Context,
         isManual: Boolean,
+        onError: ((String) -> Unit)? = null,
         callback: (UpdateInfo?) -> Unit
     ) {
         Thread {
@@ -126,7 +127,14 @@ object UpdateChecker {
                     cachedJson = responseBodyStr
                 } else {
                     Log.w(TAG, "GitHub release API returned code: $responseCode")
-                    mainHandler.post { callback(null) }
+                    val errMsg = when (responseCode) {
+                        HttpURLConnection.HTTP_NOT_FOUND -> "No published release found yet on GitHub."
+                        HttpURLConnection.HTTP_FORBIDDEN -> "GitHub API rate limit exceeded — try again in a few minutes."
+                        else -> "Update check failed (HTTP $responseCode)."
+                    }
+                    mainHandler.post {
+                        if (onError != null) onError(errMsg) else callback(null)
+                    }
                     return@Thread
                 }
 
@@ -166,7 +174,7 @@ object UpdateChecker {
                 val isNewerSemver = cmp > 0
                 var isNewerRebuild = false
                 if (cmp == 0 && remoteSha != null && localBuildSha != "dev") {
-                    if (!remoteSha.equals(localBuildSha, ignoreCase = true)) {
+                    if (!remoteSha.take(7).equals(localBuildSha.take(7), ignoreCase = true)) {
                         isNewerRebuild = true
                     }
                 }
@@ -248,7 +256,9 @@ object UpdateChecker {
                 mainHandler.post { callback(info) }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to check for updates: ${e.message}")
-                mainHandler.post { callback(null) }
+                mainHandler.post {
+                    if (onError != null) onError("Could not check for updates (offline).") else callback(null)
+                }
             } finally {
                 conn?.disconnect()
             }

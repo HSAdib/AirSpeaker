@@ -2869,12 +2869,28 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
+            if let httpResp = response as? HTTPURLResponse, httpResp.statusCode != 200 {
+                if manual {
+                    let msg: String
+                    if httpResp.statusCode == 404 {
+                        msg = "No published release found yet on GitHub."
+                    } else if httpResp.statusCode == 403 {
+                        msg = "GitHub API rate limit exceeded — try again in a few minutes."
+                    } else {
+                        msg = "Update check failed (HTTP \(httpResp.statusCode))."
+                    }
+                    DispatchQueue.main.async {
+                        self.updateStatusMessage = msg
+                    }
+                }
+                return
+            }
             guard let data = data, error == nil,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tagName = json["tag_name"] as? String else {
                 if manual {
                     DispatchQueue.main.async {
-                        self.updateStatusMessage = "Could not check for updates (offline or rate limited)."
+                        self.updateStatusMessage = "Could not check for updates (offline)."
                     }
                 }
                 return
@@ -2921,7 +2937,8 @@ public final class AirSpeakerEngine: NSObject, ObservableObject {
 
             var isNewerRebuild = false
             if remoteSem.0 == localSem.0 && remoteSem.1 == localSem.1 && remoteSem.2 == localSem.2 {
-                if let rSha = remoteSha, localBuildSha != "dev", rSha.lowercased() != localBuildSha.lowercased() {
+                if let rSha = remoteSha, localBuildSha != "dev",
+                   String(rSha.prefix(7)).lowercased() != String(localBuildSha.prefix(7)).lowercased() {
                     isNewerRebuild = true
                 }
             }

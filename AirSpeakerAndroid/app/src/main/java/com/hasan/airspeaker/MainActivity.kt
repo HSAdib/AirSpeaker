@@ -2393,7 +2393,18 @@ class MainActivity : AppCompatActivity() {
             binding.tvUpdateStatus.text = "Checking for updates..."
             binding.btnCheckForUpdates.isEnabled = false
         }
-        UpdateChecker.checkForUpdates(this, isManual) { info ->
+        UpdateChecker.checkForUpdates(
+            this,
+            isManual,
+            onError = { errMsg ->
+                if (isManual) {
+                    binding.btnCheckForUpdates.isEnabled = true
+                    binding.btnDownloadUpdate.visibility = View.GONE
+                    binding.tvUpdateStatus.visibility = View.VISIBLE
+                    binding.tvUpdateStatus.text = errMsg
+                }
+            }
+        ) { info ->
             if (isManual) {
                 binding.btnCheckForUpdates.isEnabled = true
             }

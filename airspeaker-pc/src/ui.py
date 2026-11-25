@@ -4896,7 +4896,9 @@ TABS:
             except urllib.error.HTTPError as exc:
                 def _http_err():
                     self.btn_check_updates.config(state="normal")
-                    if exc.code == 403:
+                    if exc.code == 404:
+                        msg = "No published release found yet on GitHub."
+                    elif exc.code == 403:
                         msg = "GitHub API rate limit exceeded — try again in a few minutes."
                     else:
                         msg = f"Update check failed (HTTP {exc.code})."
