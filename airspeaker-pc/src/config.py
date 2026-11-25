@@ -94,3 +94,20 @@ def setup_logging() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
     )
+
+
+def clean_subprocess_env() -> Dict[str, str] | None:
+    """
+    Restore the host OS library path when spawning external Linux tools from a
+    PyInstaller bundle so system binaries (sh, pactl, parec, pacat, xdg-open)
+    never hit symbol clashes against bundled _internal libraries.
+    """
+    if not sys.platform.startswith("linux") or not getattr(sys, "frozen", False):
+        return None
+    env = os.environ.copy()
+    orig = env.get("LD_LIBRARY_PATH_ORIG")
+    if orig is None:
+        env.pop("LD_LIBRARY_PATH", None)
+    else:
+        env["LD_LIBRARY_PATH"] = orig
+    return env

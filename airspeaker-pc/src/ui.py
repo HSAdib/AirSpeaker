@@ -367,13 +367,10 @@ class AirSpeakerApp:
         self._audio_devices: List[Dict] = []
         self._pc_output_devices: List[Dict] = []
 
-        # Setup
+        # Setup UI shell first so the window paints immediately
         self._setup_window()
         self._build_tabs()
         self._load_config_into_ui()
-        self._refresh_adapters()
-        self._refresh_audio_devices()
-        self._refresh_pc_outputs()
 
         # Start control listener immediately
         self._control_listener = ControlListener(
@@ -386,6 +383,9 @@ class AirSpeakerApp:
         self._control_listener.start()
         self._control_listener.set_target_ip(self.ip_var.get().strip())
 
+        # Populate network adapters, audio endpoints, and virtual devices right after first paint
+        self.root.after(15, self._deferred_startup_init)
+
         self._schedule_ui_update()
 
         self._latest_update_info: Optional[Dict[str, Any]] = None
@@ -393,6 +393,12 @@ class AirSpeakerApp:
         self._update_downloading: bool = False
         self._update_cancel_event = threading.Event()
         self.root.after(2500, self._check_updates_background)
+
+    def _deferred_startup_init(self) -> None:
+        self._refresh_adapters()
+        self._refresh_audio_devices()
+        self._refresh_pc_outputs()
+        self._check_virtual_device_status()
 
     def _build_target_buffer_card(self, parent: tk.Misc, title: str = " Target Buffer & Stability Presets ") -> tk.LabelFrame:
         bf = tk.LabelFrame(parent, text=title, bg=BG, fg=FG, font=FONT_MONO_BOLD, bd=1, relief="solid", padx=6, pady=2)
@@ -1553,10 +1559,6 @@ class AirSpeakerApp:
                 sf, text="Minimize to system tray on close", variable=self.tray_var,
                 bg=BG, fg=FG, selectcolor="#333333", font=FONT_MONO_SM
             ).pack(side="right", padx=6, pady=4)
-
-
-
-        self._check_virtual_device_status()
 
     # ------------------------------------------------------------------
     # Virtual Device & Device Queries

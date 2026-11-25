@@ -16,6 +16,7 @@ import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+from config import clean_subprocess_env
 from equalizer import StereoFiveBandBiquadDSP
 
 _PYAUDIO_IMPORT_ERROR: Optional[str] = None
@@ -93,13 +94,13 @@ def list_output_devices() -> List[Dict]:
         try:
             default_sink = ""
             res_def = subprocess.run(
-                ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2
+                ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2, env=clean_subprocess_env()
             )
             if res_def.returncode == 0:
                 default_sink = res_def.stdout.strip()
 
             res = subprocess.run(
-                ["pactl", "list", "short", "sinks"], capture_output=True, text=True, timeout=2
+                ["pactl", "list", "short", "sinks"], capture_output=True, text=True, timeout=2, env=clean_subprocess_env()
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
@@ -117,6 +118,10 @@ def list_output_devices() -> List[Dict]:
                         })
         except Exception:
             pass
+
+    if _IS_LINUX and devices:
+        devices.sort(key=lambda d: (not d.get("is_default", False), d.get("is_virtual", False), d.get("name", "")))
+        return devices
 
     if not _PYAUDIO_AVAILABLE:
         return devices
@@ -411,7 +416,7 @@ class AudioReceiver:
                     sink = self._device_index.split("pulse:", 1)[1]
                     cmd.append(f"--device={sink}")
                 self._pacat_proc = subprocess.Popen(
-                    cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
+                    cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0, env=clean_subprocess_env()
                 )
                 self._dev_rate = SAMPLE_RATE
                 self._dev_channels = CHANNELS

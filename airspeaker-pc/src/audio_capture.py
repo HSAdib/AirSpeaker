@@ -14,6 +14,8 @@ import threading
 import time
 from typing import Callable, List, Optional, Tuple
 
+from config import clean_subprocess_env
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -230,13 +232,13 @@ def _list_linux_pulse_monitors() -> List[dict]:
     try:
         default_sink = ""
         res_def = subprocess.run(
-            ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2
+            ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2, env=clean_subprocess_env()
         )
         if res_def.returncode == 0:
             default_sink = res_def.stdout.strip()
 
         res = subprocess.run(
-            ["pactl", "list", "short", "sources"], capture_output=True, text=True, timeout=2
+            ["pactl", "list", "short", "sources"], capture_output=True, text=True, timeout=2, env=clean_subprocess_env()
         )
         if res.returncode == 0:
             for idx, line in enumerate(res.stdout.splitlines()):
@@ -452,7 +454,7 @@ class AudioCapture:
 
         try:
             self._parec_proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0, env=clean_subprocess_env()
             )
             self.active_device_name = source_name
             self._running = True

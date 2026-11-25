@@ -926,7 +926,6 @@ def test_eq_5band_stress_and_nan_recovery() -> None:
 
         # 5. Inject NaN into filter state -> must auto-recover to dry audio AND recover next frame
         dsp._py_zi[0][0][0] = float("nan")
-        dsp._scipy_zi[0, 0, 0] = float("nan")
         out_nan = dsp.process_pcm16(raw_pcm, 2)
         if out_nan != raw_pcm:
             check(name, False, "NaN filter state did not immediately fall back to dry audio")

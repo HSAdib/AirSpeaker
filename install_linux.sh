@@ -61,13 +61,13 @@ if command -v pacman >/dev/null 2>&1; then
 elif command -v apt-get >/dev/null 2>&1; then
     echo "[Debian/Ubuntu/Mint detected] Installing dependencies via apt..."
     sudo apt-get update -qq 2>/dev/null || true
-    sudo apt-get install -y libopus0 pulseaudio-utils libpulse0 portaudio19-dev python3 python3-tk python3-venv python3-pip 2>/dev/null || true
+    sudo apt-get install -y libopus0 pulseaudio-utils libpulse0 portaudio19-dev python3 python3-tk libtk8.6 python3-venv python3-pip 2>/dev/null || true
 elif command -v dnf >/dev/null 2>&1; then
     echo "[Fedora detected] Installing dependencies via dnf..."
-    sudo dnf install -y opus pulseaudio-utils pulseaudio-libs portaudio python3 python3-tkinter python3-pip 2>/dev/null || true
+    sudo dnf install -y opus pulseaudio-utils pulseaudio-libs portaudio python3 python3-tkinter tk python3-pip 2>/dev/null || true
 elif command -v zypper >/dev/null 2>&1; then
     echo "[openSUSE detected] Installing dependencies via zypper..."
-    sudo zypper install -y libopus0 pulseaudio-utils libpulse0 python3 python3-tk 2>/dev/null || true
+    sudo zypper install -y libopus0 pulseaudio-utils libpulse0 python3 python3-tk tk 2>/dev/null || true
 fi
 
 ARCH=$(uname -m)

@@ -19,12 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-try:
-    from scipy.signal import sosfilt
-    _HAS_SCIPY = True
-except ImportError:
-    sosfilt = None
-    _HAS_SCIPY = False
 BAND_LABELS = ["60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz"]
 
 BUILTIN_PRESETS: Dict[str, List[float]] = {
@@ -76,11 +70,9 @@ class StereoFiveBandBiquadDSP:
         self._gains_db = [0.0] * 5
         self._coeffs: List[Tuple[float, float, float, float, float]] = [(1.0, 0.0, 0.0, 0.0, 0.0)] * 5
         self._active_indices: Tuple[int, ...] = ()
-        self._sos: Optional[np.ndarray] = None
 
         # Audio-thread-only filter state
         self._py_zi = [[[0.0, 0.0], [0.0, 0.0]] for _ in range(5)]
-        self._scipy_zi = np.zeros((5, 2, 2), dtype=np.float64)
         self._last_channels = 2
         self._needs_state_reset = False
         self._band_reset_mask = [False] * 5
@@ -99,12 +91,6 @@ class StereoFiveBandBiquadDSP:
             for freq, g in zip(self.BAND_FREQS, clamped)
         ]
         active = tuple(i for i, g in enumerate(clamped) if abs(g) >= 0.05)
-        sos = None
-        if _HAS_SCIPY and active:
-            sos = np.array(
-                [(coeffs[i][0], coeffs[i][1], coeffs[i][2], 1.0, coeffs[i][3], coeffs[i][4]) for i in active],
-                dtype=np.float64,
-            )
         with self._lock:
             prev_active = set(self._active_indices)
             new_active = set(active)
@@ -115,7 +101,6 @@ class StereoFiveBandBiquadDSP:
             self._gains_db = clamped
             self._coeffs = coeffs
             self._active_indices = active
-            self._sos = sos
             if enabled is not None:
                 new_en = bool(enabled)
                 if self._enabled != new_en:
@@ -154,21 +139,18 @@ class StereoFiveBandBiquadDSP:
             self._py_zi[b][0][1] = 0.0
             self._py_zi[b][1][0] = 0.0
             self._py_zi[b][1][1] = 0.0
-        self._scipy_zi.fill(0.0)
 
     def _clear_band_state(self, band_idx: int) -> None:
         self._py_zi[band_idx][0][0] = 0.0
         self._py_zi[band_idx][0][1] = 0.0
         self._py_zi[band_idx][1][0] = 0.0
         self._py_zi[band_idx][1][1] = 0.0
-        self._scipy_zi[band_idx].fill(0.0)
 
     def process_pcm16(self, pcm_bytes: bytes, channels: int = 2) -> bytes:
         with self._lock:
             enabled = self._enabled
             active = self._active_indices
             coeffs = self._coeffs
-            sos = self._sos
             should_reset = self._needs_state_reset
             self._needs_state_reset = False
             band_resets = self._band_reset_mask
@@ -190,8 +172,6 @@ class StereoFiveBandBiquadDSP:
         if not enabled or not active or not pcm_bytes:
             return pcm_bytes
 
-        if _HAS_SCIPY:
-            return self._process_scipy(pcm_bytes, coeffs, active, in_ch, sos)
         return self._process_scalar_python(pcm_bytes, coeffs, active, in_ch)
 
     @staticmethod
@@ -216,44 +196,6 @@ class StereoFiveBandBiquadDSP:
             ),
         )
         return np.ascontiguousarray(np.rint(np.clip(norm, -1.0, 1.0) * 32767.0), dtype="<i2").tobytes()
-
-    def _process_scipy(
-        self,
-        pcm_bytes: bytes,
-        coeffs: list,
-        active: Tuple[int, ...],
-        in_ch: int,
-        sos: Optional[np.ndarray] = None,
-    ) -> bytes:
-        usable = (len(pcm_bytes) // (2 * in_ch)) * (2 * in_ch)
-        if usable == 0:
-            return pcm_bytes
-
-        if sos is None or sos.shape[0] != len(active):
-            sos = np.empty((len(active), 6), dtype=np.float64)
-            for row_idx, band_idx in enumerate(active):
-                b0, b1, b2, a1, a2 = coeffs[band_idx]
-                sos[row_idx] = (b0, b1, b2, 1.0, a1, a2)
-
-        pcm = np.frombuffer(pcm_bytes[:usable], dtype="<i2").reshape(-1, in_ch)
-        x = pcm.T.astype(np.float64)  # Shape (in_ch, frames)
-
-        zi_subset = np.empty((len(active), in_ch, 2), dtype=np.float64)
-        for row_idx, band_idx in enumerate(active):
-            zi_subset[row_idx] = self._scipy_zi[band_idx, :in_ch, :]
-
-        y, zf = sosfilt(sos, x, axis=-1, zi=zi_subset)
-
-        if not np.isfinite(zf).all():
-            self._clear_states()
-            return pcm_bytes[:usable]
-
-        # Flush denormals so silence never stalls the FPU
-        zf[np.abs(zf) < 1e-18] = 0.0
-        for row_idx, band_idx in enumerate(active):
-            self._scipy_zi[band_idx, :in_ch, :] = zf[row_idx]
-
-        return self._limit_and_pack(y.T, pcm_bytes[:usable], self._clear_states)
 
     def _filter_channel_fused(
         self,

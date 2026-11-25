@@ -17,6 +17,8 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from config import clean_subprocess_env
+
 logger = logging.getLogger(__name__)
 
 _IS_LINUX = sys.platform.startswith("linux")
@@ -85,7 +87,7 @@ def setup_linux_virtual_audio() -> Tuple[bool, str]:
 
     try:
         existing = subprocess.run(
-            ["pactl", "list", "short", "modules"], capture_output=True, text=True, timeout=3
+            ["pactl", "list", "short", "modules"], capture_output=True, text=True, timeout=3, env=clean_subprocess_env()
         ).stdout
 
         if "sink_name=AirSpeaker_Sink" not in existing:
@@ -93,7 +95,7 @@ def setup_linux_virtual_audio() -> Tuple[bool, str]:
                 "pactl", "load-module", "module-null-sink",
                 "sink_name=AirSpeaker_Sink",
                 "sink_properties=device.description=AirSpeaker_Virtual_Speaker"
-            ], check=True, timeout=3)
+            ], check=True, timeout=3, env=clean_subprocess_env())
 
         msg = (
             "Linux PipeWire/PulseAudio virtual device is active!\n\n"
@@ -116,7 +118,7 @@ def detect_virtual_devices() -> List[Dict]:
 
     if _IS_LINUX and shutil.which("pactl"):
         try:
-            res = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True, timeout=2)
+            res = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True, timeout=2, env=clean_subprocess_env())
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
                     parts = line.split("\t")
@@ -134,6 +136,8 @@ def detect_virtual_devices() -> List[Dict]:
                         seen_names.add(name.lower())
         except Exception:
             pass
+        if results:
+            return results
 
     try:
         try:
@@ -201,7 +205,7 @@ def open_windows_sound_settings() -> bool:
         for cmd in [["pavucontrol"], ["gnome-control-center", "sound"], ["kcmshell6", "kcm_pulseaudio"]]:
             if shutil.which(cmd[0]):
                 try:
-                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_subprocess_env())
                     return True
                 except Exception:
                     continue

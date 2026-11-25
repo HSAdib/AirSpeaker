@@ -17,6 +17,8 @@ import subprocess
 import sys
 from typing import Optional, Tuple
 
+from config import clean_subprocess_env
+
 logger = logging.getLogger(__name__)
 
 _IS_WIN = sys.platform.startswith("win")
@@ -168,11 +170,11 @@ def get_system_volume_and_mute() -> Optional[Tuple[float, bool]]:
         try:
             res_v = subprocess.run(
                 ["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
-                capture_output=True, text=True, timeout=1
+                capture_output=True, text=True, timeout=1, env=clean_subprocess_env()
             )
             res_m = subprocess.run(
                 ["pactl", "get-sink-mute", "@DEFAULT_SINK@"],
-                capture_output=True, text=True, timeout=1
+                capture_output=True, text=True, timeout=1, env=clean_subprocess_env()
             )
             m = re.search(r"(\d+)%", res_v.stdout)
             vol = (int(m.group(1)) / 100.0) if m else 1.0
@@ -185,7 +187,7 @@ def get_system_volume_and_mute() -> Optional[Tuple[float, bool]]:
         try:
             res = subprocess.run(
                 ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
-                capture_output=True, text=True, timeout=2
+                capture_output=True, text=True, timeout=2, env=clean_subprocess_env()
             )
             if res.returncode == 0 and res.stdout:
                 m = re.search(r"([0-9.]+)", res.stdout)
@@ -240,9 +242,9 @@ def set_system_volume_and_mute(volume_scalar: float, muted: Optional[bool] = Non
     if _IS_LINUX and shutil.which("pactl"):
         try:
             pct = int(round(max(0.0, min(2.0, float(volume_scalar))) * 100))
-            subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{pct}%"], timeout=1)
+            subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{pct}%"], timeout=1, env=clean_subprocess_env())
             if muted is not None:
-                subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if muted else "0"], timeout=1)
+                subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if muted else "0"], timeout=1, env=clean_subprocess_env())
             return True
         except Exception:
             pass
@@ -253,12 +255,12 @@ def set_system_volume_and_mute(volume_scalar: float, muted: Optional[bool] = Non
                 pct = f"{int(round(max(0.0, min(2.0, float(volume_scalar))) * 100))}%"
                 subprocess.run(
                     ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", pct],
-                    capture_output=True, timeout=2
+                    capture_output=True, timeout=2, env=clean_subprocess_env()
                 )
             if muted is not None:
                 subprocess.run(
                     ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if muted else "0"],
-                    capture_output=True, timeout=2
+                    capture_output=True, timeout=2, env=clean_subprocess_env()
                 )
             return True
         except Exception:

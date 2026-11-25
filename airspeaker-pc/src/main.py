@@ -10,6 +10,10 @@ import logging
 import os
 import sys
 
+# Prevent NumPy/OpenBLAS from spawning 16-32 worker threads on startup (cuts RAM & launch latency)
+for _env_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "1")
+
 # Ensure src/ is on the path when running directly
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SRC_DIR not in sys.path:

@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from config import clean_subprocess_env
 from version import APP_VERSION, BUILD_SHA, GITHUB_REPO
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def get_downloads_dir() -> Path:
     base = None
     if sys.platform.startswith("linux") and shutil.which("xdg-user-dir"):
         try:
-            out = subprocess.check_output(["xdg-user-dir", "DOWNLOAD"], text=True, timeout=2).strip()
+            out = subprocess.check_output(["xdg-user-dir", "DOWNLOAD"], text=True, timeout=2, env=clean_subprocess_env()).strip()
             if out:
                 base = Path(out)
         except Exception:
@@ -263,14 +264,15 @@ def open_downloads_folder(file_path: Optional[str] = None) -> None:
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             timeout=2,
+                            env=clean_subprocess_env(),
                         )
                         if res.returncode == 0:
                             return
                     except Exception:
                         pass
-                subprocess.Popen(["xdg-open", str(Path(file_path).resolve().parent)])
+                subprocess.Popen(["xdg-open", str(Path(file_path).resolve().parent)], env=clean_subprocess_env())
             else:
-                subprocess.Popen(["xdg-open", downloads])
+                subprocess.Popen(["xdg-open", downloads], env=clean_subprocess_env())
     except Exception as exc:
         logger.debug("Could not open Downloads/AirSpeaker folder: %s", exc)
 
@@ -404,7 +406,7 @@ def install_downloaded_update(saved_path: str, is_win_installed: bool = False) -
             ["konsole", "-e", "bash", "-c", cmd],
         ):
             try:
-                subprocess.Popen(term)
+                subprocess.Popen(term, env=clean_subprocess_env())
                 return True, "Launched Linux updater in terminal.", False
             except Exception:
                 continue

@@ -152,6 +152,7 @@ def main() -> None:
         "--workpath", str(ROOT / "build-linux"),
         "--specpath", str(ROOT),
         "--paths", str(ROOT / "src"),
+        "--exclude-module", "scipy",
         "--hidden-import", "PIL._tkinter_finder",
     ]
     if opus_so.exists():
@@ -165,6 +166,31 @@ def main() -> None:
     if not app_dir.exists():
         print(f"ERROR: Linux application bundle was not created at {app_dir}")
         sys.exit(1)
+
+    # Strip distro-bound system libraries so AirSpeaker uses the target Linux OS's native Tk/Fontconfig/ALSA/Readline
+    internal_dir = app_dir / "_internal"
+    if internal_dir.exists():
+        strip_globs = [
+            "libtk8.6.so*",
+            "libtcl8.6.so*",
+            "libfontconfig.so*",
+            "libfreetype.so*",
+            "libasound.so*",
+            "libreadline.so*",
+            "libhistory.so*",
+            "libtinfo.so*",
+            "libncurses*.so*",
+        ]
+        removed = []
+        for pattern in strip_globs:
+            for lib_path in internal_dir.glob(pattern):
+                try:
+                    lib_path.unlink()
+                    removed.append(lib_path.name)
+                except Exception as exc:
+                    print(f"Warning: Could not strip {lib_path.name}: {exc}", flush=True)
+        if removed:
+            print(f"Stripped distro-specific system libs from bundle: {', '.join(sorted(removed))}", flush=True)
 
     # Ensure icon is available inside the bundle
     if icon_png.exists():

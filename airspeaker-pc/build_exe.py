@@ -147,6 +147,7 @@ def main() -> None:
         "--workpath", str(ROOT / "build-portable"),
         "--specpath", str(ROOT),
         "--paths", str(ROOT / "src"),
+        "--exclude-module", "scipy",
     ]
     if OPUS_DLL.exists():
         portable_args += ["--add-binary", f"{OPUS_DLL};."]
@@ -181,6 +182,7 @@ def main() -> None:
         "--workpath", str(ROOT / "build-onedir"),
         "--specpath", str(ROOT),
         "--paths", str(ROOT / "src"),
+        "--exclude-module", "scipy",
     ]
     if OPUS_DLL.exists():
         onedir_args += ["--add-binary", f"{OPUS_DLL};."]

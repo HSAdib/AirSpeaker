@@ -251,6 +251,7 @@ def main() -> None:
         "--workpath", str(ROOT / "build-macos"),
         "--specpath", str(ROOT),
         "--paths", str(ROOT / "src"),
+        "--exclude-module", "scipy",
         "--hidden-import", "PIL._tkinter_finder",
         "--hidden-import", "pyaudio",
         "--collect-all", "pyaudio",

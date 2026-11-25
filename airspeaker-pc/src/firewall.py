@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 
+from config import clean_subprocess_env
+
 logger = logging.getLogger(__name__)
 
 PORTS = [5004, 5005]
@@ -61,7 +63,7 @@ def apply_firewall_rules() -> tuple:
         shell_str = " && ".join(cmds)
         if shutil.which("pkexec"):
             try:
-                ret = subprocess.run(["pkexec", "sh", "-c", shell_str], capture_output=True, text=True, timeout=30)
+                ret = subprocess.run(["pkexec", "sh", "-c", shell_str], capture_output=True, text=True, timeout=30, env=clean_subprocess_env())
                 if ret.returncode == 0:
                     return True, "Linux firewall rules applied for UDP ports 5004 and 5005."
             except Exception as exc:
