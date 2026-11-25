@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+.venv/
+.venv*/
+venv/
+env/
+*.log
+
+# PyInstaller build outputs
+airspeaker-pc/.venv/
+airspeaker-pc/build/
+airspeaker-pc/dist/
+airspeaker-pc/build-*/
+airspeaker-pc/build-onedir/
+airspeaker-pc/build-portable/
+airspeaker-pc/src/_build_info.py
+airspeaker-pc/_build_info.py
+airspeaker-pc/vendor/opus.dll
+airspeaker-pc/vendor/libopus*
+
+# Binaries and Installers (Hosted on GitHub Releases)
+*.exe
+*.apk
+*.dmg
+*.ipa
+*.run
+*.command
+AirSpeaker-Linux-x86_64.tar.gz
+AirSpeaker-v1-Linux-x86_64.tar.gz
+
+# Android & Gradle
+.gradle/
+**/build/
+.cxx/
+local.properties
+keystore.properties
+*.jks
+*.keystore
+gradle-8.7/
+AirSpeakerAndroid/.gradle/
+AirSpeakerAndroid/build/
+AirSpeakerAndroid/app/build/
+AirSpeakerAndroid/app/.cxx/
+AirSpeakerAndroid/local.properties
+
+# IDEs & OS
+.idea/
+*.iml
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Temporary dumps and archives
+code_dump_part*.txt
+cmdline-tools.zip
+diagnostic.wav
+app-debug.apk
+AirSpeaker_old.exe
+.aider*
+extract.py

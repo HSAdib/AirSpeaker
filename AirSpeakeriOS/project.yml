@@ -1,0 +1,52 @@
+name: AirSpeaker
+options:
+  bundleIdPrefix: com.hasan
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    PRODUCT_NAME: AirSpeaker
+    PRODUCT_BUNDLE_IDENTIFIER: com.hasan.airspeaker
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: "1.0.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_BITCODE: NO
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+targets:
+  AirSpeaker:
+    type: application
+    platform: iOS
+    sources:
+      - path: AirSpeaker
+    info:
+      path: AirSpeaker/Info.plist
+      properties:
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleDisplayName: AirSpeaker
+        AirSpeakerBuildSHA: "dev"
+        UILaunchScreen: {}
+        UIBackgroundModes:
+          - audio
+        NSCameraUsageDescription: "AirSpeaker uses the camera to scan Party Host QR codes for instant connection."
+        NSPhotoLibraryUsageDescription: "AirSpeaker needs photo library access to scan saved QR code images."
+        NSLocalNetworkUsageDescription: "AirSpeaker uses your local network (UDP 5004, 5005) for ultra-low-latency audio streaming and device discovery."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    frameworks:
+      - framework: AVFoundation.framework
+      - framework: AudioToolbox.framework
+      - framework: CoreMedia.framework
+      - framework: ReplayKit.framework
+      - framework: CoreImage.framework
+      - framework: PhotosUI.framework
+      - framework: SwiftUI.framework
+      - framework: UIKit.framework

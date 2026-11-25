@@ -1,0 +1,147 @@
+#pragma once
+
+#include "jitter_buffer.h"
+#include <oboe/Oboe.h>
+#include <thread>
+#include <atomic>
+#include <memory>
+#include <vector>
+#include <string>
+#include <mutex>
+#include <netinet/in.h>
+
+struct AdvancedEngineStats {
+    float bufferMs{0.0f};
+    float targetMs{30.0f};
+    uint64_t underruns{0};
+    uint64_t lostPackets{0};
+    uint64_t latePackets{0};
+    uint64_t duplicatePackets{0};
+    uint64_t concealedPackets{0};
+    uint64_t intentionalDriftDrops{0};
+    uint64_t packetQueueOverflowDrops{0};
+    uint64_t pcmRingOverflowDrops{0};
+    uint64_t pcmRingUnderrunFrames{0};
+    uint64_t pcmRingAvailableFrames{0};
+    double callbackAverageMicros{0.0};
+    int64_t callbackMaxMicros{0};
+    uint64_t callbackDeadlineMisses{0};
+    double rxPps{0.0};
+    uint8_t activeCodec{0};
+    bool autoMode{true};
+};
+
+class NativeAudioEngine : public oboe::AudioStreamDataCallback,
+                          public oboe::AudioStreamErrorCallback {
+public:
+    NativeAudioEngine();
+    ~NativeAudioEngine();
+
+    // Section 5: Transactional start with reverse rollback on failure
+    bool start(int audio_port = 5004, bool useExternalOutput = false);
+
+    // Section 6: Idempotent and race-safe stop
+    void stop();
+
+    void setUseExternalOutput(bool useExternal);
+    bool isUsingExternalOutput() const;
+    int32_t renderExternalAudio(int16_t* output, int32_t numFrames);
+    int32_t getOutputBackendType() const; // 0=STOPPED, 1=OBOE_AAUDIO, 2=OBOE_OPENSLES, 3=AUDIOTRACK
+
+    void setTargetBufferMs(float target_ms);
+    float getTargetBufferMs();
+    void setAutoMode(bool enabled);
+    bool isAutoMode();
+    void setMuted(bool muted);
+    bool isMuted() const;
+    void setVolumeGain(float gain);
+    float getVolumeGain() const;
+    void setLowLatencyMode(bool lowLatency);
+    bool isLowLatencyMode() const;
+    void setEnableAudioEffects(bool enabled);
+    bool isEnableAudioEffects() const;
+    void setBluetoothRouteActive(bool isBluetooth, bool forceReopen = false);
+    bool isBluetoothRouteActive() const;
+    void setPartyRelayEnabled(bool enabled);
+    bool isPartyRelayEnabled() const;
+    void setPartyPeers(const std::vector<std::string>& peers);
+    void setEqualizerBands(bool enabled, float b0, float b1, float b2, float b3, float b4);
+    int32_t getAudioSessionId() const;
+
+    JitterStats getStats();
+    AdvancedEngineStats getAdvancedStats();
+    std::string getSenderIp();
+    void setAllowedSenderIp(const std::string& ip, bool requireMatch = false);
+    std::string getAllowedSenderIp() const;
+
+    // Section 10: Real-time safe Oboe AudioStreamDataCallback
+    oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream, void* audioData, int32_t numFrames) override;
+
+    // Oboe AudioStreamErrorCallback
+    void onErrorAfterClose(oboe::AudioStream* stream, oboe::Result result) override;
+
+private:
+    void cleanupAfterFailedStart() noexcept;
+    bool openOboeStream();
+    bool startOboeStream();
+    void stopAndCloseOboeStream();
+    void scheduleStreamReopen();
+    void socketReceiverLoop();
+    void processOutputBlock(int16_t* output, int32_t numFrames);
+    std::atomic<bool> mUseExternalOutput{false};
+
+    int mAudioPort{5004};
+    std::mutex mStartStopMutex;
+    std::atomic<bool> mIsRunning{false};
+    std::atomic<bool> mMuted{false};
+    std::atomic<float> mVolumeGain{1.0f};
+    std::atomic<bool> mLowLatencyMode{true};
+    std::atomic<bool> mEnableAudioEffects{false};
+    std::atomic<bool> mBluetoothRouteActive{false};
+    std::atomic<int32_t> mStreamSampleRate{48000};
+    std::atomic<bool> mPartyRelayEnabled{false};
+    std::mutex mPartyPeersMutex;
+    std::vector<struct sockaddr_in> mPartyPeerAddrs;
+    std::atomic<int> mSocketFd{-1};
+    std::mutex mSenderIpMutex;
+    std::string mLastSenderIp;
+    std::atomic<uint32_t> mAllowedSenderIpv4{0};
+    std::atomic<bool> mRequireAllowedSender{false};
+    mutable std::mutex mAllowedSenderMutex;
+    std::string mAllowedSenderIp;
+
+    mutable std::mutex mStreamMutex;
+    std::atomic<bool> mShuttingDown{false};
+    std::mutex mReopenMutex;
+    std::atomic<bool> mReopenPending{false};
+    std::atomic<bool> mReopenAgain{false};
+    std::thread mReceiverThread;
+    std::thread mReopenThread;
+    std::shared_ptr<oboe::AudioStream> mAudioStream;
+
+    // Section 10: Lock-free callback instrumentation metrics
+    alignas(64) std::atomic<uint64_t> mTotalCallbackCount{0};
+    alignas(64) std::atomic<uint64_t> mTotalCallbackMicros{0};
+    alignas(64) std::atomic<int64_t> mMaxCallbackMicros{0};
+    alignas(64) std::atomic<uint64_t> mDeadlineMisses{0};
+
+    // 5-Band Biquad Equalizer state (lock-free seqlock: zero torn reads, zero locks in audio callback)
+    struct EqBandCoeffs {
+        double b0{1.0}, b1{0.0}, b2{0.0}, a1{0.0}, a2{0.0};
+        bool active{false};
+    };
+    std::mutex mEqWriteMutex;
+    std::atomic<uint64_t> mEqSeq{0};
+    bool mEqStagingEnabled{false};
+    EqBandCoeffs mEqStagingCoeffs[5];
+    std::atomic<float> mEqGainsDb[5]{{0.0f}, {0.0f}, {0.0f}, {0.0f}, {0.0f}};
+
+    // Audio-thread-exclusive EQ snapshot & filter delay lines
+    uint64_t mAudioEqSeq{0};
+    bool mAudioEqEnabled{false};
+    EqBandCoeffs mAudioEqCoeffs[5];
+    double mEqZ1[5][2]{{0.0}};
+    double mEqZ2[5][2]{{0.0}};
+
+    JitterBuffer mJitterBuffer;
+};

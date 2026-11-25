@@ -1,0 +1,573 @@
+name: AirSpeaker CI & Release Pipeline
+
+on:
+  push:
+    branches: [ "main", "master", "fix/*" ]
+    tags: [ "v1.*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  # ====================================================
+  # 1. ANDROID BUILD JOB (Java 17 Temurin & assembleRelease)
+  # ====================================================
+  build-android:
+    name: Build Android APK (Release & Debug)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install Android NDK & CMake
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.2.12479018" "cmake;3.22.1" || true
+
+      - name: Decode Android Release Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+            echo "AIRSPEAKER_KEYSTORE_PATH=/tmp/release.keystore" >> $GITHUB_ENV
+            echo "AIRSPEAKER_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "AIRSPEAKER_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "AIRSPEAKER_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+          else
+            echo "No keystore secret found, skipping release signing."
+          fi
+
+      - name: Run Native Audio C++ Tests
+        run: |
+          g++ -std=c++17 -O2 -pthread -DAIRSPEAKER_UNIT_TEST \
+            -I"AirSpeakerAndroid/app/src/main/cpp" \
+            "AirSpeakerAndroid/app/src/main/cpp/test_native_pipeline.cpp" \
+            "AirSpeakerAndroid/app/src/main/cpp/jitter_buffer.cpp" \
+            "AirSpeakerAndroid/app/src/main/cpp/opus_wrapper.cpp" \
+            -o test_pipeline
+          ./test_pipeline
+
+      - name: Run Android Unit Tests
+        run: |
+          cd AirSpeakerAndroid
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest
+
+      - name: Build Android APK
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          APP_VER="1.0.0"
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            APP_VER="${GITHUB_REF_NAME#v}"
+          fi
+          export AIRSPEAKER_VERSION="$APP_VER"
+          cd AirSpeakerAndroid
+          if [ -n "$AIRSPEAKER_KEYSTORE_PATH" ] && [ -f "$AIRSPEAKER_KEYSTORE_PATH" ]; then
+            ./gradlew assembleRelease
+          else
+            echo "No release keystore configured — building signed debug APK so it installs cleanly on devices."
+            ./gradlew assembleDebug
+          fi
+          rm -f /tmp/release.keystore
+
+      - name: Locate, Verify, and Package Android Artifacts
+        run: |
+          APK_DIR="AirSpeakerAndroid/app/build/outputs/apk/release"
+          if [ ! -d "$APK_DIR" ] || [ -z "$(find "$APK_DIR" -name "*.apk" 2>/dev/null)" ]; then
+            APK_DIR="AirSpeakerAndroid/app/build/outputs/apk/debug"
+          fi
+          echo "Using APK directory: $APK_DIR"
+          ls -la "$APK_DIR"
+
+          mkdir -p android-deliverables
+
+          # Locate build-tools apksigner
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: apksigner not found in $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          echo "Using apksigner: $APKSIGNER"
+
+          copy_and_verify() {
+            local pattern="$1"
+            local dest="$2"
+            local src=$(find "$APK_DIR" -name "*-${pattern}-*.apk" ! -name "*unsigned*" 2>/dev/null | head -n 1)
+            if [ -z "$src" ] || [ ! -f "$src" ]; then
+              echo "ERROR: Missing required APK variant for $pattern in $APK_DIR"
+              exit 1
+            fi
+            echo "Verifying signature for $src ..."
+            $APKSIGNER verify --verbose "$src" || {
+              echo "ERROR: $src signature verification failed!"
+              exit 1
+            }
+            cp -f "$src" "android-deliverables/$dest"
+            echo "Packaged: android-deliverables/$dest (from $src)"
+          }
+
+          copy_and_verify "arm64-v8a" "AirSpeaker-arm64-v8a.apk"
+          copy_and_verify "armeabi-v7a" "AirSpeaker-armeabi-v7a.apk"
+          copy_and_verify "x86_64" "AirSpeaker-x86_64.apk"
+          copy_and_verify "x86" "AirSpeaker-x86.apk"
+          copy_and_verify "universal" "AirSpeaker-universal.apk"
+
+          # Universal alias for backward compatibility
+          cp -f "android-deliverables/AirSpeaker-universal.apk" "android-deliverables/AirSpeaker.apk"
+
+          cd android-deliverables
+          sha256sum *.apk | tee SHA256SUMS-android.txt
+          ls -la
+
+      - name: Upload Android APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSpeaker-APK
+          path: |
+            android-deliverables/*.apk
+            android-deliverables/SHA256SUMS-android.txt
+
+  # ====================================================
+  # 2. WINDOWS BUILD JOB (Inno Setup 6 + PyInstaller)
+  # ====================================================
+  build-windows:
+    name: Build Windows Setup & Portable
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Ensure Inno Setup 6 Compiler
+        shell: pwsh
+        run: |
+          if (!(Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") -and !(Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y
+          }
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies, Acquire Opus & Run Verification Tests
+        run: |
+          cd airspeaker-pc
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python vendor/get_opus.py
+          python tests/verify_pc.py
+
+      - name: Compile Windows Setup & Portable Executables
+        run: |
+          cd airspeaker-pc
+          python build_exe.py
+
+      - name: Verify Windows Artifacts & Generate Checksums
+        shell: pwsh
+        run: |
+          if (!(Test-Path "AirSpeaker-Portable.exe")) {
+            Write-Error "Missing AirSpeaker-Portable.exe"
+            exit 1
+          }
+          if (!(Test-Path "AirSpeaker-Setup.exe")) {
+            Write-Error "Missing AirSpeaker-Setup.exe"
+            exit 1
+          }
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-Portable.exe" | Out-File "AirSpeaker-Portable.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "AirSpeaker-Setup.exe" | Out-File "AirSpeaker-Setup.exe.sha256"
+          Write-Host "Windows Deliverables:"
+          Get-ChildItem -Filter "AirSpeaker-*"
+
+      - name: Upload Windows Executable Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSpeaker-Windows
+          path: |
+            AirSpeaker-Setup.exe
+            AirSpeaker-Portable.exe
+
+  # ====================================================
+  # 3. LINUX BUILD JOB (Persistent Bundle & Tarball)
+  # ====================================================
+  build-linux:
+    name: Build Linux Application Bundle & Tarball
+    runs-on: ubuntu-22.04
+    env:
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopus0 libopus-dev portaudio19-dev python3-tk pulseaudio-utils
+
+      - name: Install Python Requirements & Run Verification Tests
+        run: |
+          cd airspeaker-pc
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyaudio || true
+          python tests/verify_pc.py
+
+      - name: Build Linux Application Bundle & Tarball
+        run: |
+          cd airspeaker-pc
+          python build_linux.py
+          ./dist/AirSpeaker/AirSpeaker --version
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSpeaker-Linux
+          path: |
+            AirSpeaker-Linux-x86_64.tar.gz
+
+  # ====================================================
+  # 4. MACOS & IOS BUILD JOB (Xcode & DMG / IPA Packaging)
+  # ====================================================
+  build-apple:
+    name: Build macOS DMG & iOS IPA
+    runs-on: macos-latest
+    env:
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 for macOS
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install macOS Audio & Build Dependencies
+        run: |
+          brew install opus portaudio python@3.11 python-tk@3.11 xcodegen
+
+      - name: Build macOS Application Bundle & DMG
+        run: |
+          cd airspeaker-pc
+          /opt/homebrew/bin/python3.11 build_macos.py || python3 build_macos.py
+          cd ..
+          cp -f AirSpeaker-macOS-arm64.dmg AirSpeaker-macOS.dmg || true
+
+      - name: Verify macOS Audio Loading (--check-audio)
+        run: |
+          ./airspeaker-pc/dist/AirSpeaker.app/Contents/MacOS/AirSpeaker --check-audio
+
+      - name: Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Inject Version & Build SHA into iOS project.yml & Generate Xcode Project
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [ -z "$SHORT_SHA" ]; then SHORT_SHA="dev"; fi
+          APP_VER="1.0.0"
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            APP_VER="${GITHUB_REF_NAME#v}"
+          fi
+          sed -i '' "s/MARKETING_VERSION: .*/MARKETING_VERSION: \"$APP_VER\"/" AirSpeakeriOS/project.yml || true
+          sed -i '' "s/AirSpeakerBuildSHA: .*/AirSpeakerBuildSHA: \"$SHORT_SHA\"/" AirSpeakeriOS/project.yml || true
+          cd AirSpeakeriOS
+          xcodegen generate
+
+      - name: Build iOS Archive (Unsigned for Sideloading)
+        run: |
+          cd AirSpeakeriOS
+          xcodebuild archive \
+            -project AirSpeaker.xcodeproj \
+            -scheme AirSpeaker \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "build/AirSpeaker.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package IPA
+        run: |
+          cd AirSpeakeriOS
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "build/AirSpeaker.xcarchive/Products/Applications/AirSpeaker.app" Payload/
+          zip -r -q ../AirSpeaker-iOS.ipa Payload
+          cd ..
+
+      - name: Upload Apple Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSpeaker-Apple-Deliverables
+          path: |
+            AirSpeaker-macOS-arm64.dmg
+            AirSpeaker-macOS.dmg
+            AirSpeaker-iOS.ipa
+
+  # ====================================================
+  # 4b. INTEL MACOS BUILD JOB (macOS x86_64 DMG without Homebrew)
+  # ====================================================
+  build-macos-intel:
+    name: Build Intel macOS DMG (x86_64)
+    runs-on: macos-15-intel
+    env:
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install official Python 3.11 with Tkinter
+        run: |
+          curl -sSL -o /tmp/python311.pkg https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+          sudo installer -pkg /tmp/python311.pkg -target /
+          /Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -c "import tkinter; print('Tk:', tkinter.TkVersion)"
+
+      - name: Compile PortAudio and libopus v1.5.2 from source into /usr/local
+        run: |
+          git clone --depth 1 https://github.com/PortAudio/portaudio.git /tmp/portaudio
+          cmake -S /tmp/portaudio -B /tmp/portaudio/build \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_INSTALL_NAME_DIR=/usr/local/lib \
+            -DBUILD_SHARED_LIBS=ON \
+            -DPA_BUILD_SHARED_LIBS=ON \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build /tmp/portaudio/build -j4
+          sudo cmake --install /tmp/portaudio/build
+
+          git clone --depth 1 --branch v1.5.2 https://github.com/xiph/opus.git /tmp/opus
+          cmake -S /tmp/opus -B /tmp/opus/build \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_INSTALL_NAME_DIR=/usr/local/lib \
+            -DBUILD_SHARED_LIBS=ON \
+            -DOPUS_BUILD_PROGRAMS=OFF \
+            -DOPUS_BUILD_TESTING=OFF \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build /tmp/opus/build -j4
+          sudo cmake --install /tmp/opus/build
+
+      - name: Build Intel macOS DMG
+        run: |
+          cd airspeaker-pc
+          MACOSX_DEPLOYMENT_TARGET=11.0 /Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 build_macos.py
+
+      - name: Isolated Runtime Smoke Test (--check-audio without host libs)
+        run: |
+          sudo mkdir -p /tmp/isolated_libs
+          sudo mv /usr/local/lib/libportaudio* /tmp/isolated_libs/ || true
+          sudo mv /usr/local/lib/libopus* /tmp/isolated_libs/ || true
+          ./airspeaker-pc/dist/AirSpeaker.app/Contents/MacOS/AirSpeaker --check-audio
+
+      - name: Restore Isolated Libs
+        if: always()
+        run: |
+          if [ -d /tmp/isolated_libs ]; then
+            sudo mv /tmp/isolated_libs/* /usr/local/lib/ 2>/dev/null || true
+          fi
+
+      - name: Verify Intel x86_64 Binary & DMG
+        run: |
+          file airspeaker-pc/dist/AirSpeaker.app/Contents/MacOS/AirSpeaker | grep -q x86_64
+          test -f AirSpeaker-macOS-x86_64.dmg
+          ls -lh AirSpeaker-macOS-x86_64.dmg
+
+      - name: Upload Intel macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSpeaker-macOS-Intel
+          path: |
+            AirSpeaker-macOS-x86_64.dmg
+
+  # ====================================================
+  # 5. OFFICIAL RELEASE PUBLICATION (All 5 Operating Systems)
+  # ====================================================
+  release-publish:
+    name: Publish Official Release Deliverables
+    needs: [build-android, build-windows, build-linux, build-apple, build-macos-intel]
+    if: (startsWith(github.ref, 'refs/tags/v1.') || github.ref_name == 'main') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    concurrency:
+      group: airspeaker-release-publish
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: AirSpeaker-APK
+          path: release-artifacts/
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: AirSpeaker-Windows
+          path: release-artifacts/
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AirSpeaker-Linux
+          path: release-artifacts/
+
+      - name: Download Apple Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: AirSpeaker-Apple-Deliverables
+          path: release-artifacts/
+
+      - name: Download Intel macOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AirSpeaker-macOS-Intel
+          path: release-artifacts/
+
+      - name: Copy Linux Installer Script
+        run: |
+          mkdir -p release-artifacts
+          cp -f install_linux.sh release-artifacts/
+
+      - name: Generate Checksums & Build Manifest
+        run: |
+          cd release-artifacts
+          sha256sum * > SHA256SUMS.txt || true
+          cat SHA256SUMS.txt
+
+      - name: Create or Update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
+            TAG_NAME="v1.0.0"
+          fi
+          APP_VER="${TAG_NAME#v}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [ -z "$SHORT_SHA" ]; then SHORT_SHA="dev"; fi
+
+          cat << EOF > RELEASE_NOTES.md
+          <!-- build: ${SHORT_SHA} -->
+          ### AirSpeaker ${TAG_NAME} Studio — Cross-Platform Release
+
+          Low-latency wireless audio streaming & internal system audio studio for Windows 11, macOS, Linux, Android, and iOS.
+
+          #### Unified Architecture Highlights:
+          - **Zero-Loss PCM16 Playout:** Default 48 kHz stereo lossless PCM16 transmission with sub-35 ms latency, lock-free SPSC PCM ring buffer, and hardened prebuffering.
+          - **Option A Internal System Audio Capture (SERVE):** Stream internal audio directly from Android 10+ (MediaProjection AudioPlaybackCaptureConfiguration) and iOS (ReplayKit app audio capture) on UDP port 5004.
+          - **Real-Time Live Delay Graphs:** Real-time buffer latency and jitter visualization active across all PLAY, SERVE, and PARTY (Host & Join) tabs on PC, Android, and iOS.
+          - **Unified Monospace UI:** Exact identical tabs across all platforms:
+            - **Phone (Android & iOS — Exactly 4 Tabs):** \`[ PLAY ]\` *(Default on startup)* | \`[ SERVE ]\` | \`[ PARTY ]\` | \`[ SETTINGS ]\`
+            - **PC (Windows, macOS, Linux — Exactly 5 Tabs):** \`[ PLAY ]\` | \`[ SERVE ]\` *(Default on startup)* | \`[ PARTY ]\` | \`[ SETTINGS ]\` | \`[ VIRTUAL DEVICE ]\`
+          - **Multi-Device Party Mode:** Synchronized multi-device broadcasting and daisy-chain personal hotspot extension.
+          - **In-App Settings Updater (All 5 OSes):** Check for updates, download at full speed with live speed/progress directly into \`Downloads/AirSpeaker\`, and tap **Install Now** or **See in Files**.
+
+          #### Deliverables for All 5 Operating Systems:
+          - **Windows (Installed App):** \`AirSpeaker-Setup.exe\` (Native Start Menu & Windows Settings setup)
+          - **Windows (Portable):** \`AirSpeaker-Portable.exe\` (Standalone zero-install single-file executable)
+          - **Android (Architecture Splits + Universal APK):**
+            - \`AirSpeaker-arm64-v8a.apk\` — **Recommended for modern phones** (64-bit ARM, smaller download & optimal performance)
+            - \`AirSpeaker-universal.apk\` — **Universal APK** (All architectures bundled, fallback if unsure of your CPU)
+            - \`AirSpeaker.apk\` — *(Universal compatibility alias)*
+            - \`AirSpeaker-armeabi-v7a.apk\` — Older 32-bit ARM phones
+            - \`AirSpeaker-x86_64.apk\` — 64-bit x86 tablets, emulators & ChromeOS
+            - \`AirSpeaker-x86.apk\` — 32-bit x86 emulators & devices
+          - **macOS (Universal / Apple Silicon & Intel):**
+            - \`AirSpeaker-macOS-arm64.dmg\` — **Apple Silicon (M1–M4)**
+            - \`AirSpeaker-macOS-x86_64.dmg\` — **Intel Mac (x86_64)**
+            - \`AirSpeaker-macOS.dmg\` — *(Apple Silicon compatibility alias)*
+          - **Linux:** \`AirSpeaker-Linux-x86_64.tar.gz\` & One-Click Installer (\`install_linux.sh\`)
+          - **iOS:** \`AirSpeaker-iOS.ipa\` (AVAudioEngine player & ReplayKit internal streamer for sideloading)
+          EOF
+
+          gh release view "$TAG_NAME" >/dev/null 2>&1 || \
+            gh release create "$TAG_NAME" --title "AirSpeaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md
+
+          gh release edit "$TAG_NAME" --title "AirSpeaker ${TAG_NAME} Studio" --notes-file RELEASE_NOTES.md || true
+
+          for f in release-artifacts/*; do
+            if [ -f "$f" ]; then
+              echo "Uploading $f to Release $TAG_NAME..."
+              uploaded=0
+              for attempt in 1 2 3; do
+                if gh release upload "$TAG_NAME" "$f" --clobber; then
+                  uploaded=1
+                  break
+                fi
+                echo "Warning: Upload of $f failed (attempt $attempt/3). Waiting 5s before retrying..."
+                sleep 5
+              done
+              if [ $uploaded -ne 1 ]; then
+                echo "Error: Failed to upload $f after 3 attempts."
+                exit 1
+              fi
+            fi
+          done
+
+      # ----------------------------------------------------
+      # 6. PUBLISH TO GITHUB PACKAGES (GHCR OCI Registry)
+      # ----------------------------------------------------
+      - name: Set up ORAS CLI
+        if: github.event_name != 'pull_request'
+        uses: oras-project/setup-oras@v1
+
+      - name: Publish Installers to GitHub Packages (GHCR OCI Registry)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ -z "$TAG_NAME" ] || [[ ! "$TAG_NAME" =~ ^v ]]; then
+            TAG_NAME="v1.0.0"
+          fi
+          APP_VER="${TAG_NAME#v}"
+
+          echo "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          PKG_REF="ghcr.io/${OWNER_LC}/airspeaker"
+
+          cd release-artifacts
+          ORAS_FILES=()
+          for f in *; do
+            [ -f "$f" ] && ORAS_FILES+=("$f")
+          done
+
+          if [ ${#ORAS_FILES[@]} -gt 0 ]; then
+            echo "Pushing ${#ORAS_FILES[@]} deliverables to $PKG_REF (version ${APP_VER})..."
+            oras push --disable-path-validation "${PKG_REF}:latest" \
+              --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --annotation "org.opencontainers.image.description=AirSpeaker Studio — Official Installers for Windows, Linux, macOS, Android, and iOS" \
+              --annotation "org.opencontainers.image.version=${APP_VER}" \
+              "${ORAS_FILES[@]}"
+
+            oras tag "${PKG_REF}:latest" "${APP_VER}"
+          fi
